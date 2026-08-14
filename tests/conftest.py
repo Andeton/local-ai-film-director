@@ -32,3 +32,15 @@ def wc_db_path(tmp_path):
 @pytest.fixture
 def wc_project_id():
     return TEST_PROJECT_ID
+
+
+@pytest.fixture
+def api_client(tmp_path, wc_db_path):
+    """Full-app TestClient wired to a WC fixture DB + fresh our DB."""
+    s = Settings(
+        _env_file=None,
+        database_path=str(tmp_path / "our.db"),
+        storage_root=str(tmp_path / "storage"),
+        wc_database_path=wc_db_path,
+    )
+    return TestClient(create_app(s))

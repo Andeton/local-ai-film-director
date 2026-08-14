@@ -4,6 +4,8 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from film_director.adapters.wind_comic import WindComicAdapter
+from film_director.api.routes import create_router
 from film_director.config import Settings
 from film_director.errors import (
     FilmDirectorError,
@@ -16,6 +18,15 @@ from film_director.errors import (
     WindComicSchemaError,
     WindComicUnavailableError,
 )
+from film_director.llm.ollama import create_llm_provider
+from film_director.persistence.database import Database
+from film_director.persistence.repositories import (
+    CharacterRepository,
+    ProjectRepository,
+    SceneRepository,
+    SequenceRepository,
+)
+from film_director.services.import_service import ImportService
 
 logger = logging.getLogger(__name__)
 
@@ -51,5 +62,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok", "version": "0.1.0"}
+
+    # --- Dependency wiring ---
+    db = Database(settings.database_path)
+    db.init_schema()
+
+    project_repo = ProjectRepository(db)
+    seq_repo = SequenceRepository(db)
+    scene_repo = SceneRepository(db)
+    char_repo = CharacterRepository(db)
+
+    adapter = WindComicAdapter(settings.wc_database_path)
+
+    import_service = ImportService(
+        adapter=adapter,
+        project_repo=project_repo,
+        sequence_repo=seq_repo,
+        scene_repo=scene_repo,
+        character_repo=char_repo,
+    )
+
+    llm_provider = create_llm_provider(settings)
+
+    router = create_router(
+        adapter=adapter,
+        import_service=import_service,
+        project_repo=project_repo,
+        seq_repo=seq_repo,
+        scene_repo=scene_repo,
+        char_repo=char_repo,
+        llm_provider=llm_provider,
+    )
+    app.include_router(router)
 
     return app

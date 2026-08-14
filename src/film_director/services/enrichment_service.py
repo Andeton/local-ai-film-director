@@ -388,6 +388,81 @@ class EnrichmentService:
         }
 
     # ------------------------------------------------------------------
+    # Human editing
+    # ------------------------------------------------------------------
+
+    def edit_beat(self, beat_id: str, patch: dict) -> Beat:
+        """Human edit: update fields, source='human', version+1, propagate stale."""
+        from datetime import datetime, timezone
+
+        with self._db.connection() as conn:
+            beat = self._beat_repo.get_beat(beat_id, conn=conn)
+            if beat is None or beat.status == "outdated":
+                return None  # caller maps to 404
+
+            # Apply editable fields
+            fields = {}
+            for key in ("dramatic_action", "character_intention", "change", "characters", "status"):
+                if key in patch and patch[key] is not None:
+                    fields[key] = patch[key]
+
+            if not fields:
+                return None  # caller maps to 422 — but this shouldn't happen due to DTO validation
+
+            updated = beat.model_copy(update={
+                **fields,
+                "source": "human",
+                "version": beat.version + 1,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            self._beat_repo.save_beat(updated, conn=conn)
+            self._stale_propagator.propagate_beat_stale(beat_id, conn=conn)
+
+        return updated
+
+    def edit_shot(self, shot_id: str, patch: dict) -> ShotSpecificationV1 | None:
+        """Human edit: update creative fields, source='human', version+1, propagate stale."""
+        from datetime import datetime, timezone
+
+        with self._db.connection() as conn:
+            shot = self._shot_repo.get_shot(shot_id, conn=conn)
+            if shot is None or shot.status == "outdated":
+                return None  # caller maps to 404
+
+            # Apply editable fields
+            fields = {}
+            for key in ("dramatic_purpose", "action", "environment", "lighting",
+                        "audio_intent", "duration_sec", "status"):
+                if key in patch and patch[key] is not None:
+                    fields[key] = patch[key]
+
+            # Handle complex fields that need model reconstruction
+            if "subjects" in patch and patch["subjects"] is not None:
+                from film_director.models.canonical import ShotSubject
+                fields["subjects"] = [
+                    ShotSubject(**s) if isinstance(s, dict) else s
+                    for s in patch["subjects"]
+                ]
+            if "camera" in patch and patch["camera"] is not None:
+                from film_director.models.canonical import CameraIntent
+                cam = patch["camera"]
+                fields["camera"] = CameraIntent(**cam) if isinstance(cam, dict) else cam
+
+            if not fields:
+                return None
+
+            updated = shot.model_copy(update={
+                **fields,
+                "source": "human",
+                "version": shot.version + 1,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            self._shot_repo.save_shot(updated, conn=conn)
+            self._stale_propagator.propagate_shot_stale(shot_id, conn=conn)
+
+        return updated
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

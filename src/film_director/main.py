@@ -8,8 +8,15 @@ from fastapi.responses import JSONResponse
 from film_director.adapters.wind_comic import WindComicAdapter
 from film_director.api.routes import create_router
 from film_director.config import Settings
+from film_director.enrichment.beat_enricher import BeatEnricher
+from film_director.enrichment.coverage_planner import CoveragePlanner
+from film_director.enrichment.shot_spec_builder import ShotSpecBuilder
+from film_director.enrichment.stale_propagator import StalePropagator
+from film_director.enrichment.strategy_selector import StrategySelector
 from film_director.errors import (
+    EnrichmentError,
     FilmDirectorError,
+    HumanEditConflictError,
     LLMStructuredOutputError,
     LLMUnavailableError,
     NormalizationError,
@@ -22,11 +29,15 @@ from film_director.errors import (
 from film_director.llm.ollama import create_llm_provider
 from film_director.persistence.database import Database
 from film_director.persistence.repositories import (
+    BeatRepository,
     CharacterRepository,
+    GenerationPlanRepository,
     ProjectRepository,
     SceneRepository,
     SequenceRepository,
+    ShotRepository,
 )
+from film_director.services.enrichment_service import EnrichmentService
 from film_director.services.import_service import ImportService
 
 logger = logging.getLogger(__name__)
@@ -35,6 +46,8 @@ _ERROR_STATUS: dict[type, int] = {
     WindComicNotFoundError: 404,
     WindComicArtifactMalformedError: 422,
     LLMStructuredOutputError: 422,
+    EnrichmentError: 422,
+    HumanEditConflictError: 409,
     WindComicSchemaError: 502,
     WindComicUnavailableError: 503,
     LLMUnavailableError: 503,
@@ -80,6 +93,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     seq_repo = SequenceRepository(db)
     scene_repo = SceneRepository(db)
     char_repo = CharacterRepository(db)
+    beat_repo = BeatRepository(db)
+    shot_repo = ShotRepository(db)
+    plan_repo = GenerationPlanRepository(db)
 
     adapter = WindComicAdapter(settings.wc_database_path)
 
@@ -94,6 +110,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     llm_provider = create_llm_provider(settings)
 
+    # M2 services
+    stale_propagator = StalePropagator(
+        db=db,
+        beat_repo=beat_repo,
+        shot_repo=shot_repo,
+        plan_repo=plan_repo,
+        sequence_repo=seq_repo,
+        scene_repo=scene_repo,
+    )
+
+    enrichment_service = EnrichmentService(
+        db=db,
+        project_repo=project_repo,
+        sequence_repo=seq_repo,
+        scene_repo=scene_repo,
+        character_repo=char_repo,
+        beat_repo=beat_repo,
+        shot_repo=shot_repo,
+        plan_repo=plan_repo,
+        adapter=adapter,
+        import_service=import_service,
+        beat_enricher=BeatEnricher(llm_provider),
+        coverage_planner=CoveragePlanner(llm_provider),
+        shot_spec_builder=ShotSpecBuilder(),
+        strategy_selector=StrategySelector(),
+        stale_propagator=stale_propagator,
+    )
+
     router = create_router(
         adapter=adapter,
         import_service=import_service,
@@ -102,6 +146,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         scene_repo=scene_repo,
         char_repo=char_repo,
         llm_provider=llm_provider,
+        enrichment_service=enrichment_service,
+        beat_repo=beat_repo,
+        shot_repo=shot_repo,
+        plan_repo=plan_repo,
     )
     app.include_router(router)
 

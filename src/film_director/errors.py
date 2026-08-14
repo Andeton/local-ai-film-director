@@ -46,3 +46,7 @@ class ConfigurationError(FilmDirectorError):
 
 class EnrichmentError(FilmDirectorError):
     """Valid JSON-object but Beat/Coverage domain contract invalid after repair attempt."""
+
+
+class HumanEditConflictError(FilmDirectorError):
+    """Re-enrichment blocked: human-edited content exists and force=False."""

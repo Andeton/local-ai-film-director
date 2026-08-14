@@ -1,12 +1,12 @@
 # Development State — Local AI Film Director
 
-**Last Updated:** 2026-08-14
+**Last Updated:** 2026-08-15
 
 ---
 
 ## Current Milestone
 
-**M0.7 — Architecture Documentation Consistency**
+**M1 — Integration Core**
 
 **Status:** COMPLETE
 
@@ -22,6 +22,7 @@
 | M0.5 | 2026-08-14 | Architecture frozen: hybrid sidecar, 4 ADRs, canonical data model, 10-milestone roadmap, first vertical slice defined |
 | M0.6 | 2026-08-14 | Model-agnostic boundary correction: H3 fields removed from Shot/CharacterReference, GenerationPlan + H3PromptV1 as separate artifacts, ADR-005 |
 | M0.7 | 2026-08-14 | Documentation consistency: ADR header fixed, M2 uses generic strategy names, ADR-002 clarifies GenerationPlan is model-agnostic, terminology verified across all docs |
+| M1 | 2026-08-15 | Integration Core: Python 3.14.3, FastAPI scaffold, WC SQLite read-only adapter (real WC schema verified), canonical Project/Sequence/Scene/CharacterReference with provenance, atomic import with change detection (added/modified/deleted), SQLite persistence with UPSERT/UNIQUE/FK, Ollama LLM provider (gemma4:e4b structured JSON verified), API with 11 endpoints. 185 tests (182 deterministic + 3 live Ollama). |
 
 ---
 
@@ -64,11 +65,11 @@
 
 ## Next Approved Action
 
-**M1.1 — Integration Core Planning**
+**M2.1 — Production Specification Planning**
 
-Scope: Plan the M1 implementation — project scaffold, WindComicAdapter, canonical schema, LLMProvider.
+Scope: Plan the M2 implementation — BeatEnricher, CoveragePlanner, ShotSpecificationV1, GenerationPlanBuilder.
 
-**NOT YET STARTED. Awaiting architectural review.**
+**NOT YET STARTED. Awaiting M1 merge and M2 planning approval.**
 
 ---
 
@@ -92,3 +93,14 @@ Scope: Plan the M1 implementation — project scaffold, WindComicAdapter, canoni
 | `docs/architecture/ADR-004-*.md` | MCP development boundary |
 | `docs/architecture/ADR-005-*.md` | Provider-specific generation artifacts |
 | `experiments/wind-comic/` | Wind Comic clone (isolated, do not modify) |
+| `src/film_director/` | M1 production source (FastAPI backend) |
+| `src/film_director/config.py` | Application configuration (pydantic-settings) |
+| `src/film_director/main.py` | FastAPI application factory |
+| `src/film_director/adapters/wind_comic.py` | Wind Comic SQLite read-only adapter |
+| `src/film_director/models/canonical.py` | Canonical production models |
+| `src/film_director/models/provenance.py` | Provenance tracking + source hash |
+| `src/film_director/persistence/` | Our SQLite persistence layer |
+| `src/film_director/services/import_service.py` | WC import pipeline + change detection |
+| `src/film_director/llm/` | LLM provider abstraction (Ollama) |
+| `src/film_director/api/routes.py` | API route definitions |
+| `tests/` | Test suite (unit + integration + live) |

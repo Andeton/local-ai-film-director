@@ -1,5 +1,7 @@
 # M2 Production Specification Implementation Plan (Revised)
 
+**M2 IMPLEMENTATION: COMPLETE** — Merged to main at `71c0f1c` (2026-08-16). 413 deterministic + 5 live tests pass. Exit criteria 12/12 PASS.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Enrich Wind Comic's flat shot list into a hierarchical, model-agnostic production specification: Scene → Beat → CoverageDecision → ShotSpecificationV1 → GenerationPlan — with LLM-driven enrichment, history-preserving re-enrichment, and human editing via API.
@@ -584,10 +586,10 @@ tests/
 - Consumes: existing `canonical.py`, `database.py` schema, `errors.py`
 - Produces: `Beat`, `ShotSubject`, `CameraIntent`, `ShotSpecificationV1`, `ReferenceRequirements`, `GenerationPlan`, `StrategySelectionContext`, `EnrichmentError`, M2 DB tables
 
-- [ ] **Step 1: Write Beat model tests** (test_beat_model.py — valid, invalid status, valid statuses, source values, characters list)
-- [ ] **Step 2: Write ShotSpecificationV1 tests** (test_shot_spec_model.py — ShotSubject validation, CameraIntent shot_size Literal, valid/invalid statuses, subjects with ref_images non-lossy)
-- [ ] **Step 3: Write GenerationPlan tests** (test_generation_plan_model.py — NO engine_family, NO workflow_profile, all 5 strategies, invalid strategy rejected, seed_policy, ReferenceRequirements, selection_reason)
-- [ ] **Step 4: Run tests (RED), implement all models + StrategySelectionContext + EnrichmentError + DB tables, run tests (GREEN), commit**
+- [x] **Step 1: Write Beat model tests** (test_beat_model.py — valid, invalid status, valid statuses, source values, characters list)
+- [x] **Step 2: Write ShotSpecificationV1 tests** (test_shot_spec_model.py — ShotSubject validation, CameraIntent shot_size Literal, valid/invalid statuses, subjects with ref_images non-lossy)
+- [x] **Step 3: Write GenerationPlan tests** (test_generation_plan_model.py — NO engine_family, NO workflow_profile, all 5 strategies, invalid strategy rejected, seed_policy, ReferenceRequirements, selection_reason)
+- [x] **Step 4: Run tests (RED), implement all models + StrategySelectionContext + EnrichmentError + DB tables, run tests (GREEN), commit**
 
 ```bash
 git commit -m "M2.A: Beat, ShotSpecificationV1, GenerationPlan — model-agnostic, no provider fields"
@@ -613,7 +615,7 @@ git commit -m "M2.A: Beat, ShotSpecificationV1, GenerationPlan — model-agnosti
 
 Tests: UPSERT, FK, restart persistence, mark_outdated, JSON round-trip (ShotSubject, CameraIntent, ReferenceRequirements), current vs historical queries.
 
-- [ ] **Steps: TDD cycle, commit**
+- [x] **Steps: TDD cycle, commit**
 
 ```bash
 git commit -m "M2.B: history-preserving repositories — no physical deletion"
@@ -637,7 +639,7 @@ git commit -m "M2.B: history-preserving repositories — no physical deletion"
 
 Tests (mocked LLM): valid `{"beats":[...]}`, missing `"beats"` key → repair, malformed JSON → LLMStructuredOutputError (from provider), empty beats array → EnrichmentError, missing required fields → repair → EnrichmentError.
 
-- [ ] **Steps: TDD cycle, commit**
+- [x] **Steps: TDD cycle, commit**
 
 ```bash
 git commit -m "M2.C: BeatEnricher — object-wrapped LLM contract with domain repair"
@@ -660,7 +662,7 @@ git commit -m "M2.C: BeatEnricher — object-wrapped LLM contract with domain re
 
 Tests: CoveragePlanner with mocked LLM using `{"coverage":[...]}` wrapper. ShotSpecBuilder deterministic — character resolution, CameraIntent construction, environment from scene, non-lossy ref_images.
 
-- [ ] **Steps: TDD cycle, commit**
+- [x] **Steps: TDD cycle, commit**
 
 ```bash
 git commit -m "M2.D: CoveragePlanner + ShotSpecBuilder — non-lossy character refs"
@@ -681,7 +683,7 @@ git commit -m "M2.D: CoveragePlanner + ShotSpecBuilder — non-lossy character r
 
 Tests: all 5 strategies with explicit StrategySelectionContext inputs, deterministic precedence (priority 1 beats 4 when both match), no `engine_family`/`workflow_profile` in output, `selection_reason` populated.
 
-- [ ] **Steps: TDD cycle, commit**
+- [x] **Steps: TDD cycle, commit**
 
 ```bash
 git commit -m "M2.E: deterministic StrategySelector — explicit inputs, no provider fields"
@@ -705,7 +707,7 @@ git commit -m "M2.E: deterministic StrategySelector — explicit inputs, no prov
 
 Tests: each cascade path, entities outside cascade unchanged, already-outdated entities not double-processed.
 
-- [ ] **Steps: TDD cycle, commit**
+- [x] **Steps: TDD cycle, commit**
 
 ```bash
 git commit -m "M2.F: stale propagation — scene/character/beat/shot/project cascades"
@@ -730,7 +732,7 @@ git commit -m "M2.F: stale propagation — scene/character/beat/shot/project cas
 
 Tests: full pipeline (mocked LLM), idempotent enrichment, human edit protection (409 without force), force override preserves old as outdated, re-enrichment after stale, history preservation tests (old beats/shots/plans exist with status=outdated after re-enrich), M1 apply-changes + M2 cascade integration.
 
-- [ ] **Steps: TDD cycle, commit**
+- [x] **Steps: TDD cycle, commit**
 
 ```bash
 git commit -m "M2.G: EnrichmentService — history-preserving, M1 cascade integration"
@@ -751,7 +753,7 @@ git commit -m "M2.G: EnrichmentService — history-preserving, M1 cascade integr
 
 Tests: all API routes, human edit lifecycle (edit → stale propagation → re-enrich rejected → force), restart persistence, M1 apply-changes cascades M2, model-agnostic scan, live Ollama with object-wrapped prompts.
 
-- [ ] **Steps: TDD cycle, exit criteria verification, architecture scan, commit**
+- [x] **Steps: TDD cycle, exit criteria verification, architecture scan, commit**
 
 ```bash
 git commit -m "M2.H: API routes, human editing, M1 cascade, exit criteria verified"

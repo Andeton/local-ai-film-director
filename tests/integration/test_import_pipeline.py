@@ -52,6 +52,7 @@ def svc(env):
         sequence_repo=env["sequence"],
         scene_repo=env["scene"],
         character_repo=env["character"],
+        db=env["db"],
     )
 
 

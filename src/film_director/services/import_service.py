@@ -14,6 +14,7 @@ from typing import Literal
 
 from film_director.adapters.wind_comic import WindComicAdapter
 from film_director.errors import NormalizationError, WindComicNotFoundError
+from film_director.persistence.database import Database
 from film_director.models.canonical import (
     CharacterReference,
     ProductionProject,
@@ -92,12 +93,14 @@ class ImportService:
         sequence_repo: SequenceRepository,
         scene_repo: SceneRepository,
         character_repo: CharacterRepository,
+        db: Database,
     ) -> None:
         self._adapter = adapter
         self._project_repo = project_repo
         self._sequence_repo = sequence_repo
         self._scene_repo = scene_repo
         self._character_repo = character_repo
+        self._db = db
 
     # ------------------------------------------------------------------
     # import_project
@@ -116,7 +119,7 @@ class ImportService:
         now = _now_iso()
 
         # Use the DB instance from project_repo to get a transaction
-        db = self._project_repo._db
+        db = self._db
 
         try:
             with db.connection() as conn:
@@ -380,7 +383,7 @@ class ImportService:
         For 'modified' / 'deleted' items, marks the specific entity OUTDATED.
         Never deletes. Uses one transaction.
         """
-        db = self._project_repo._db
+        db = self._db
 
         with db.connection() as conn:
             for change in changes:

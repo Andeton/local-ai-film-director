@@ -4,9 +4,11 @@ Tests all routes via TestClient with fixture WC DB + temp our DB.
 """
 import json
 import sqlite3
+from unittest.mock import patch
 
 import pytest
 
+from film_director.main import create_app
 from tests.fixtures.wind_comic_fixture import TEST_PROJECT_ID
 
 
@@ -209,3 +211,44 @@ class TestApplyChanges:
     def test_apply_changes_missing_project_404(self, api_client):
         r = api_client.post("/projects/nonexistent/apply-changes")
         assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Error handling — MAJOR-1 regression guard
+# ---------------------------------------------------------------------------
+
+class TestErrorHandling:
+    """Verify that raw sqlite3 errors do not leak schema details via HTTP."""
+
+    def test_sqlite_integrity_error_returns_500_not_schema(self, api_client):
+        """An unhandled sqlite3.IntegrityError must return 500 with a safe body.
+
+        Simulates a repository raising a raw IntegrityError (e.g. FK violation)
+        that bypasses the FilmDirectorError hierarchy. The handler added in
+        main.py must catch it and return {"error": "Internal database error"}.
+        """
+        with patch(
+            "film_director.persistence.repositories.ProjectRepository.get_project",
+            side_effect=sqlite3.IntegrityError(
+                "FOREIGN KEY constraint failed: projects.id references sequences"
+            ),
+        ):
+            r = api_client.get("/projects/some_id")
+
+        assert r.status_code == 500
+        body = r.json()
+        # Must NOT expose internal schema details
+        assert "constraint" not in json.dumps(body).lower()
+        assert "sqlite" not in json.dumps(body).lower()
+        # Must have the generic safe message
+        assert body.get("error") == "Internal database error"
+        assert body.get("detail") is None
+
+    def test_sqlite_error_handler_registered(self, api_client):
+        """The sqlite3.Error exception handler must be registered on the app."""
+        # Verify by checking the exception_handlers mapping on the underlying app
+        app = api_client.app
+        handler_types = {exc_type for exc_type in app.exception_handlers}
+        assert sqlite3.Error in handler_types, (
+            "sqlite3.Error handler not registered — raw DB errors may leak schema details"
+        )

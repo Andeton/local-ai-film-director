@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 import logging
+import sqlite3
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -59,6 +60,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={"error": exc.message, "detail": exc.detail},
         )
 
+    @app.exception_handler(sqlite3.Error)
+    def handle_sqlite_error(request: Request, exc: sqlite3.Error) -> JSONResponse:
+        logger.error("Database error: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Internal database error", "detail": None},
+        )
+
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok", "version": "0.1.0"}
@@ -80,6 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sequence_repo=seq_repo,
         scene_repo=scene_repo,
         character_repo=char_repo,
+        db=db,
     )
 
     llm_provider = create_llm_provider(settings)

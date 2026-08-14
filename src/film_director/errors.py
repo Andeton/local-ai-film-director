@@ -42,3 +42,7 @@ class LLMStructuredOutputError(FilmDirectorError):
 
 class ConfigurationError(FilmDirectorError):
     """Invalid or missing configuration."""
+
+
+class EnrichmentError(FilmDirectorError):
+    """Valid JSON-object but Beat/Coverage domain contract invalid after repair attempt."""

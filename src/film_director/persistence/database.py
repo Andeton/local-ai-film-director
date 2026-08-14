@@ -78,6 +78,65 @@ CREATE TABLE IF NOT EXISTS character_references (
     UNIQUE(project_id, wc_character_id),
     FOREIGN KEY (project_id) REFERENCES production_projects(id)
 );
+
+CREATE TABLE IF NOT EXISTS beats (
+    id TEXT PRIMARY KEY,
+    scene_id TEXT NOT NULL,
+    dramatic_action TEXT NOT NULL,
+    character_intention TEXT NOT NULL DEFAULT '',
+    change TEXT NOT NULL DEFAULT '',
+    characters TEXT NOT NULL DEFAULT '[]',
+    order_index INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    source TEXT NOT NULL DEFAULT 'llm',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (scene_id) REFERENCES scenes(id)
+);
+
+CREATE TABLE IF NOT EXISTS shots (
+    id TEXT PRIMARY KEY,
+    beat_id TEXT NOT NULL,
+    wc_storyboard_id TEXT,
+    wc_shot_number INTEGER,
+    dramatic_purpose TEXT NOT NULL DEFAULT '',
+    subjects TEXT NOT NULL DEFAULT '[]',
+    action TEXT NOT NULL DEFAULT '',
+    environment TEXT NOT NULL DEFAULT '{}',
+    camera TEXT NOT NULL DEFAULT '{}',
+    lighting TEXT NOT NULL DEFAULT '{}',
+    audio_intent TEXT NOT NULL DEFAULT '{}',
+    duration_sec REAL NOT NULL DEFAULT 5.0,
+    continuity_inputs TEXT NOT NULL DEFAULT '{}',
+    storyboard_image_path TEXT,
+    order_index INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    source TEXT NOT NULL DEFAULT 'generated',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (beat_id) REFERENCES beats(id)
+);
+
+CREATE TABLE IF NOT EXISTS generation_plans (
+    id TEXT PRIMARY KEY,
+    shot_id TEXT NOT NULL,
+    shot_version INTEGER NOT NULL,
+    strategy TEXT NOT NULL,
+    reference_requirements TEXT NOT NULL DEFAULT '{}',
+    duration_sec REAL NOT NULL,
+    resolution_intent TEXT NOT NULL DEFAULT '{}',
+    seed_policy TEXT NOT NULL DEFAULT 'random',
+    seed INTEGER,
+    continuity_mode TEXT NOT NULL DEFAULT 'none',
+    selection_reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (shot_id) REFERENCES shots(id)
+);
 """
 
 

@@ -129,9 +129,11 @@ class EnrichmentService:
             if current_beats:
                 beats_for_scene = current_beats
             else:
+                # Read WC context BEFORE LLM call, outside any transaction
+                wc_context = self._get_wc_scene_context(scene, project.wc_project_id)
                 # LLM call — outside any transaction
                 beats_for_scene = self._beat_enricher.enrich_scene(
-                    scene, script_context=None,
+                    scene, script_context=wc_context,
                 )
                 new_beats.extend(beats_for_scene)
 
@@ -208,8 +210,16 @@ class EnrichmentService:
                 detail=f"scene_id={scene_id}, human_beat_ids={[b.id for b in human_beats]}",
             )
 
+        # Resolve wc_project_id and read WC context BEFORE LLM call, outside transaction
+        project_id = self._find_project_id_for_scene(scene)
+        wc_context = None
+        if project_id is not None:
+            project = self._project_repo.get_project(project_id)
+            if project is not None:
+                wc_context = self._get_wc_scene_context(scene, project.wc_project_id)
+
         # LLM work — outside transaction
-        new_beats = self._beat_enricher.enrich_scene(scene, script_context=None)
+        new_beats = self._beat_enricher.enrich_scene(scene, script_context=wc_context)
 
         # ONE transaction: mark old outdated, save new
         with self._db.connection() as conn:
@@ -394,4 +404,22 @@ class EnrichmentService:
             for seq in sequences:
                 if seq.id == scene.sequence_id:
                     return project.id
+        return None
+
+    def _get_wc_scene_context(self, scene, wc_project_id: str) -> dict | None:
+        """Look up matching WC source scene data for BeatEnricher context.
+
+        Matches by WCScene.asset_id == scene.wc_scene_id.
+        Returns WCScene.data dict if found, None if not found.
+        WC integration errors (Unavailable, Schema, Malformed) propagate unchanged.
+
+        MUST be called outside any write transaction.
+        Does NOT mutate WCScene.data or the canonical Scene.
+        """
+        if self._adapter is None or scene.wc_scene_id is None:
+            return None
+        wc_scenes = self._adapter.get_scenes(wc_project_id)
+        for wc_scene in wc_scenes:
+            if wc_scene.asset_id == scene.wc_scene_id:
+                return wc_scene.data
         return None

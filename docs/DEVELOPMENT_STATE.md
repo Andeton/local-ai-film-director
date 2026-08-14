@@ -1,12 +1,12 @@
 # Development State — Local AI Film Director
 
-**Last Updated:** 2026-08-15
+**Last Updated:** 2026-08-16
 
 ---
 
 ## Current Milestone
 
-**M1 — Integration Core**
+**M2 — Production Specification**
 
 **Status:** COMPLETE
 
@@ -23,6 +23,7 @@
 | M0.6 | 2026-08-14 | Model-agnostic boundary correction: H3 fields removed from Shot/CharacterReference, GenerationPlan + H3PromptV1 as separate artifacts, ADR-005 |
 | M0.7 | 2026-08-14 | Documentation consistency: ADR header fixed, M2 uses generic strategy names, ADR-002 clarifies GenerationPlan is model-agnostic, terminology verified across all docs |
 | M1 | 2026-08-15 | Integration Core: Python 3.14.3, FastAPI scaffold, WC SQLite read-only adapter (real WC schema verified), canonical Project/Sequence/Scene/CharacterReference with provenance, atomic import with change detection (added/modified/deleted), SQLite persistence with UPSERT/UNIQUE/FK, Ollama LLM provider (gemma4:e4b structured JSON verified), API with 11 endpoints. 185 tests (182 deterministic + 3 live Ollama). |
+| M2 | 2026-08-16 | Production Specification: Beat/ShotSpecificationV1/GenerationPlan canonical models (model-agnostic, zero provider fields), BeatEnricher + CoveragePlanner (LLM object-wrapper contract, domain repair), deterministic ShotSpecBuilder (non-lossy character refs), deterministic StrategySelector (explicit context, 5-priority precedence), history-preserving re-enrichment (OUTDATED + new IDs, never delete), human editing API with stale propagation + force protection (409), atomic M1+M2 source-change cascade, 23 API endpoints total. 418 tests (413 deterministic + 5 live Ollama). Exit criteria 12/12 PASS. Backlog: _find_project_id_for_scene O(N) scan (MINOR). |
 
 ---
 
@@ -65,11 +66,11 @@
 
 ## Next Approved Action
 
-**M2.1 — Production Specification Planning**
+**M3.1 — H3 Bridge Planning**
 
-Scope: Plan the M2 implementation — BeatEnricher, CoveragePlanner, ShotSpecificationV1, GenerationPlanBuilder.
+Scope: Plan the M3 implementation — H3PromptV1, H3PromptBuilder, WorkflowRegistry, ComfyUIAdapter, GenerationRequest, Take.
 
-**NOT YET STARTED. Awaiting M1 merge and M2 planning approval.**
+**NOT YET STARTED. Awaiting M2 merge and M3 planning approval.**
 
 ---
 
@@ -103,4 +104,6 @@ Scope: Plan the M2 implementation — BeatEnricher, CoveragePlanner, ShotSpecifi
 | `src/film_director/services/import_service.py` | WC import pipeline + change detection |
 | `src/film_director/llm/` | LLM provider abstraction (Ollama) |
 | `src/film_director/api/routes.py` | API route definitions |
+| `src/film_director/enrichment/` | M2 enrichment layer (BeatEnricher, CoveragePlanner, ShotSpecBuilder, StrategySelector, StalePropagator) |
+| `src/film_director/services/enrichment_service.py` | M2 enrichment orchestrator + atomic M1/M2 change cascade |
 | `tests/` | Test suite (unit + integration + live) |

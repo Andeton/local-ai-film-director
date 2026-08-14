@@ -7,6 +7,7 @@ and reimport without data loss.
 from __future__ import annotations
 
 import logging
+import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -375,25 +376,42 @@ class ImportService:
     # ------------------------------------------------------------------
 
     def apply_detected_changes(
-        self, project_id: str, changes: list[ChangeDetection]
+        self,
+        project_id: str,
+        changes: list[ChangeDetection],
+        conn: sqlite3.Connection | None = None,
     ) -> None:
         """Mark entities as OUTDATED based on detected changes.
 
         For 'added' items, marks parent project OUTDATED.
         For 'modified' / 'deleted' items, marks the specific entity OUTDATED.
         Never deletes. Uses one transaction.
-        """
-        db = self._db
 
-        with db.connection() as conn:
-            for change in changes:
-                if change.change_type == "added":
-                    # Mark parent project outdated
+        When *conn* is supplied the caller owns the transaction; this method
+        will NOT commit or close the connection.  When *conn* is absent a new
+        connection is opened, committed, and closed automatically.
+        """
+        if conn is not None:
+            self._apply_changes(project_id, changes, conn)
+        else:
+            with self._db.connection() as c:
+                self._apply_changes(project_id, changes, c)
+
+    def _apply_changes(
+        self,
+        project_id: str,
+        changes: list[ChangeDetection],
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Inner implementation: apply changes using an already-open connection."""
+        for change in changes:
+            if change.change_type == "added":
+                # Mark parent project outdated
+                self._project_repo.mark_outdated(project_id, conn=conn)
+            elif change.change_type in ("modified", "deleted"):
+                if change.entity_type == "project":
                     self._project_repo.mark_outdated(project_id, conn=conn)
-                elif change.change_type in ("modified", "deleted"):
-                    if change.entity_type == "project":
-                        self._project_repo.mark_outdated(project_id, conn=conn)
-                    elif change.entity_type == "scene" and change.entity_id:
-                        self._scene_repo.mark_outdated(change.entity_id, conn=conn)
-                    elif change.entity_type == "character" and change.entity_id:
-                        self._character_repo.mark_outdated(change.entity_id, conn=conn)
+                elif change.entity_type == "scene" and change.entity_id:
+                    self._scene_repo.mark_outdated(change.entity_id, conn=conn)
+                elif change.entity_type == "character" and change.entity_id:
+                    self._character_repo.mark_outdated(change.entity_id, conn=conn)

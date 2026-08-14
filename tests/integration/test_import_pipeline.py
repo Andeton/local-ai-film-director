@@ -609,3 +609,67 @@ class TestProjectDeletion:
 
         with pytest.raises(WindComicNotFoundError):
             svc.import_project(wc_project_id)
+
+
+# ---------------------------------------------------------------------------
+# 14. apply_detected_changes participates in caller-owned transaction
+# ---------------------------------------------------------------------------
+
+class TestApplyInSharedTransaction:
+    def test_shared_transaction_rollback_undoes_apply(self, svc, env, wc_project_id):
+        """When apply_detected_changes is called inside a caller-owned connection
+        and that connection is rolled back, entity statuses must remain unchanged."""
+        r = svc.import_project(wc_project_id)
+
+        # Modify a scene upstream so we have a real change to apply
+        wc_conn = sqlite3.connect(env["wc_db_path"])
+        wc_conn.execute(
+            "UPDATE project_assets SET data=? WHERE id='asset_scene_001'",
+            (json.dumps({"description": "CHANGED FOR ROLLBACK", "location": "X"}),),
+        )
+        wc_conn.commit()
+        wc_conn.close()
+
+        changes = svc.check_for_changes(r.project_id)
+        assert any(c.change_type == "modified" and c.entity_type == "scene" for c in changes)
+
+        # Simulate a caller-owned transaction that we roll back
+        db = env["db"]
+        shared_conn = db._conn if hasattr(db, "_conn") else None
+        # Use the db.connection() context manager but catch and rollback
+        try:
+            with db.connection() as conn:
+                svc.apply_detected_changes(r.project_id, changes, conn=conn)
+                # Verify changes ARE visible within this transaction
+                seqs = env["sequence"].get_sequences_by_project(r.project_id, conn=conn)
+                scenes_in_tx = env["scene"].get_scenes_by_sequence(seqs[0].id, conn=conn)
+                assert any(s.status == "outdated" for s in scenes_in_tx), \
+                    "Changes should be visible within the transaction before rollback"
+                # Raise to trigger rollback
+                raise RuntimeError("Simulated caller rollback")
+        except RuntimeError:
+            pass  # expected
+
+        # After rollback, statuses should be unchanged (still 'draft')
+        seqs = env["sequence"].get_sequences_by_project(r.project_id)
+        scenes = env["scene"].get_scenes_by_sequence(seqs[0].id)
+        assert all(s.status != "outdated" for s in scenes), \
+            "Caller rollback should have undone apply_detected_changes"
+
+    def test_no_conn_still_works(self, svc, env, wc_project_id):
+        """Existing no-conn behavior: apply_detected_changes without conn commits."""
+        r = svc.import_project(wc_project_id)
+        wc_conn = sqlite3.connect(env["wc_db_path"])
+        wc_conn.execute(
+            "UPDATE project_assets SET data=? WHERE id='asset_scene_001'",
+            (json.dumps({"description": "CHANGED", "location": "Z"}),),
+        )
+        wc_conn.commit()
+        wc_conn.close()
+
+        changes = svc.check_for_changes(r.project_id)
+        svc.apply_detected_changes(r.project_id, changes)  # no conn — old behavior
+
+        seqs = env["sequence"].get_sequences_by_project(r.project_id)
+        scenes = env["scene"].get_scenes_by_sequence(seqs[0].id)
+        assert any(s.status == "outdated" for s in scenes)

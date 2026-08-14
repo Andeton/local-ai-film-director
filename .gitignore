@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.local
+.env.production
+
+# Our runtime data
+data/*.db
+data/*.db-journal
+data/*.db-wal
+storage/
+
+# Wind Comic sidecar (separate git repo)
+experiments/wind-comic/
+
+# Node (future frontend)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Temporary
+*.tmp
+*.log

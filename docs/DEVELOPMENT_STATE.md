@@ -1,0 +1,94 @@
+# Development State — Local AI Film Director
+
+**Last Updated:** 2026-08-14
+
+---
+
+## Current Milestone
+
+**M0.7 — Architecture Documentation Consistency**
+
+**Status:** COMPLETE
+
+---
+
+## Completed Milestones
+
+| Milestone | Date | Key Outcome |
+|---|---|---|
+| M0 | 2026-08-14 | Technical discovery: RTX 5090, ComfyUI 0.32.0 verified, H3 models installed, R2V prompt format discovered, upstream projects researched |
+| M0.3 | 2026-08-14 | ComfyUI MCP assessed: 40+ tools, all H3 nodes visible, development-only role confirmed |
+| M0.4 | 2026-08-14 | Wind Comic v12.320 validated locally: runs on port 3000, Ollama connects (gemma4 fails strict JSON), 10 duplication warnings with M1-M8, full artifact inspection |
+| M0.5 | 2026-08-14 | Architecture frozen: hybrid sidecar, 4 ADRs, canonical data model, 10-milestone roadmap, first vertical slice defined |
+| M0.6 | 2026-08-14 | Model-agnostic boundary correction: H3 fields removed from Shot/CharacterReference, GenerationPlan + H3PromptV1 as separate artifacts, ADR-005 |
+| M0.7 | 2026-08-14 | Documentation consistency: ADR header fixed, M2 uses generic strategy names, ADR-002 clarifies GenerationPlan is model-agnostic, terminology verified across all docs |
+
+---
+
+## Architecture Decisions
+
+| ADR | Decision | Status |
+|---|---|---|
+| ADR-001 | Hybrid Wind Comic Sidecar Architecture | Accepted |
+| ADR-002 | Canonical Production Specification independent of Wind Comic | Accepted |
+| ADR-003 | ComfyUI runtime via REST/WebSocket API only | Accepted |
+| ADR-004 | ComfyUI MCP as development tool only | Accepted |
+| ADR-005 | Provider-specific generation artifacts separated from canonical model | Accepted |
+
+---
+
+## Known Blockers
+
+| Blocker | Severity | Impact | Mitigation |
+|---|---|---|---|
+| No 14B+ LLM model installed locally | HIGH | Enrichment agents (beats, coverage) need reliable structured output | Download qwen2.5:14b or use OpenRouter |
+| No T2V/I2V API-format workflow template | LOW | Only R2V is API-ready; T2V/I2V need construction from native nodes | Use MCP to construct during M3 |
+| No H3 Turbo LoRA installed | LOW | Generation will be slower (20 steps vs 6-10) | Download when needed |
+| Wind Comic requires budget hack for demo user | LOW | Budget cap blocks project creation | Set budget_hard_cap_cny to 99999 |
+
+---
+
+## Deferred Items
+
+| Item | Reason | When |
+|---|---|---|
+| Wind Comic fork/modification | Sidecar architecture — don't modify WC | Revisit if WC becomes blocking |
+| Blender/ControlNet spatial continuity | Not MVP | Post-M10 |
+| Distributed GPU rendering | Not MVP | Post-M10 |
+| Multi-engine routing (WAN, LTX, etc.) | H3-only for MVP | Post-M10 |
+| Mobile / cloud deployment | Not MVP | Post-M10 |
+| Automatic rejection (AI auto-deletes) | Human review required in MVP | Post-M10 |
+| Full Wind Comic v1 API | Requires API_KEYS env var; SQLite read is simpler | Revisit if multi-machine setup needed |
+
+---
+
+## Next Approved Action
+
+**M1.1 — Integration Core Planning**
+
+Scope: Plan the M1 implementation — project scaffold, WindComicAdapter, canonical schema, LLMProvider.
+
+**NOT YET STARTED. Awaiting architectural review.**
+
+---
+
+## Key File Locations
+
+| File | Purpose |
+|---|---|
+| `Техническое задание и roadmap_...md` | Original specification (historical, do not modify) |
+| `docs/M0_DISCOVERY.md` | M0 technical discovery report |
+| `docs/M0_COMPONENT_MATRIX.md` | Component matrix |
+| `docs/M0_OPEN_QUESTIONS.md` | Open questions + phase/milestone mapping |
+| `docs/M0_3_COMFYUI_MCP_ASSESSMENT.md` | MCP tooling assessment |
+| `docs/M0_4_WIND_COMIC_VALIDATION.md` | Wind Comic local validation |
+| `docs/M0_4_WIND_TO_LOCAL_FILM_DIRECTOR_MAPPING.md` | WC → our spec field mapping |
+| `docs/ARCHITECTURE_V1.md` | Frozen architecture (V1) |
+| `docs/ROADMAP_V2.md` | Rebased roadmap |
+| `docs/DEVELOPMENT_STATE.md` | This file |
+| `docs/architecture/ADR-001-*.md` | Hybrid sidecar decision |
+| `docs/architecture/ADR-002-*.md` | Canonical data model decision |
+| `docs/architecture/ADR-003-*.md` | ComfyUI runtime boundary |
+| `docs/architecture/ADR-004-*.md` | MCP development boundary |
+| `docs/architecture/ADR-005-*.md` | Provider-specific generation artifacts |
+| `experiments/wind-comic/` | Wind Comic clone (isolated, do not modify) |

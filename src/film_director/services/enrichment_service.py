@@ -391,7 +391,7 @@ class EnrichmentService:
     # Human editing
     # ------------------------------------------------------------------
 
-    def edit_beat(self, beat_id: str, patch: dict) -> Beat:
+    def edit_beat(self, beat_id: str, patch: dict) -> Beat | None:
         """Human edit: update fields, source='human', version+1, propagate stale."""
         from datetime import datetime, timezone
 

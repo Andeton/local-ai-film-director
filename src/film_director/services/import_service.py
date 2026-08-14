@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from film_director.adapters.wind_comic import WindComicAdapter
-from film_director.errors import NormalizationError
+from film_director.errors import NormalizationError, WindComicNotFoundError
 from film_director.models.canonical import (
     CharacterReference,
     ProductionProject,
@@ -271,7 +271,15 @@ class ImportService:
             return []
 
         wc_project_id = project.wc_project_id
-        bundle = self._adapter.read_project_bundle(wc_project_id)
+        try:
+            bundle = self._adapter.read_project_bundle(wc_project_id)
+        except WindComicNotFoundError:
+            return [ChangeDetection(
+                entity_type="project",
+                entity_id=project.id,
+                source_asset_id=wc_project_id,
+                change_type="deleted",
+            )]
 
         changes: list[ChangeDetection] = []
 

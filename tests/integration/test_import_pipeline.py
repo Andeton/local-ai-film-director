@@ -3,7 +3,8 @@
 Covers: basic import, provenance, character turnaround dedup, idempotent
 reimport, atomic rollback, change detection (added/modified/deleted),
 side-effect-free check, apply_detected_changes marks OUTDATED, reimport
-clears outdated, reimport marks deleted-upstream OUTDATED.
+clears outdated, reimport marks deleted-upstream OUTDATED, WC project
+deletion detection.
 """
 import json
 import sqlite3
@@ -19,7 +20,7 @@ from film_director.persistence.repositories import (
     SceneRepository,
     SequenceRepository,
 )
-from film_director.errors import NormalizationError
+from film_director.errors import NormalizationError, WindComicNotFoundError
 from film_director.services.import_service import ImportService
 
 
@@ -556,3 +557,54 @@ class TestDirectReimportAfterDelete:
         chars = env["character"].get_characters_by_project(r.project_id)
         outdated = [c for c in chars if c.status == "outdated"]
         assert len(outdated) == 1
+
+
+# ---------------------------------------------------------------------------
+# 13. WC Project Deletion
+# ---------------------------------------------------------------------------
+
+class TestProjectDeletion:
+    def test_check_detects_deleted_wc_project(self, svc, env, wc_project_id):
+        """When the WC source project is deleted, check_for_changes reports project deletion."""
+        result = svc.import_project(wc_project_id)
+        # Delete the WC project from source
+        conn = sqlite3.connect(env["wc_db_path"])
+        conn.execute("DELETE FROM projects WHERE id = ?", (wc_project_id,))
+        conn.commit(); conn.close()
+
+        changes = svc.check_for_changes(result.project_id)
+        assert len(changes) == 1  # Only project deletion, no child noise
+        assert changes[0].entity_type == "project"
+        assert changes[0].entity_id == result.project_id
+        assert changes[0].change_type == "deleted"
+
+    def test_apply_project_deletion_marks_outdated(self, svc, env, wc_project_id):
+        """Apply project deletion marks our ProductionProject OUTDATED but preserves everything."""
+        result = svc.import_project(wc_project_id)
+        conn = sqlite3.connect(env["wc_db_path"])
+        conn.execute("DELETE FROM projects WHERE id = ?", (wc_project_id,))
+        conn.commit(); conn.close()
+
+        changes = svc.check_for_changes(result.project_id)
+        svc.apply_detected_changes(result.project_id, changes)
+
+        project = env["project"].get_project(result.project_id)
+        assert project is not None  # NOT deleted
+        assert project.status == "outdated"
+        # Children still exist
+        seqs = env["sequence"].get_sequences_by_project(result.project_id)
+        assert len(seqs) == 1
+        scenes = env["scene"].get_scenes_by_sequence(seqs[0].id)
+        assert len(scenes) == 2  # preserved
+        chars = env["character"].get_characters_by_project(result.project_id)
+        assert len(chars) == 2  # preserved
+
+    def test_reimport_after_wc_project_deletion_raises_not_found(self, svc, env, wc_project_id):
+        """Explicit reimport when WC project is gone still raises WindComicNotFoundError."""
+        svc.import_project(wc_project_id)
+        conn = sqlite3.connect(env["wc_db_path"])
+        conn.execute("DELETE FROM projects WHERE id = ?", (wc_project_id,))
+        conn.commit(); conn.close()
+
+        with pytest.raises(WindComicNotFoundError):
+            svc.import_project(wc_project_id)

@@ -46,6 +46,9 @@ Desktop.ini
 htmlcov/
 .mypy_cache/
 
+# Worktrees
+.worktrees/
+
 # Temporary
 *.tmp
 *.log

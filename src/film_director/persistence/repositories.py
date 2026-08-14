@@ -17,10 +17,16 @@ from typing import Generator
 
 from film_director.errors import PersistenceError
 from film_director.models.canonical import (
+    Beat,
+    CameraIntent,
     CharacterReference,
+    GenerationPlan,
     ProductionProject,
+    ReferenceRequirements,
     Scene,
     Sequence,
+    ShotSpecificationV1,
+    ShotSubject,
 )
 from film_director.models.provenance import Provenance
 from film_director.persistence.database import Database
@@ -319,6 +325,13 @@ class CharacterRepository:
             ).fetchall()
         return [self._row_to_character(r) for r in rows]
 
+    def get_character(self, character_id: str, conn: sqlite3.Connection | None = None) -> CharacterReference | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute("SELECT * FROM character_references WHERE id = ?", (character_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_character(row)
+
     def mark_outdated(self, character_id: str, conn: sqlite3.Connection | None = None) -> None:
         with _use_conn(self._db, conn) as c:
             c.execute(
@@ -340,4 +353,338 @@ class CharacterRepository:
             visual_anchors=json.loads(row["visual_anchors"]),
             status=row["status"],
             provenance=_prov_from_row(row),
+        )
+
+
+# ---------------------------------------------------------------------------
+# BeatRepository
+# ---------------------------------------------------------------------------
+
+class BeatRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save_beat(self, beat: Beat, conn: sqlite3.Connection | None = None) -> None:
+        """Upsert a Beat. characters stored as JSON."""
+        sql = """
+            INSERT INTO beats
+                (id, scene_id, dramatic_action, character_intention, change,
+                 characters, order_index, status, source, version,
+                 created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                scene_id            = excluded.scene_id,
+                dramatic_action     = excluded.dramatic_action,
+                character_intention = excluded.character_intention,
+                change              = excluded.change,
+                characters          = excluded.characters,
+                order_index         = excluded.order_index,
+                status              = excluded.status,
+                source              = excluded.source,
+                version             = excluded.version,
+                created_at          = excluded.created_at,
+                updated_at          = excluded.updated_at
+        """
+        params = (
+            beat.id, beat.scene_id, beat.dramatic_action,
+            beat.character_intention, beat.change,
+            json.dumps(beat.characters),
+            beat.order_index, beat.status, beat.source, beat.version,
+            beat.created_at, beat.updated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save beat", str(exc)) from exc
+
+    def get_beat(self, beat_id: str, conn: sqlite3.Connection | None = None) -> Beat | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute("SELECT * FROM beats WHERE id = ?", (beat_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_beat(row)
+
+    def get_beats_by_scene(self, scene_id: str, conn: sqlite3.Connection | None = None) -> list[Beat]:
+        """Return ALL beats for a scene (current + historical)."""
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM beats WHERE scene_id = ? ORDER BY order_index, id",
+                (scene_id,),
+            ).fetchall()
+        return [self._row_to_beat(r) for r in rows]
+
+    def get_current_beats_by_scene(self, scene_id: str, conn: sqlite3.Connection | None = None) -> list[Beat]:
+        """Return non-outdated beats for a scene."""
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM beats WHERE scene_id = ? AND status != 'outdated' ORDER BY order_index, id",
+                (scene_id,),
+            ).fetchall()
+        return [self._row_to_beat(r) for r in rows]
+
+    def mark_outdated(self, beat_id: str, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute("UPDATE beats SET status = 'outdated' WHERE id = ?", (beat_id,))
+
+    def mark_beats_outdated_by_scene(self, scene_id: str, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute("UPDATE beats SET status = 'outdated' WHERE scene_id = ?", (scene_id,))
+
+    @staticmethod
+    def _row_to_beat(row: sqlite3.Row) -> Beat:
+        return Beat(
+            id=row["id"],
+            scene_id=row["scene_id"],
+            dramatic_action=row["dramatic_action"],
+            character_intention=row["character_intention"],
+            change=row["change"],
+            characters=json.loads(row["characters"]),
+            order_index=row["order_index"],
+            status=row["status"],
+            source=row["source"],
+            version=row["version"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# ShotRepository
+# ---------------------------------------------------------------------------
+
+class ShotRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save_shot(self, shot: ShotSpecificationV1, conn: sqlite3.Connection | None = None) -> None:
+        """Upsert a ShotSpecificationV1. Complex fields stored as JSON."""
+        sql = """
+            INSERT INTO shots
+                (id, beat_id, wc_storyboard_id, wc_shot_number,
+                 dramatic_purpose, subjects, action, environment, camera,
+                 lighting, audio_intent, duration_sec, continuity_inputs,
+                 storyboard_image_path, order_index, status, source, version,
+                 created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                beat_id               = excluded.beat_id,
+                wc_storyboard_id      = excluded.wc_storyboard_id,
+                wc_shot_number        = excluded.wc_shot_number,
+                dramatic_purpose      = excluded.dramatic_purpose,
+                subjects              = excluded.subjects,
+                action                = excluded.action,
+                environment           = excluded.environment,
+                camera                = excluded.camera,
+                lighting              = excluded.lighting,
+                audio_intent          = excluded.audio_intent,
+                duration_sec          = excluded.duration_sec,
+                continuity_inputs     = excluded.continuity_inputs,
+                storyboard_image_path = excluded.storyboard_image_path,
+                order_index           = excluded.order_index,
+                status                = excluded.status,
+                source                = excluded.source,
+                version               = excluded.version,
+                created_at            = excluded.created_at,
+                updated_at            = excluded.updated_at
+        """
+        params = (
+            shot.id, shot.beat_id, shot.wc_storyboard_id, shot.wc_shot_number,
+            shot.dramatic_purpose,
+            json.dumps([s.model_dump() for s in shot.subjects]),
+            shot.action,
+            json.dumps(shot.environment),
+            json.dumps(shot.camera.model_dump()),
+            json.dumps(shot.lighting),
+            json.dumps(shot.audio_intent),
+            shot.duration_sec,
+            json.dumps(shot.continuity_inputs),
+            shot.storyboard_image_path,
+            shot.order_index, shot.status, shot.source, shot.version,
+            shot.created_at, shot.updated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save shot", str(exc)) from exc
+
+    def get_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> ShotSpecificationV1 | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute("SELECT * FROM shots WHERE id = ?", (shot_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_shot(row)
+
+    def get_shots_by_beat(self, beat_id: str, conn: sqlite3.Connection | None = None) -> list[ShotSpecificationV1]:
+        """Return ALL shots for a beat (current + historical)."""
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM shots WHERE beat_id = ? ORDER BY order_index, id",
+                (beat_id,),
+            ).fetchall()
+        return [self._row_to_shot(r) for r in rows]
+
+    def get_current_shots_by_beat(self, beat_id: str, conn: sqlite3.Connection | None = None) -> list[ShotSpecificationV1]:
+        """Return non-outdated shots for a beat."""
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM shots WHERE beat_id = ? AND status != 'outdated' ORDER BY order_index, id",
+                (beat_id,),
+            ).fetchall()
+        return [self._row_to_shot(r) for r in rows]
+
+    def get_current_shots_by_project(self, project_id: str, conn: sqlite3.Connection | None = None) -> list[ShotSpecificationV1]:
+        """Return current shots across the whole project, excluding outdated shots AND shots on outdated beats."""
+        sql = """
+            SELECT shots.* FROM shots
+            JOIN beats ON shots.beat_id = beats.id
+            JOIN scenes ON beats.scene_id = scenes.id
+            JOIN sequences ON scenes.sequence_id = sequences.id
+            WHERE sequences.project_id = ?
+              AND shots.status != 'outdated'
+              AND beats.status != 'outdated'
+            ORDER BY shots.order_index, shots.id
+        """
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(sql, (project_id,)).fetchall()
+        return [self._row_to_shot(r) for r in rows]
+
+    def mark_outdated(self, shot_id: str, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute("UPDATE shots SET status = 'outdated' WHERE id = ?", (shot_id,))
+
+    def mark_shots_outdated_by_beat(self, beat_id: str, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute("UPDATE shots SET status = 'outdated' WHERE beat_id = ?", (beat_id,))
+
+    @staticmethod
+    def _row_to_shot(row: sqlite3.Row) -> ShotSpecificationV1:
+        return ShotSpecificationV1(
+            id=row["id"],
+            beat_id=row["beat_id"],
+            wc_storyboard_id=row["wc_storyboard_id"],
+            wc_shot_number=row["wc_shot_number"],
+            dramatic_purpose=row["dramatic_purpose"],
+            subjects=[ShotSubject(**s) for s in json.loads(row["subjects"])],
+            action=row["action"],
+            environment=json.loads(row["environment"]),
+            camera=CameraIntent(**json.loads(row["camera"])),
+            lighting=json.loads(row["lighting"]),
+            audio_intent=json.loads(row["audio_intent"]),
+            duration_sec=row["duration_sec"],
+            continuity_inputs=json.loads(row["continuity_inputs"]),
+            storyboard_image_path=row["storyboard_image_path"],
+            order_index=row["order_index"],
+            status=row["status"],
+            source=row["source"],
+            version=row["version"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# GenerationPlanRepository
+# ---------------------------------------------------------------------------
+
+class GenerationPlanRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save_plan(self, plan: GenerationPlan, conn: sqlite3.Connection | None = None) -> None:
+        """Upsert a GenerationPlan. reference_requirements and resolution_intent stored as JSON."""
+        sql = """
+            INSERT INTO generation_plans
+                (id, shot_id, shot_version, strategy, reference_requirements,
+                 duration_sec, resolution_intent, seed_policy, seed,
+                 continuity_mode, selection_reason, status, version,
+                 created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                shot_id                = excluded.shot_id,
+                shot_version           = excluded.shot_version,
+                strategy               = excluded.strategy,
+                reference_requirements = excluded.reference_requirements,
+                duration_sec           = excluded.duration_sec,
+                resolution_intent      = excluded.resolution_intent,
+                seed_policy            = excluded.seed_policy,
+                seed                   = excluded.seed,
+                continuity_mode        = excluded.continuity_mode,
+                selection_reason       = excluded.selection_reason,
+                status                 = excluded.status,
+                version                = excluded.version,
+                created_at             = excluded.created_at,
+                updated_at             = excluded.updated_at
+        """
+        params = (
+            plan.id, plan.shot_id, plan.shot_version, plan.strategy,
+            json.dumps(plan.reference_requirements.model_dump()),
+            plan.duration_sec,
+            json.dumps(plan.resolution_intent),
+            plan.seed_policy, plan.seed,
+            plan.continuity_mode, plan.selection_reason,
+            plan.status, plan.version,
+            plan.created_at, plan.updated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save generation plan", str(exc)) from exc
+
+    def get_plans_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> list[GenerationPlan]:
+        """Return ALL plans for a shot (current + historical)."""
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM generation_plans WHERE shot_id = ? ORDER BY version, id",
+                (shot_id,),
+            ).fetchall()
+        return [self._row_to_plan(r) for r in rows]
+
+    def get_current_plan_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> GenerationPlan | None:
+        """Return the non-outdated plan whose shot_version matches the current shot version."""
+        sql = """
+            SELECT gp.* FROM generation_plans gp
+            JOIN shots s ON gp.shot_id = s.id
+            WHERE gp.shot_id = ? AND gp.status != 'outdated' AND gp.shot_version = s.version
+        """
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(sql, (shot_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_plan(row)
+
+    def mark_outdated(self, plan_id: str, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute("UPDATE generation_plans SET status = 'outdated' WHERE id = ?", (plan_id,))
+
+    def mark_plan_outdated_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute("UPDATE generation_plans SET status = 'outdated' WHERE shot_id = ?", (shot_id,))
+
+    @staticmethod
+    def _row_to_plan(row: sqlite3.Row) -> GenerationPlan:
+        return GenerationPlan(
+            id=row["id"],
+            shot_id=row["shot_id"],
+            shot_version=row["shot_version"],
+            strategy=row["strategy"],
+            reference_requirements=ReferenceRequirements(**json.loads(row["reference_requirements"])),
+            duration_sec=row["duration_sec"],
+            resolution_intent=json.loads(row["resolution_intent"]),
+            seed_policy=row["seed_policy"],
+            seed=row["seed"],
+            continuity_mode=row["continuity_mode"],
+            selection_reason=row["selection_reason"],
+            status=row["status"],
+            version=row["version"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )

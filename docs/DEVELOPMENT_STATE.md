@@ -6,9 +6,9 @@
 
 ## Current Milestone
 
-**M2 — Production Specification**
+**M3 — H3 Bridge (Vertical Slice)**
 
-**Status:** COMPLETE
+**Status:** IN PROGRESS — M3.A and M3.B complete, M3.C next
 
 ---
 
@@ -66,11 +66,19 @@
 
 ## Next Approved Action
 
-**M3.1 — H3 Bridge Planning**
+**M3.C — H3ReferenceResolver + H3PromptBuilder**
 
-Scope: Plan the M3 implementation — H3PromptV1, H3PromptBuilder, WorkflowRegistry, ComfyUIAdapter, GenerationRequest, Take.
+Resume from branch `m3-h3-bridge` at commit `673ccca`.
+Worktree: `D:\Ai\Local AI Film Director\.worktrees\m3-h3-bridge`
 
-**NOT YET STARTED. Awaiting M2 merge and M3 planning approval.**
+**M3 Progress:**
+- M3.A: COMPLETE — runtime preflight, real R2V execution validated, template SHA `3893eb4a...`
+- M3.B: COMPLETE — H3ReferenceBinding/WorkflowInjection/H3PromptV1/GenerationRequest/Take models, DB tables, 9 errors
+- M3.C: NEXT — H3ReferenceResolver (content SHA, min resolver) + H3PromptBuilder (deterministic)
+- M3.D–M3.H: NOT STARTED
+
+**Authoritative docs:** `docs/superpowers/plans/2026-08-14-m3-h3-bridge.md`, `docs/M3_PREFLIGHT.md`
+**Baseline:** 454 deterministic + 5 live = 459 tests, 0 failed
 
 ---
 
@@ -106,4 +114,7 @@ Scope: Plan the M3 implementation — H3PromptV1, H3PromptBuilder, WorkflowRegis
 | `src/film_director/api/routes.py` | API route definitions |
 | `src/film_director/enrichment/` | M2 enrichment layer (BeatEnricher, CoveragePlanner, ShotSpecBuilder, StrategySelector, StalePropagator) |
 | `src/film_director/services/enrichment_service.py` | M2 enrichment orchestrator + atomic M1/M2 change cascade |
+| `src/film_director/generation/` | M3 H3 provider layer (h3_types, h3_prompt, generation_request models) |
+| `workflows/h3/r2v_v1.json` | Verified H3 R2V API workflow template |
+| `docs/M3_PREFLIGHT.md` | M3.A runtime preflight evidence + frozen implementation facts |
 | `tests/` | Test suite (unit + integration + live) |

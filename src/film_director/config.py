@@ -25,5 +25,6 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = None
 
     comfyui_base_url: str = "http://127.0.0.1:8188"
+    comfyui_generation_timeout: int = 600
 
     log_level: str = "INFO"

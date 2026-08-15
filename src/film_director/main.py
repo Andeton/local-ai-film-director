@@ -14,28 +14,43 @@ from film_director.enrichment.shot_spec_builder import ShotSpecBuilder
 from film_director.enrichment.stale_propagator import StalePropagator
 from film_director.enrichment.strategy_selector import StrategySelector
 from film_director.errors import (
+    ComfyUIExecutionError,
+    ComfyUIResultError,
+    ComfyUIUnavailableError,
     EnrichmentError,
     FilmDirectorError,
+    GenerationError,
     HumanEditConflictError,
     LLMStructuredOutputError,
     LLMUnavailableError,
+    MediaProcessingError,
     NormalizationError,
+    ParameterResolutionError,
     PersistenceError,
+    ReferenceResolutionError,
+    UnsupportedStrategyError,
     WindComicArtifactMalformedError,
     WindComicNotFoundError,
     WindComicSchemaError,
     WindComicUnavailableError,
+    WorkflowTemplateError,
 )
 from film_director.llm.ollama import create_llm_provider
 from film_director.persistence.database import Database
+from film_director.generation.comfyui_adapter import ComfyUIAdapter
+from film_director.generation.generation_service import GenerationService
+from film_director.generation.workflow_registry import WorkflowResolver
 from film_director.persistence.repositories import (
     BeatRepository,
     CharacterRepository,
     GenerationPlanRepository,
+    GenerationRequestRepository,
+    H3PromptRepository,
     ProjectRepository,
     SceneRepository,
     SequenceRepository,
     ShotRepository,
+    TakeRepository,
 )
 from film_director.services.enrichment_service import EnrichmentService
 from film_director.services.import_service import ImportService
@@ -51,6 +66,15 @@ _ERROR_STATUS: dict[type, int] = {
     WindComicSchemaError: 502,
     WindComicUnavailableError: 503,
     LLMUnavailableError: 503,
+    ComfyUIUnavailableError: 503,
+    ComfyUIExecutionError: 502,
+    ComfyUIResultError: 502,
+    UnsupportedStrategyError: 422,
+    ReferenceResolutionError: 422,
+    ParameterResolutionError: 422,
+    WorkflowTemplateError: 500,
+    GenerationError: 500,
+    MediaProcessingError: 500,
     NormalizationError: 500,
     PersistenceError: 500,
 }
@@ -138,6 +162,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         stale_propagator=stale_propagator,
     )
 
+    # M3 services
+    import os
+    comfyui_adapter = ComfyUIAdapter(
+        base_url=settings.comfyui_base_url,
+    )
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    generation_service = GenerationService(
+        db=db,
+        comfyui=comfyui_adapter,
+        storage_root=settings.storage_root,
+        project_root=project_root,
+        generation_timeout=settings.comfyui_generation_timeout,
+    )
+    request_repo = GenerationRequestRepository(db)
+
     router = create_router(
         adapter=adapter,
         import_service=import_service,
@@ -150,6 +189,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         beat_repo=beat_repo,
         shot_repo=shot_repo,
         plan_repo=plan_repo,
+        generation_service=generation_service,
+        comfyui_adapter=comfyui_adapter,
+        request_repo=request_repo,
     )
     app.include_router(router)
 

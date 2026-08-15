@@ -16,6 +16,8 @@ from contextlib import contextmanager
 from typing import Generator
 
 from film_director.errors import PersistenceError
+from film_director.generation.generation_request import GenerationRequest, Take
+from film_director.generation.h3_prompt import H3PromptV1
 from film_director.models.canonical import (
     Beat,
     CameraIntent,
@@ -687,4 +689,280 @@ class GenerationPlanRepository:
             version=row["version"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# H3PromptRepository
+# ---------------------------------------------------------------------------
+
+_SENTINEL = object()
+
+
+class H3PromptRepository:
+    """Immutable H3PromptV1 persistence. Plain INSERT — no UPSERT."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save_prompt(self, prompt: H3PromptV1, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO h3_prompts
+                (id, shot_id, generation_plan_id,
+                 source_shot_version, source_generation_plan_version,
+                 subject_definitions, summary, retention_analysis,
+                 detailed_description, overall_soundscape, non_diegetic_music,
+                 rendered_prompt_text, status, version, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """
+        params = (
+            prompt.id, prompt.shot_id, prompt.generation_plan_id,
+            prompt.source_shot_version, prompt.source_generation_plan_version,
+            prompt.subject_definitions, prompt.summary, prompt.retention_analysis,
+            prompt.detailed_description, prompt.overall_soundscape,
+            prompt.non_diegetic_music, prompt.rendered_prompt_text,
+            prompt.status, prompt.version, prompt.created_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save H3 prompt", str(exc)) from exc
+
+    def get_prompt(self, prompt_id: str, conn: sqlite3.Connection | None = None) -> H3PromptV1 | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute("SELECT * FROM h3_prompts WHERE id = ?", (prompt_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_prompt(row)
+
+    def get_current_prompt(
+        self,
+        shot_id: str,
+        shot_version: int,
+        generation_plan_id: str,
+        generation_plan_version: int,
+        conn: sqlite3.Connection | None = None,
+    ) -> H3PromptV1 | None:
+        sql = """
+            SELECT * FROM h3_prompts
+            WHERE shot_id = ?
+              AND source_shot_version = ?
+              AND generation_plan_id = ?
+              AND source_generation_plan_version = ?
+              AND status = 'current'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+        """
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                sql, (shot_id, shot_version, generation_plan_id, generation_plan_version)
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_prompt(row)
+
+    def mark_stale(self, prompt_id: str, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute(
+                "UPDATE h3_prompts SET status = 'stale' WHERE id = ?",
+                (prompt_id,),
+            )
+
+    @staticmethod
+    def _row_to_prompt(row: sqlite3.Row) -> H3PromptV1:
+        return H3PromptV1(
+            id=row["id"],
+            shot_id=row["shot_id"],
+            generation_plan_id=row["generation_plan_id"],
+            source_shot_version=row["source_shot_version"],
+            source_generation_plan_version=row["source_generation_plan_version"],
+            subject_definitions=row["subject_definitions"],
+            summary=row["summary"],
+            retention_analysis=row["retention_analysis"],
+            detailed_description=row["detailed_description"],
+            overall_soundscape=row["overall_soundscape"],
+            non_diegetic_music=row["non_diegetic_music"],
+            rendered_prompt_text=row["rendered_prompt_text"],
+            status=row["status"],
+            version=row["version"],
+            created_at=row["created_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# GenerationRequestRepository
+# ---------------------------------------------------------------------------
+
+class GenerationRequestRepository:
+    """INSERT-ONLY GenerationRequest persistence. Input fields are immutable."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create_request(self, request: GenerationRequest, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO generation_requests
+                (id, shot_id, shot_version, generation_plan_id,
+                 generation_plan_version, prompt_artifact_id,
+                 prompt_artifact_version, workflow_definition_id,
+                 workflow_definition_version, workflow_template_fingerprint,
+                 take_number, parameters_snapshot, reference_snapshot,
+                 seed, comfyui_prompt_id, status, submitted_at,
+                 completed_at, error)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """
+        params = (
+            request.id, request.shot_id, request.shot_version,
+            request.generation_plan_id, request.generation_plan_version,
+            request.prompt_artifact_id, request.prompt_artifact_version,
+            request.workflow_definition_id, request.workflow_definition_version,
+            request.workflow_template_fingerprint, request.take_number,
+            json.dumps(request.parameters_snapshot),
+            json.dumps(request.reference_snapshot),
+            request.seed, request.comfyui_prompt_id,
+            request.status, request.submitted_at, request.completed_at,
+            request.error,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to create generation request", str(exc)) from exc
+
+    def get_request(self, request_id: str, conn: sqlite3.Connection | None = None) -> GenerationRequest | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM generation_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_request(row)
+
+    def get_requests_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> list[GenerationRequest]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM generation_requests WHERE shot_id = ? ORDER BY take_number, id",
+                (shot_id,),
+            ).fetchall()
+        return [self._row_to_request(r) for r in rows]
+
+    def update_status(
+        self,
+        request_id: str,
+        status: str,
+        comfyui_prompt_id: object = _SENTINEL,
+        submitted_at: object = _SENTINEL,
+        completed_at: object = _SENTINEL,
+        error: object = _SENTINEL,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        sets = ["status = ?"]
+        params: list = [status]
+        if comfyui_prompt_id is not _SENTINEL:
+            sets.append("comfyui_prompt_id = ?")
+            params.append(comfyui_prompt_id)
+        if submitted_at is not _SENTINEL:
+            sets.append("submitted_at = ?")
+            params.append(submitted_at)
+        if completed_at is not _SENTINEL:
+            sets.append("completed_at = ?")
+            params.append(completed_at)
+        if error is not _SENTINEL:
+            sets.append("error = ?")
+            params.append(error)
+        params.append(request_id)
+        sql = f"UPDATE generation_requests SET {', '.join(sets)} WHERE id = ?"
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to update request status", str(exc)) from exc
+
+    @staticmethod
+    def _row_to_request(row: sqlite3.Row) -> GenerationRequest:
+        return GenerationRequest(
+            id=row["id"],
+            shot_id=row["shot_id"],
+            shot_version=row["shot_version"],
+            generation_plan_id=row["generation_plan_id"],
+            generation_plan_version=row["generation_plan_version"],
+            prompt_artifact_id=row["prompt_artifact_id"],
+            prompt_artifact_version=row["prompt_artifact_version"],
+            workflow_definition_id=row["workflow_definition_id"],
+            workflow_definition_version=row["workflow_definition_version"],
+            workflow_template_fingerprint=row["workflow_template_fingerprint"],
+            take_number=row["take_number"],
+            parameters_snapshot=json.loads(row["parameters_snapshot"]),
+            reference_snapshot=json.loads(row["reference_snapshot"]),
+            seed=row["seed"],
+            comfyui_prompt_id=row["comfyui_prompt_id"],
+            status=row["status"],
+            submitted_at=row["submitted_at"],
+            completed_at=row["completed_at"],
+            error=row["error"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# TakeRepository
+# ---------------------------------------------------------------------------
+
+class TakeRepository:
+    """Take persistence. Plain INSERT. UNIQUE(generation_request_id) enforced by DB."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save_take(self, take: Take, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO takes
+                (id, shot_id, generation_request_id, seed, video_path,
+                 audio_path, last_frame_path, status, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """
+        params = (
+            take.id, take.shot_id, take.generation_request_id,
+            take.seed, take.video_path, take.audio_path,
+            take.last_frame_path, take.status, take.created_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save take", str(exc)) from exc
+
+    def get_take(self, take_id: str, conn: sqlite3.Connection | None = None) -> Take | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute("SELECT * FROM takes WHERE id = ?", (take_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_take(row)
+
+    def get_takes_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> list[Take]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM takes WHERE shot_id = ? ORDER BY created_at, id",
+                (shot_id,),
+            ).fetchall()
+        return [self._row_to_take(r) for r in rows]
+
+    @staticmethod
+    def _row_to_take(row: sqlite3.Row) -> Take:
+        return Take(
+            id=row["id"],
+            shot_id=row["shot_id"],
+            generation_request_id=row["generation_request_id"],
+            seed=row["seed"],
+            video_path=row["video_path"],
+            audio_path=row["audio_path"],
+            last_frame_path=row["last_frame_path"],
+            status=row["status"],
+            created_at=row["created_at"],
         )

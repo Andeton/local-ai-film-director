@@ -50,3 +50,39 @@ class EnrichmentError(FilmDirectorError):
 
 class HumanEditConflictError(FilmDirectorError):
     """Re-enrichment blocked: human-edited content exists and force=False."""
+
+
+class ComfyUIUnavailableError(FilmDirectorError):
+    """ComfyUI runtime unreachable."""
+
+
+class ComfyUIExecutionError(FilmDirectorError):
+    """ComfyUI job execution failed."""
+
+
+class ComfyUIResultError(FilmDirectorError):
+    """ComfyUI result retrieval/download failed."""
+
+
+class UnsupportedStrategyError(FilmDirectorError):
+    """Generation strategy not implemented in current milestone."""
+
+
+class ReferenceResolutionError(FilmDirectorError):
+    """Required R2V reference cannot be resolved/validated."""
+
+
+class ParameterResolutionError(FilmDirectorError):
+    """Generic plan cannot be converted to verified provider parameters."""
+
+
+class WorkflowTemplateError(FilmDirectorError):
+    """Workflow template missing, invalid, or fingerprint mismatch."""
+
+
+class GenerationError(FilmDirectorError):
+    """Internal generation orchestration failure."""
+
+
+class MediaProcessingError(FilmDirectorError):
+    """FFmpeg, media staging, or verification failure."""

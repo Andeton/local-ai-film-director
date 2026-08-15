@@ -8,11 +8,14 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, model_validator
 
 from film_director.adapters.wind_comic import WindComicAdapter
+from film_director.generation.comfyui_adapter import ComfyUIAdapter
+from film_director.generation.generation_service import GenerationService
 from film_director.models.canonical import CameraIntent, ShotSubject
 from film_director.persistence.repositories import (
     BeatRepository,
     CharacterRepository,
     GenerationPlanRepository,
+    GenerationRequestRepository,
     ProjectRepository,
     SceneRepository,
     SequenceRepository,
@@ -81,6 +84,10 @@ def create_router(
     beat_repo: BeatRepository | None = None,
     shot_repo: ShotRepository | None = None,
     plan_repo: GenerationPlanRepository | None = None,
+    # M3 services
+    generation_service: GenerationService | None = None,
+    comfyui_adapter: ComfyUIAdapter | None = None,
+    request_repo: GenerationRequestRepository | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -277,5 +284,50 @@ def create_router(
             raise HTTPException(status_code=404, detail="Project not found")
         count = enrichment_service.assign_strategies(project_id)
         return {"plans_created": count}
+
+    # ------------------------------------------------------------------
+    # M3 — Generation
+    # ------------------------------------------------------------------
+
+    @router.post("/shots/{shot_id}/generate")
+    def generate_shot(shot_id: str) -> dict:
+        """Synchronous M3 generation: Shot → H3 R2V → Take.
+
+        No queue, no background worker. The request stays open during
+        the entire H3 generation (~3-5 min on RTX 5090). Later milestones
+        will add async job support.
+        """
+        if generation_service is None:
+            raise HTTPException(status_code=501, detail="M3 generation not available")
+        take = generation_service.generate_shot(shot_id)
+        return {
+            "take_id": take.id,
+            "shot_id": take.shot_id,
+            "generation_request_id": take.generation_request_id,
+            "seed": take.seed,
+            "video_path": take.video_path,
+            "last_frame_path": take.last_frame_path,
+            "status": take.status,
+        }
+
+    @router.get("/generation-requests/{request_id}")
+    def get_generation_request(request_id: str) -> dict:
+        if request_repo is None:
+            raise HTTPException(status_code=501, detail="M3 generation not available")
+        req = request_repo.get_request(request_id)
+        if req is None:
+            raise HTTPException(status_code=404, detail="Generation request not found")
+        return req.model_dump()
+
+    @router.get("/integrations/comfyui/health")
+    def comfyui_health() -> dict:
+        if comfyui_adapter is None:
+            raise HTTPException(status_code=501, detail="ComfyUI not configured")
+        result = comfyui_adapter.health()
+        return {
+            "available": True,
+            "system": result.get("system", {}),
+            "devices": result.get("devices", []),
+        }
 
     return router

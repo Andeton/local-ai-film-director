@@ -6,9 +6,9 @@
 
 ## Current Milestone
 
-**M2 — Production Specification**
+**M3 — H3 Bridge (Vertical Slice)**
 
-**Status:** COMPLETE
+**Status:** CLOSED — All 15 exit criteria PASS including human visual acceptance
 
 ---
 
@@ -24,6 +24,7 @@
 | M0.7 | 2026-08-14 | Documentation consistency: ADR header fixed, M2 uses generic strategy names, ADR-002 clarifies GenerationPlan is model-agnostic, terminology verified across all docs |
 | M1 | 2026-08-15 | Integration Core: Python 3.14.3, FastAPI scaffold, WC SQLite read-only adapter (real WC schema verified), canonical Project/Sequence/Scene/CharacterReference with provenance, atomic import with change detection (added/modified/deleted), SQLite persistence with UPSERT/UNIQUE/FK, Ollama LLM provider (gemma4:e4b structured JSON verified), API with 11 endpoints. 185 tests (182 deterministic + 3 live Ollama). |
 | M2 | 2026-08-16 | Production Specification: Beat/ShotSpecificationV1/GenerationPlan canonical models (model-agnostic, zero provider fields), BeatEnricher + CoveragePlanner (LLM object-wrapper contract, domain repair), deterministic ShotSpecBuilder (non-lossy character refs), deterministic StrategySelector (explicit context, 5-priority precedence), history-preserving re-enrichment (OUTDATED + new IDs, never delete), human editing API with stale propagation + force protection (409), atomic M1+M2 source-change cascade, 23 API endpoints total. 418 tests (413 deterministic + 5 live Ollama). Exit criteria 12/12 PASS. Backlog: _find_project_id_for_scene O(N) scan (MINOR). |
+| M3 | 2026-08-16 | H3 Bridge Vertical Slice: Shot → H3 R2V → ComfyUI → Take. H3ReferenceResolver (content SHA-256, first-ref-only), H3PromptBuilder (deterministic, binding-authority), WorkflowRegistry (fingerprint-verified r2v_v1.json), ParameterResolver (seconds injection, trained 124-362 frame range, explicit aspect mapping), ComfyUIAdapter (sync REST+WS, prompt_id filtering), INSERT-only GenerationRequest + UNIQUE Take repositories with atomic finalization, GenerationService (22-step pipeline with pre/post-request failure boundary), media staging (ffprobe + true last-frame extraction), API (POST generate, GET request, GET comfyui health). Real H3 R2V execution: 1376x768 h264+aac 5.167s in 3:51 on RTX 5090. Human visual acceptance PASS. 673 deterministic + 1 live ComfyUI + 5 live Ollama tests. Exit criteria 15/15 PASS. |
 
 ---
 
@@ -44,7 +45,7 @@
 | Blocker | Severity | Impact | Mitigation |
 |---|---|---|---|
 | No 14B+ LLM model installed locally | HIGH | Enrichment agents (beats, coverage) need reliable structured output | Download qwen2.5:14b or use OpenRouter |
-| No T2V/I2V API-format workflow template | LOW | Only R2V is API-ready; T2V/I2V need construction from native nodes | Use MCP to construct during M3 |
+| No T2V/I2V API-format workflow template | LOW | Only R2V is API-ready; T2V/I2V need construction from native nodes | Use MCP to construct in future milestone |
 | No H3 Turbo LoRA installed | LOW | Generation will be slower (20 steps vs 6-10) | Download when needed |
 | Wind Comic requires budget hack for demo user | LOW | Budget cap blocks project creation | Set budget_hard_cap_cny to 99999 |
 
@@ -66,11 +67,38 @@
 
 ## Next Approved Action
 
-**M3.1 — H3 Bridge Planning**
+**Pending external review — select next milestone (M4+)**
 
-Scope: Plan the M3 implementation — H3PromptV1, H3PromptBuilder, WorkflowRegistry, ComfyUIAdapter, GenerationRequest, Take.
+M3 branch `m3-h3-bridge` is CLOSED. Merge to main when instructed.
 
-**NOT YET STARTED. Awaiting M2 merge and M3 planning approval.**
+**M3 Closure Evidence:**
+- Branch: `m3-h3-bridge`
+- Final implementation HEAD: `dfd8994`
+- Live GenerationRequest: `greq31767e233ca3`
+- Live Take: `takee024e17d050a`
+- ComfyUI prompt: `d4e450d0-8ed1-48b4-8d57-5a2335065e80`
+- Video: `storage/takes/proj-live/shot-live/take_1/96efcf92_00001_.mp4`
+- Human visual acceptance: PASS
+- Exit criteria: 15/15 PASS
+- Deterministic tests: 673 passed, 6 live deselected, 0 failed
+
+**M3 Known Limitations (not blockers — deferred to later milestones):**
+- Only REFERENCE_TO_VIDEO execution supported
+- Checked-in template materializes 1 reference slot (provider supports 9)
+- Generation API is synchronous (no queue/background worker)
+- One Take per execution (no multi-take)
+- No continuity chain
+- No M5 reference ranking
+- No multi-take selection/review
+- Live acceptance used project fixture (strict WC storyboard traceability exercised later)
+
+**M3 Verified Runtime Contract:**
+- ComfyUI 0.33.1, H3 R2V template `workflows/h3/r2v_v1.json`
+- Template SHA-256: `3893eb4ab9738c33953c016e6ae349f2a9d1e5414c0776c26f222743417206b4`
+- Prompt: node 104, Reference: node 200 (1 materialized / 9 provider), Duration: node 111 (seconds, trained 124-362 frames), Seed: node 15, Aspect: node 115, Output: node 92
+- Media: MP4/H264 + muxed AAC, 24fps, 1376x768 (16:9)
+
+**Authoritative docs:** `docs/superpowers/plans/2026-08-14-m3-h3-bridge.md`, `docs/M3_PREFLIGHT.md`
 
 ---
 
@@ -106,4 +134,7 @@ Scope: Plan the M3 implementation — H3PromptV1, H3PromptBuilder, WorkflowRegis
 | `src/film_director/api/routes.py` | API route definitions |
 | `src/film_director/enrichment/` | M2 enrichment layer (BeatEnricher, CoveragePlanner, ShotSpecBuilder, StrategySelector, StalePropagator) |
 | `src/film_director/services/enrichment_service.py` | M2 enrichment orchestrator + atomic M1/M2 change cascade |
+| `src/film_director/generation/` | M3 H3 provider layer (types, resolver, prompt, workflow, parameters, adapter, service, media) |
+| `workflows/h3/r2v_v1.json` | Verified H3 R2V API workflow template |
+| `docs/M3_PREFLIGHT.md` | M3.A runtime preflight evidence + frozen implementation facts |
 | `tests/` | Test suite (unit + integration + live) |

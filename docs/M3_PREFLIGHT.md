@@ -341,11 +341,62 @@ The following fields must be injected at runtime by the bridge:
 8. **R2V requires audio_vae** (additional required input vs I2V)
 9. **R2V has ref_image_size option** ("match" vs "max")
 
-## 20. Blockers and Risks
+## 20. Real R2V Validation Run
 
-- **No existing R2V execution in history** -- template is constructed from I2V history + R2V node schema. Should be validated with a test run in M3.B.
-- **Autogrow dot-notation** is inferred from ComfyMathExpression pattern, not directly verified with R2V execution. Test run critical.
-- **VRAM pressure unknown** for R2V -- I2V with these models used ~29 GiB of 32 GiB VRAM.
+**Date:** 2026-08-16
+**ComfyUI:** 0.33.1
+**Template SHA-256:** 3893eb4ab9738c33953c016e6ae349f2a9d1e5414c0776c26f222743417206b4
+
+| Parameter | Value |
+|-----------|-------|
+| Reference file | example.png (768x768 RGB PNG, uploaded as m3a_ref.png via POST /upload/image) |
+| Prompt | Minimal R2V with `<Subject 1>` / `<Picture 1>` tags, 6 sections |
+| Duration input | 5.0 seconds (PrimitiveFloat node 111) |
+| Seed | 42 (RandomNoise node 15, field noise_seed) |
+| Aspect | "16:9 (Widescreen)" (ResolutionSelector node 115) |
+| Output prefix | "preflight/m3a_validation" (SaveVideo node 92) |
+| client_id | 4cc8fadb-3f05-4287-ac92-53b7d4ac85e2 |
+| prompt_id | fea453b7-ccb6-4f0b-8bee-05225c4df2bd |
+
+**Submission:** POST /prompt HTTP 200 — accepted on first attempt.
+
+**Execution:**
+- execution_start event received
+- execution_cached for nodes: 11, 24, 17, 13 (model loaders cached)
+- Generation took ~230 seconds (~3.8 minutes)
+- execution_success event received
+
+**History output (exact):**
+```json
+outputs["92"]["images"][0] = {
+    "filename": "m3a_validation_00001_.mp4",
+    "subfolder": "preflight",
+    "type": "output"
+}
+```
+
+**Binary retrieval:** GET /view?filename=m3a_validation_00001_.mp4&subfolder=preflight&type=output → HTTP 200, Content-Type: video/mp4, 532,938 bytes.
+
+**FFprobe analysis:**
+| Property | Value |
+|----------|-------|
+| Container | mov/mp4 |
+| Video codec | h264 |
+| Resolution | 1376x768 (16:9) |
+| Frame rate | 24 fps |
+| Frame count | 124 |
+| Audio codec | AAC |
+| Audio rate | 32,000 Hz stereo |
+| Duration | 5.167 seconds |
+| Audio | MUXED into video (no separate file) |
+
+**Duration verification:** input 5.0s → 124 frames. Formula: max(5, round(5.0 × 24)) + (5 - (max(5, round(5.0 × 24)) % 17)) % 17 = 120 + 4 = 124. Grid 17×7+5=124. **CONFIRMED.**
+
+**Reference slot behavior:** 1 reference image used, unused autogrow slots absent from workflow. **Job succeeded — confirms unused slots can be omitted.**
+
+**FFmpeg last frame extraction:** `ffmpeg -sseof -0.04 -i video.mp4 -frames:v 1 lastframe.png` → exit 0, valid PNG produced. **CONFIRMED.**
+
+**Blockers resolved:** NONE remaining. All implementation contracts verified by real R2V execution.
 
 ## 21. Frozen Implementation Facts
 
@@ -375,4 +426,14 @@ The following fields must be injected at runtime by the bridge:
 | Image upload                  | POST /upload/image (multipart)                           |
 | Job submit                    | POST /prompt {prompt: workflow, client_id: uuid}         |
 | WS connect                    | ws://127.0.0.1:8188/ws?clientId={uuid}                   |
+| Seed node                     | 15 (RandomNoise), field: noise_seed → SamplerCustomAdvanced 14   |
+| Prompt node                   | 104 (MiniMaxH3ReferenceToVideo), field: prompt                   |
+| Ref image node                | 200 (LoadImage) → R2V 104 ref_images.ref_image_0                |
+| Duration node                 | 111 (PrimitiveFloat) → 107 (ComfyMathExpression) → R2V 104      |
+| Minimum proven refs           | 1 (validated by real R2V execution)                              |
+| Audio                         | MUXED into .mp4 (no separate audio output)                      |
+| Output container              | .mp4 (h264 video + AAC audio)                                   |
+| Output resolution (16:9)      | 1376x768                                                         |
+| R2V generation time (5s/124f) | ~230 seconds (~3.8 minutes) on RTX 5090                         |
 | Template SHA-256              | 3893eb4ab9738c33953c016e6ae349f2a9d1e5414c0776c26f222743417206b4 |
+| Template validated by R2V run | YES — prompt_id fea453b7-ccb6-4f0b-8bee-05225c4df2bd            |

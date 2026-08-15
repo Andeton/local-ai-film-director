@@ -66,19 +66,27 @@
 
 ## Next Approved Action
 
-**M3.C — H3ReferenceResolver + H3PromptBuilder**
+**M3 — AWAITING HUMAN VISUAL ACCEPTANCE**
 
-Resume from branch `m3-h3-bridge` at commit `673ccca`.
+Branch: `m3-h3-bridge`
 Worktree: `D:\Ai\Local AI Film Director\.worktrees\m3-h3-bridge`
 
 **M3 Progress:**
 - M3.A: COMPLETE — runtime preflight, real R2V execution validated, template SHA `3893eb4a...`
 - M3.B: COMPLETE — H3ReferenceBinding/WorkflowInjection/H3PromptV1/GenerationRequest/Take models, DB tables, 9 errors
-- M3.C: NEXT — H3ReferenceResolver (content SHA, min resolver) + H3PromptBuilder (deterministic)
-- M3.D–M3.H: NOT STARTED
+- M3.C: COMPLETE — H3ReferenceResolver (content SHA, min resolver) + H3PromptBuilder (deterministic)
+- M3.D: COMPLETE — WorkflowRegistry (fingerprint) + ParameterResolver (seconds injection, trained 124-362 range)
+- M3.E: COMPLETE — ComfyUIAdapter (sync REST + WS, prompt_id filtering, output node caller-supplied)
+- M3.F: COMPLETE — H3PromptRepo, GenerationRequestRepo (INSERT-only), TakeRepo (UNIQUE gen_request_id), atomic finalization
+- M3.G: COMPLETE — GenerationService (22-step pipeline), media_utils (staging, ffprobe, true last frame, finalization)
+- M3.H: COMPLETE — API routes (POST generate, GET request, GET comfyui health), live R2V acceptance PASS
+
+**M3 Technical Pipeline:** PASS
+**Human Visual Acceptance:** PENDING — video at `storage/takes/proj-live/shot-live/take_1/96efcf92_00001_.mp4`
+**Deterministic baseline:** 673 passed + 6 live deselected, 0 failed
+**Live ComfyUI acceptance:** 1 PASSED (3:51 on RTX 5090)
 
 **Authoritative docs:** `docs/superpowers/plans/2026-08-14-m3-h3-bridge.md`, `docs/M3_PREFLIGHT.md`
-**Baseline:** 454 deterministic + 5 live = 459 tests, 0 failed
 
 ---
 

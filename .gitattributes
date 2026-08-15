@@ -1,0 +1,2 @@
+# Workflow templates must preserve exact bytes for SHA-256 fingerprint verification
+workflows/**/*.json binary

@@ -144,6 +144,55 @@ class TestExtractLastFrame:
         with pytest.raises(MediaProcessingError):
             extract_last_frame("/nonexistent.mp4", output)
 
+    def test_extracts_true_final_frame(self, tmp_path):
+        """BLOCKING: Prove extracted frame is the TRUE last frame.
+
+        Creates a 1-second video where the first 0.5s is red and the last
+        0.5s is blue. Extracts last frame and verifies it is blue, not red.
+        """
+        video = os.path.join(str(tmp_path), "bicolor.mp4")
+        # Use filter_complex to generate red→blue color change
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "color=c=red:s=64x64:r=24:d=0.5",
+            "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=24:d=0.5",
+            "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[out]",
+            "-map", "[out]",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            video,
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode != 0:
+            pytest.skip("FFmpeg not available or concat failed")
+
+        output = os.path.join(str(tmp_path), "last.png")
+        extract_last_frame(video, output)
+
+        # Verify the last frame is blue by checking average color with ffprobe
+        probe_cmd = [
+            "ffprobe", "-v", "quiet",
+            "-f", "lavfi", "-i", f"movie={output},signalstats",
+            "-show_entries", "frame_tags=lavfi.signalstats.HUEMED",
+            "-print_format", "json",
+        ]
+        # Alternative: use ffmpeg to get pixel value
+        check_cmd = [
+            "ffmpeg", "-i", output,
+            "-vf", "crop=1:1:32:32,format=rgb24",
+            "-f", "rawvideo", "-frames:v", "1",
+            "-"
+        ]
+        check = subprocess.run(check_cmd, capture_output=True, timeout=10)
+        if check.returncode != 0:
+            pytest.skip("Cannot verify pixel color")
+
+        rgb = check.stdout[:3]
+        r, g, b = rgb[0], rgb[1], rgb[2]
+        # Blue frame: R should be low, B should be high
+        # Red frame: R should be high, B should be low
+        # H.264 encoding shifts values slightly, so use generous thresholds
+        assert b > r, f"Expected blue frame (b>r), got R={r} G={g} B={b}"
+
 
 # ---------------------------------------------------------------------------
 # move_to_final

@@ -94,17 +94,16 @@ def verify_media(path: str) -> dict:
 
 
 def extract_last_frame(video_path: str, output_path: str) -> str:
-    """Extract the last video frame as PNG using FFmpeg.
+    """Extract the TRUE final decoded video frame as PNG.
 
-    Uses -sseof to seek near the end, then extract one frame.
-    M3.A validated: ffmpeg -sseof -0.04 -i video.mp4 -frames:v 1 lastframe.png
-    Uses -0.5s offset for robustness with variable GOP sizes.
+    Decodes the full video with -update 1 (no -sseof, no -frames:v 1).
+    Each decoded frame overwrites the output file, so the final file IS
+    the true last frame. For M3 H3 clips (5-15s, 120-360 frames at 24fps)
+    this is fast and guaranteed correct.
     """
     cmd = [
         "ffmpeg", "-y",
-        "-sseof", "-0.5",
         "-i", video_path,
-        "-frames:v", "1",
         "-update", "1",
         output_path,
     ]

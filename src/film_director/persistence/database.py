@@ -137,6 +137,65 @@ CREATE TABLE IF NOT EXISTS generation_plans (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (shot_id) REFERENCES shots(id)
 );
+
+CREATE TABLE IF NOT EXISTS h3_prompts (
+    id TEXT PRIMARY KEY,
+    shot_id TEXT NOT NULL,
+    generation_plan_id TEXT NOT NULL,
+    source_shot_version INTEGER NOT NULL,
+    source_generation_plan_version INTEGER NOT NULL,
+    subject_definitions TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    retention_analysis TEXT NOT NULL,
+    detailed_description TEXT NOT NULL,
+    overall_soundscape TEXT NOT NULL DEFAULT '',
+    non_diegetic_music TEXT NOT NULL DEFAULT '',
+    rendered_prompt_text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'current',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (shot_id) REFERENCES shots(id),
+    FOREIGN KEY (generation_plan_id) REFERENCES generation_plans(id)
+);
+
+CREATE TABLE IF NOT EXISTS generation_requests (
+    id TEXT PRIMARY KEY,
+    shot_id TEXT NOT NULL,
+    shot_version INTEGER NOT NULL,
+    generation_plan_id TEXT NOT NULL,
+    generation_plan_version INTEGER NOT NULL,
+    prompt_artifact_id TEXT NOT NULL,
+    prompt_artifact_version INTEGER NOT NULL,
+    workflow_definition_id TEXT NOT NULL,
+    workflow_definition_version TEXT NOT NULL,
+    workflow_template_fingerprint TEXT NOT NULL,
+    take_number INTEGER NOT NULL,
+    parameters_snapshot TEXT NOT NULL,
+    reference_snapshot TEXT NOT NULL,
+    seed INTEGER NOT NULL,
+    comfyui_prompt_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    submitted_at TEXT NOT NULL DEFAULT '',
+    completed_at TEXT NOT NULL DEFAULT '',
+    error TEXT,
+    FOREIGN KEY (shot_id) REFERENCES shots(id),
+    FOREIGN KEY (generation_plan_id) REFERENCES generation_plans(id),
+    FOREIGN KEY (prompt_artifact_id) REFERENCES h3_prompts(id)
+);
+
+CREATE TABLE IF NOT EXISTS takes (
+    id TEXT PRIMARY KEY,
+    shot_id TEXT NOT NULL,
+    generation_request_id TEXT NOT NULL UNIQUE,
+    seed INTEGER NOT NULL,
+    video_path TEXT NOT NULL,
+    audio_path TEXT,
+    last_frame_path TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (shot_id) REFERENCES shots(id),
+    FOREIGN KEY (generation_request_id) REFERENCES generation_requests(id)
+);
 """
 
 

@@ -146,34 +146,70 @@ class TestSeedResolution:
 # ---------------------------------------------------------------------------
 
 class TestDurationResolution:
-    def test_valid_duration_passes(self):
+    def test_m3a_proven_5s_accepted(self):
+        """M3.A real execution: 5.0s → 124 frames (trained minimum)."""
         pr = ParameterResolver()
         defn = _get_defn()
         assert pr.resolve_duration(5.0, defn) == 5.0
 
-    def test_max_duration_passes(self):
+    def test_15s_accepted(self):
+        """15.0s → 362 frames (trained maximum)."""
         pr = ParameterResolver()
         defn = _get_defn()
         assert pr.resolve_duration(15.0, defn) == 15.0
 
-    def test_too_short_raises(self):
+    def test_10s_accepted(self):
+        pr = ParameterResolver()
+        defn = _get_defn()
+        assert pr.resolve_duration(10.0, defn) == 10.0
+
+    def test_sub_second_rejected(self):
+        """0.1s → 5 frames, well below trained 124 minimum."""
         pr = ParameterResolver()
         defn = _get_defn()
         with pytest.raises(ParameterResolutionError, match="(?i)duration"):
             pr.resolve_duration(0.1, defn)
 
-    def test_too_long_raises(self):
+    def test_1s_rejected(self):
+        """1.0s → round(24)=24 → grid 39 frames, below trained 124."""
+        pr = ParameterResolver()
+        defn = _get_defn()
+        with pytest.raises(ParameterResolutionError, match="(?i)duration"):
+            pr.resolve_duration(1.0, defn)
+
+    def test_4s_rejected(self):
+        """4.0s → round(96)=96 → grid 107 frames, below trained 124."""
+        pr = ParameterResolver()
+        defn = _get_defn()
+        with pytest.raises(ParameterResolutionError, match="(?i)duration"):
+            pr.resolve_duration(4.0, defn)
+
+    def test_20s_rejected(self):
+        """20.0s → round(480)=480 → grid 490 frames, above trained 362."""
         pr = ParameterResolver()
         defn = _get_defn()
         with pytest.raises(ParameterResolutionError, match="(?i)duration"):
             pr.resolve_duration(20.0, defn)
 
-    def test_duration_injected_as_seconds(self):
-        """Duration injected as seconds to node 111, NOT frames."""
+    def test_duration_returns_seconds_not_frames(self):
+        """resolve_duration returns seconds; node 111 receives seconds."""
         pr = ParameterResolver()
         defn = _get_defn()
         val = pr.resolve_duration(7.5, defn)
         assert val == 7.5  # seconds, not frames
+
+    def test_boundary_just_below_124_frames_rejected(self):
+        """4.4s → round(105.6)=106 → grid 107 < 124. Rejected."""
+        pr = ParameterResolver()
+        defn = _get_defn()
+        with pytest.raises(ParameterResolutionError):
+            pr.resolve_duration(4.4, defn)
+
+    def test_boundary_at_124_frames_accepted(self):
+        """4.5s → round(108)=108 → grid 124. Accepted (trained min)."""
+        pr = ParameterResolver()
+        defn = _get_defn()
+        assert pr.resolve_duration(4.5, defn) == 4.5
 
 
 # ---------------------------------------------------------------------------

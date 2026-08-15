@@ -30,14 +30,26 @@ _ASPECT_MAP: dict[str, str] = {
     "21:9": "21:9 (Ultrawide)",
 }
 
-# M3.A verified: trained range 124-362 frames = ~5.17-15.08s
-_MIN_DURATION_SEC = 0.21  # 5 frames / 24 fps (absolute minimum)
-_MAX_DURATION_SEC = 15.08  # 362 frames / 24 fps
+# M3.A verified: trained frame range 124-362 at 24fps
+# Validation uses the exact workflow grid expression to compute frames,
+# then enforces the trained range.  Node 111 still receives seconds.
+_TRAINED_MIN_FRAMES = 124
+_TRAINED_MAX_FRAMES = 362
 
 # M3.A verified: RandomNoise.noise_seed uint64
 _SEED_MAX = 0xFFFFFFFFFFFFFFFF
 
 _DEFAULT_ASPECT = "16:9"
+
+
+def _seconds_to_grid_frames(seconds: float) -> int:
+    """Apply the exact H3 workflow grid expression (from template node 107).
+
+    Expression: max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17
+    Snaps to the nearest 17k+5 grid point at or above round(seconds * 24).
+    """
+    raw = max(5, round(seconds * 24))
+    return raw + (5 - (raw % 17)) % 17
 
 
 class ParameterResolver:
@@ -57,11 +69,12 @@ class ParameterResolver:
     def resolve_duration(
         self, duration_sec: float, workflow_def: WorkflowDefinition
     ) -> float:
-        if duration_sec < _MIN_DURATION_SEC or duration_sec > _MAX_DURATION_SEC:
+        frames = _seconds_to_grid_frames(duration_sec)
+        if frames < _TRAINED_MIN_FRAMES or frames > _TRAINED_MAX_FRAMES:
             raise ParameterResolutionError(
-                f"Duration {duration_sec}s outside supported range "
-                f"[{_MIN_DURATION_SEC}, {_MAX_DURATION_SEC}]",
-                detail=f"duration_sec={duration_sec}",
+                f"Duration {duration_sec}s resolves to {frames} frames, "
+                f"outside trained range [{_TRAINED_MIN_FRAMES}, {_TRAINED_MAX_FRAMES}]",
+                detail=f"duration_sec={duration_sec}, frames={frames}",
             )
         return duration_sec
 

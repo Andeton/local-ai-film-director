@@ -6,9 +6,24 @@
 
 ## Current Milestone
 
-**M4 — Wind Comic Production Handoff**
+**M5 — Reference Management**
 
-**Status:** CLOSED — 13/13 exit criteria PASS, real live acceptance with WC 12.320.0 + qwen3:14b. Known WC Writer quality limitation: empty dialogue + sentinel action/emotion in M4.H run (architecture handles correctly via fallback).
+**Status:** IN PROGRESS
+
+Branch: `m5-reference-management`
+Worktree: `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management`
+Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
+
+**M5 Progress:**
+- M5.A: COMPLETE — ReferenceAsset (kind/source/ownership/lifecycle), ReferenceGenerationRequest (immutable), ReferenceGenerationExecution (mutable), 3 DB tables + indexes, 3 repositories
+- M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation (PNG/JPEG/WEBP), SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
+- M5.C1: PREFLIGHT COMPLETE — Z-Image Turbo (~5s, standard KSampler) and Krea 2 Turbo (~25s, Krea2PromptWeight) both verified runnable via ComfyUI REST. Both remain selectable candidates. ComfyUI 0.33.1, RTX 5090.
+- M5.C implementation: NOT STARTED (next — versioned/selectable generator profiles)
+- M5.D–M5.H: NOT STARTED
+
+**Baseline:** 985 deterministic + 7 live deselected, 0 failed
+
+Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ---
 
@@ -67,22 +82,6 @@
 ---
 
 ## Next Approved Action
-
-**M5 — Reference Management (IN PROGRESS)**
-
-Architecture: FROZEN
-Branch: `m5-reference-management`
-Worktree: `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management`
-Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
-
-**M5 Progress:**
-- M5.A: COMPLETE — ReferenceAsset (kind/source/ownership/lifecycle), ReferenceGenerationRequest (immutable), ReferenceGenerationExecution (mutable lifecycle), 3 new DB tables + indexes, 3 new repositories
-- M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation, SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
-- M5.C–M5.H: NOT STARTED
-
-**Baseline:** 985 deterministic + 7 live deselected, 0 failed
-
-Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ---
 

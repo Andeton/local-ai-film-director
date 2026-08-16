@@ -158,7 +158,7 @@
 **Tasks:**
 1. ReferenceAsset entity with kind/source separation, managed storage, SHA-256 provenance
 2. User-provided and WC media reference ingestion with image validation
-3. ComfyUI character reference generation (installed local model, versioned workflow)
+3. ComfyUI character reference generation (versioned/selectable workflow profiles, multiple models supported)
 4. Approval/pinning lifecycle independent from source freshness/staleness
 5. Deterministic ReferenceSelector (pinned+approved+current priority)
 6. H3 multi-reference binding evolution + empirically proven r2v_v2 workflow

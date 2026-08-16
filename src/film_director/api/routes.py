@@ -96,6 +96,8 @@ class GenerateReferenceRequest(BaseModel):
     kind: str = "character_body"
     profile_id: str | None = None
     seed: int | None = None
+    prompt_override: str | None = None
+    negative_prompt_override: str | None = None
 
     @model_validator(mode="after")
     def _valid_kind(self):
@@ -509,6 +511,8 @@ def create_router(
             kind=ref_kind,
             profile_id=body.profile_id,
             seed=body.seed,
+            prompt_override=body.prompt_override,
+            negative_prompt_override=body.negative_prompt_override,
         )
         return {
             "asset": result.asset.model_dump(),

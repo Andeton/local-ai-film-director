@@ -215,8 +215,15 @@ class ReferenceGenerationService:
         kind: ReferenceKind = ReferenceKind.CHARACTER_BODY,
         profile_id: str | None = None,
         seed: int | None = None,
+        prompt_override: str | None = None,
+        negative_prompt_override: str | None = None,
     ) -> ReferenceGenerationResult:
         """Generate a character reference image via ComfyUI.
+
+        When prompt_override is supplied, it replaces the auto-built prompt
+        entirely. The exact override text is persisted in the immutable
+        ReferenceGenerationRequest. negative_prompt_override similarly
+        replaces the default negative prompt.
 
         Returns ReferenceGenerationResult with CANDIDATE asset on success.
         Raises ReferenceGenerationError on failure.
@@ -232,9 +239,15 @@ class ReferenceGenerationService:
         else:
             profile = _get_default_profile()
 
-        # 2. Build prompt
-        prompt_text = _build_prompt(character_name, character_appearance, kind)
-        negative_text = _DEFAULT_NEGATIVE
+        # Validate overrides
+        if prompt_override is not None and not prompt_override.strip():
+            raise ReferenceGenerationError("prompt_override must not be empty")
+        if negative_prompt_override is not None and not negative_prompt_override.strip():
+            raise ReferenceGenerationError("negative_prompt_override must not be empty")
+
+        # 2. Build prompt (override or auto)
+        prompt_text = prompt_override if prompt_override else _build_prompt(character_name, character_appearance, kind)
+        negative_text = negative_prompt_override if negative_prompt_override else _DEFAULT_NEGATIVE
         appearance_hash = _compute_appearance_hash(character_appearance)
         actual_seed = seed if seed is not None else int.from_bytes(os.urandom(4), "big")
 

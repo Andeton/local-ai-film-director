@@ -41,13 +41,10 @@
 
 | Item | Value |
 |---|---|
-| Main last merged HEAD | `8a2222d` |
-| Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management` |
-| Active branch | `m5-reference-management` |
-| Current branch HEAD | *(see git log)* |
-| Last production-code HEAD | M5.C commit (reference generation service) |
+| Main HEAD | `d4e0fbe` (Merge M5: reference management) |
 | Deterministic tests | 1148 passed, 9 live deselected, 0 failed |
-| Current milestone | M5 — Reference Management (CLOSED) |
+| M5 live evidence tests | 2 passed (@pytest.mark.live) |
+| Current milestone | M5 — Reference Management (COMPLETE / CLOSED / MERGED) |
 
 **M5 Progress:**
 - M5.A: COMPLETE (ReferenceAsset + ReferenceGenerationRequest + ReferenceGenerationExecution)
@@ -59,9 +56,9 @@
 - M5.G: COMPLETE (10 API routes, multipart upload, lifecycle, selection, 34 tests)
 - M5.H: COMPLETE (live reference generation, human reject+approve cycle, real H3 generation, human influence PASS)
 
-**M5 Status:** COMPLETE / CLOSED — 26/26 exit criteria PASS. Branch ready for merge.
+**M5 Status:** COMPLETE / CLOSED / MERGED — 26/26 exit criteria PASS. Main contains accepted M5.
 
-**Next action:** Merge M5 to main, then M6 — Take Management.
+**Next action:** Prepare M6 implementation plan and create a separate M6 worktree/branch after user approval. M6 — Take Management. NOT STARTED.
 
 ---
 

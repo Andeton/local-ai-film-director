@@ -8,10 +8,9 @@
 
 **M5 — Reference Management**
 
-**Status:** COMPLETE / CLOSED
+**Status:** COMPLETE / CLOSED / MERGED
 
-Branch: `m5-reference-management`
-Worktree: `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management`
+Branch: `m5-reference-management` (merged to main at `d4e0fbe`)
 Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 
 **M5 Progress:**
@@ -117,9 +116,9 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 **M6 — Take Management**
 
-M5 is COMPLETE / CLOSED. Next: M6 — Take Management.
+M5 is COMPLETE / CLOSED / MERGED (main HEAD `d4e0fbe`).
 
-M6 must NOT begin until M5 is merged to main.
+Next: Prepare M6 implementation plan and create a separate M6 worktree/branch after user approval. M6 — Take Management. NOT STARTED.
 
 ---
 

@@ -92,6 +92,10 @@ class WindComicPreproductionError(FilmDirectorError):
     """Wind Comic pre-production pipeline error, SSE stream failure, or timeout."""
 
 
+class ReferenceLifecycleError(FilmDirectorError):
+    """Illegal lifecycle operation on a ReferenceAsset."""
+
+
 class ReferenceGenerationError(FilmDirectorError):
     """ComfyUI reference image generation failure."""
 

@@ -7,8 +7,8 @@ No H3 binding (M5.E). No API (M5.G).
 """
 from __future__ import annotations
 
-from film_director.errors import ReferenceResolutionError
-from film_director.models.canonical import ShotSpecificationV1
+from film_director.errors import ReferenceLifecycleError, ReferenceResolutionError
+from film_director.models.canonical import CharacterReference, ShotSpecificationV1
 from film_director.models.reference import (
     ReferenceAsset,
     ReferenceKind,
@@ -16,14 +16,6 @@ from film_director.models.reference import (
     ReferenceStatus,
 )
 from film_director.persistence.repositories import ReferenceAssetRepository
-
-
-class ReferenceLifecycleError(Exception):
-    """Illegal lifecycle operation on a ReferenceAsset."""
-
-    def __init__(self, message: str) -> None:
-        self.message = message
-        super().__init__(message)
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +70,7 @@ class ReferenceLifecycleService:
 class ReferenceSelector:
     """Provider-neutral deterministic reference selection per shot subject.
 
+    Validates subjects against canonical project characters before selecting.
     Returns ordered ReferenceAssets matching shot subjects. Does NOT create
     H3ReferenceBinding (M5.E). Does NOT modify inputs.
     """
@@ -87,18 +80,36 @@ class ReferenceSelector:
         shot: ShotSpecificationV1,
         project_id: str,
         kind: ReferenceKind,
+        characters: list[CharacterReference],
         assets: list[ReferenceAsset],
     ) -> list[ReferenceAsset]:
         """Select one eligible reference per shot subject, in subject order.
 
-        Raises ReferenceResolutionError if any subject has no eligible reference.
-        Never returns a partial result.
+        Validates each subject's character_id against the supplied project
+        characters. Raises ReferenceResolutionError if any subject has no
+        valid canonical character or no eligible reference. Never returns
+        a partial result.
         """
         if not shot.subjects:
             raise ReferenceResolutionError(
                 "Shot has no subjects",
                 detail=f"shot_id={shot.id}",
             )
+
+        # Build valid character set: only characters belonging to this project
+        valid_char_ids = {
+            c.id for c in characters
+            if c.project_id == project_id
+        }
+
+        # Validate all subjects against canonical characters BEFORE selection
+        for subject in shot.subjects:
+            if subject.character_id not in valid_char_ids:
+                raise ReferenceResolutionError(
+                    f"Subject character {subject.character_id} is not a valid "
+                    f"canonical character in project {project_id}",
+                    detail=f"character_id={subject.character_id}, project_id={project_id}",
+                )
 
         # Filter to eligible: APPROVED + CURRENT + correct project + correct kind
         eligible = [
@@ -111,9 +122,9 @@ class ReferenceSelector:
 
         # Sort by priority: pinned DESC, created_at DESC, id ASC
         eligible.sort(key=lambda a: (
-            not a.pinned,     # False (pinned) sorts before True (not pinned)
-            _invert_ts(a.created_at),  # newer first
-            a.id,             # ASC for tie-breaking
+            not a.pinned,
+            _invert_ts(a.created_at),
+            a.id,
         ))
 
         # Select one per subject in subject order
@@ -136,17 +147,5 @@ class ReferenceSelector:
 
 
 def _invert_ts(ts: str) -> str:
-    """Invert timestamp string for descending sort.
-
-    Works because ISO 8601 timestamps sort lexicographically.
-    Prefixing with a negative-sortable key achieves descending order
-    within a tuple that otherwise sorts ascending.
-    """
-    # For descending: we want newer timestamps to sort first.
-    # Since we're in a tuple with ASC sort, we negate by returning
-    # a string that sorts inversely. The simplest correct approach:
-    # return the complement characters.
-    # But actually, the sort key already handles this via tuple ordering.
-    # We just need to negate the string sort.
-    # Use a simpler approach: return negated ordinals.
+    """Invert timestamp string for descending sort within an ASC tuple."""
     return "".join(chr(0xFFFF - ord(c)) for c in ts) if ts else ""

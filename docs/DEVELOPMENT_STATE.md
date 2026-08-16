@@ -22,7 +22,7 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 - M5.E: NOT STARTED (next — H3 multi-reference binding + r2v_v2 workflow)
 - M5.F–M5.H: NOT STARTED
 
-**Baseline:** 1044 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1050 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 

@@ -67,7 +67,7 @@
 
 ## Next Approved Action
 
-**M4 — Wind Comic Production Handoff (IN PROGRESS)**
+**M4 — Wind Comic Production Handoff (TECHNICAL COMPLETE — pending merge)**
 
 Branch: `m4-wc-handoff`
 Worktree: `D:\Ai\Local AI Film Director\.worktrees\m4-wc-handoff`
@@ -81,9 +81,11 @@ Plan: `docs/superpowers/plans/2026-08-15-m4-wind-comic-production-handoff.md`
 - M4.E: COMPLETE — PreproductionService synchronous orchestrator (idea → WC SSE → persisted validation → import → enrich), artifact validation, error propagation
 - M4.F: COMPLETE — Reimport stale propagation: project source hash extended with director_plan + storyboard data, script/storyboard/director changes trigger project-level stale cascade, human edits + historical requests/takes preserved
 - M4.G: COMPLETE — POST /projects/from-idea synchronous API, PreproductionService wiring, WindComicPreproductionError→502 mapping, request/response DTOs
-- M4.H: NOT STARTED
+- M4.H: COMPLETE — Live acceptance: real idea → WC qwen3:14b pipeline → canonical import with source-fact precedence, 1 live test
 
-**Baseline:** 884 deterministic + 6 live deselected, 0 failed
+**M4 Status:** TECHNICAL COMPLETE (pending merge)
+
+**Baseline:** 884 deterministic + 7 live deselected, 0 failed
 
 **M3 Closure Evidence:**
 - Branch: `m3-h3-bridge`

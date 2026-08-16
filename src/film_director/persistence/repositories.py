@@ -75,15 +75,17 @@ class ProjectRepository:
         prov = project.provenance
         sql = """
             INSERT INTO production_projects
-                (id, wc_project_id, title, status, aspect, created_at, updated_at,
+                (id, wc_project_id, title, status, aspect, director_context,
+                 created_at, updated_at,
                  prov_source_system, prov_source_project_id, prov_source_asset_id,
                  prov_source_asset_version, prov_imported_at, prov_source_hash)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 wc_project_id           = excluded.wc_project_id,
                 title                   = excluded.title,
                 status                  = excluded.status,
                 aspect                  = excluded.aspect,
+                director_context        = excluded.director_context,
                 created_at              = excluded.created_at,
                 updated_at              = excluded.updated_at,
                 prov_source_system      = excluded.prov_source_system,
@@ -95,7 +97,8 @@ class ProjectRepository:
         """
         params = (
             project.id, project.wc_project_id, project.title,
-            project.status, project.aspect, project.created_at, project.updated_at,
+            project.status, project.aspect, json.dumps(project.director_context),
+            project.created_at, project.updated_at,
             prov.source_system, prov.source_project_id, prov.source_asset_id,
             prov.source_asset_version, prov.imported_at, prov.source_hash,
         )
@@ -143,6 +146,7 @@ class ProjectRepository:
             title=row["title"],
             status=row["status"],
             aspect=row["aspect"],
+            director_context=json.loads(row["director_context"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             provenance=_prov_from_row(row),

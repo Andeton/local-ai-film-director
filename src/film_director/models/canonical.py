@@ -15,6 +15,7 @@ class ProductionProject(BaseModel):
     title: str
     status: Literal["draft", "active", "outdated"] = "draft"
     aspect: str = "16:9"
+    director_context: dict = Field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
     provenance: Provenance  # REQUIRED — all M1 projects originate from WC

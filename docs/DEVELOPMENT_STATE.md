@@ -80,9 +80,10 @@ Plan: `docs/superpowers/plans/2026-08-15-m4-wind-comic-production-handoff.md`
 - M4.D: COMPLETE — Deterministic source-fact precedence in ShotSpecBuilder, EnrichmentService recomputation path, sentinel handling, partial camera merge, dialogue speaker resolution, project-scoped subject resolution
 - M4.E: COMPLETE — PreproductionService synchronous orchestrator (idea → WC SSE → persisted validation → import → enrich), artifact validation, error propagation
 - M4.F: COMPLETE — Reimport stale propagation: project source hash extended with director_plan + storyboard data, script/storyboard/director changes trigger project-level stale cascade, human edits + historical requests/takes preserved
-- M4.G–M4.H: NOT STARTED
+- M4.G: COMPLETE — POST /projects/from-idea synchronous API, PreproductionService wiring, WindComicPreproductionError→502 mapping, request/response DTOs
+- M4.H: NOT STARTED
 
-**Baseline:** 862 deterministic + 6 live deselected, 0 failed
+**Baseline:** 884 deterministic + 6 live deselected, 0 failed
 
 **M3 Closure Evidence:**
 - Branch: `m3-h3-bridge`

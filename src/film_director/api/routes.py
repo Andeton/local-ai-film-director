@@ -30,6 +30,13 @@ from film_director.services.import_service import ImportService
 # ---------------------------------------------------------------------------
 
 
+class FromIdeaRequest(BaseModel):
+    idea: str
+    style: str | None = None
+    aspect: str | None = None
+    language: str | None = None
+
+
 class BeatEditRequest(BaseModel):
     dramatic_action: str | None = None
     character_intention: str | None = None
@@ -88,6 +95,8 @@ def create_router(
     generation_service: GenerationService | None = None,
     comfyui_adapter: ComfyUIAdapter | None = None,
     request_repo: GenerationRequestRepository | None = None,
+    # M4 services
+    preproduction_service=None,  # PreproductionService | None
 ) -> APIRouter:
     router = APIRouter()
 
@@ -328,6 +337,31 @@ def create_router(
             "available": True,
             "system": result.get("system", {}),
             "devices": result.get("devices", []),
+        }
+
+    # ------------------------------------------------------------------
+    # M4 — Preproduction
+    # ------------------------------------------------------------------
+
+    @router.post("/projects/from-idea")
+    def create_from_idea(body: FromIdeaRequest) -> dict:
+        """Synchronous idea → WC pre-production → canonical import → enrichment.
+
+        Blocks until the full pipeline completes. No background job.
+        """
+        if preproduction_service is None:
+            raise HTTPException(status_code=501, detail="M4 preproduction not available")
+        result = preproduction_service.create_from_idea(
+            body.idea, style=body.style, aspect=body.aspect, language=body.language,
+        )
+        return {
+            "project_id": result.project_id,
+            "wc_project_id": result.wc_project_id,
+            "scenes_imported": result.import_result.scenes_imported,
+            "characters_imported": result.import_result.characters_imported,
+            "beats_created": result.enrichment_result.beats_created,
+            "shots_created": result.enrichment_result.shots_created,
+            "plans_created": result.enrichment_result.plans_created,
         }
 
     return router

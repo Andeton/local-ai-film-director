@@ -30,12 +30,14 @@ def build_project_source_payload(wc: WCProject) -> dict:
     """Return the stable fields from a WCProject used for hashing.
 
     Excludes volatile WC fields: status, user_id.
+    Includes script_data for M4 change detection.
     """
     return {
         "id": wc.id,
         "title": wc.title,
         "aspect": wc.aspect,
         "style_id": wc.style_id,
+        "script_data": wc.script_data,
     }
 
 

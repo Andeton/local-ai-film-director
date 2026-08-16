@@ -2,7 +2,7 @@
 import json
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 
 from film_director.errors import (
@@ -13,20 +13,25 @@ from film_director.errors import (
 )
 from film_director.models.wind_comic_dto import (
     WCCharacter,
+    WCDirectorPlan,
     WCHealth,
     WCProject,
     WCScene,
+    WCScriptShot,
     WCStoryboardShot,
 )
 
 
 @dataclass(frozen=True)
 class WCProjectBundle:
-    """Snapshot of a project with all its scenes and characters, read atomically."""
+    """Snapshot of a project with all artifacts, read atomically."""
 
     project: WCProject
     scenes: list[WCScene]
     characters: list[WCCharacter]
+    script_shots: list[WCScriptShot] = dataclass_field(default_factory=list)
+    storyboard_shots: list[WCStoryboardShot] = dataclass_field(default_factory=list)
+    director_plan: WCDirectorPlan | None = None
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +288,53 @@ class WindComicAdapter:
                     )
                 )
 
-            return WCProjectBundle(project=project, scenes=scenes, characters=characters)
+            # --- script shots from project.script_data ---
+            script_shots = self._parse_script_shots(project.script_data)
+
+            # --- storyboard shots ---
+            sb_rows = conn.execute(
+                "SELECT id, project_id, shot_number, data, media_urls, persistent_url, version"
+                " FROM project_assets"
+                " WHERE project_id = ? AND type = 'storyboard'"
+                " ORDER BY shot_number",
+                (project_id,),
+            ).fetchall()
+            storyboard_shots = []
+            for r in sb_rows:
+                d = self._parse_json_dict(r["data"], f"storyboard {r['id']}")
+                storyboard_shots.append(
+                    WCStoryboardShot(
+                        asset_id=r["id"],
+                        project_id=r["project_id"],
+                        shot_number=r["shot_number"] or 0,
+                        data=d,
+                        media_urls=self._parse_json_list(r["media_urls"], f"storyboard {r['id']} media_urls"),
+                        persistent_url=r["persistent_url"],
+                        version=r["version"] or 1,
+                    )
+                )
+
+            # --- Director plan (first plan asset) ---
+            director_plan = None
+            plan_row = conn.execute(
+                "SELECT data FROM project_assets"
+                " WHERE project_id = ? AND type = 'plan'"
+                " ORDER BY version DESC LIMIT 1",
+                (project_id,),
+            ).fetchone()
+            if plan_row:
+                plan_data = self._parse_json_dict(plan_row["data"], f"plan for {project_id}")
+                director_plan = WCDirectorPlan(
+                    genre=plan_data.get("genre", ""),
+                    style=plan_data.get("style", ""),
+                    story_structure=plan_data.get("storyStructure", {}),
+                )
+
+            return WCProjectBundle(
+                project=project, scenes=scenes, characters=characters,
+                script_shots=script_shots, storyboard_shots=storyboard_shots,
+                director_plan=director_plan,
+            )
         except sqlite3.OperationalError as e:
             msg = str(e)
             if "no such table" in msg or "no such column" in msg:
@@ -291,6 +342,28 @@ class WindComicAdapter:
             raise
         finally:
             conn.close()
+
+    @staticmethod
+    def _parse_script_shots(script_data: dict | None) -> list[WCScriptShot]:
+        """Extract script shots from project script_data JSON."""
+        if not script_data:
+            return []
+        shots = script_data.get("shots", [])
+        if not isinstance(shots, list):
+            return []
+        result = []
+        for s in shots:
+            if not isinstance(s, dict):
+                continue
+            result.append(WCScriptShot(
+                shot_number=s.get("shotNumber", 0),
+                scene_description=s.get("sceneDescription", ""),
+                characters=s.get("characters", []) if isinstance(s.get("characters"), list) else [],
+                dialogue=s.get("dialogue", ""),
+                action=s.get("action", ""),
+                emotion=s.get("emotion", ""),
+            ))
+        return result
 
     def get_storyboard(self, project_id: str) -> list[WCStoryboardShot]:
         """Fetch all storyboard shot assets for a project, ordered by shot_number.

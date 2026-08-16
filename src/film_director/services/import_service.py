@@ -131,12 +131,23 @@ class ImportService:
                 proj_payload = build_project_source_payload(bundle.project)
                 proj_hash = compute_source_hash(proj_payload)
 
+                # Build director_context from plan if available
+                director_context = {}
+                if bundle.director_plan is not None:
+                    dp = bundle.director_plan
+                    director_context = {
+                        "genre": dp.genre,
+                        "style": dp.style,
+                        "story_structure": dp.story_structure,
+                    }
+
                 project = ProductionProject(
                     id=project_id,
                     wc_project_id=wc_project_id,
                     title=bundle.project.title,
                     status="active",
                     aspect=bundle.project.aspect,
+                    director_context=director_context,
                     created_at=existing_project.created_at if existing_project else now,
                     updated_at=now,
                     provenance=Provenance(

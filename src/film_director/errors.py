@@ -9,7 +9,7 @@ class FilmDirectorError(Exception):
 
 
 class WindComicUnavailableError(FilmDirectorError):
-    """WC database file missing or unreadable."""
+    """WC service unreachable, database missing, or authentication failed."""
 
 
 class WindComicSchemaError(FilmDirectorError):
@@ -86,3 +86,7 @@ class GenerationError(FilmDirectorError):
 
 class MediaProcessingError(FilmDirectorError):
     """FFmpeg, media staging, or verification failure."""
+
+
+class WindComicPreproductionError(FilmDirectorError):
+    """Wind Comic pre-production pipeline error, SSE stream failure, or timeout."""

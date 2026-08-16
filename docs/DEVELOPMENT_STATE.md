@@ -67,10 +67,17 @@
 
 ## Next Approved Action
 
-**M4 — Wind Comic Production Handoff (PLANNED, NOT STARTED)**
+**M4 — Wind Comic Production Handoff (IN PROGRESS)**
 
-M3 merged to main. M4 implementation plan approved.
+Branch: `m4-wc-handoff`
+Worktree: `D:\Ai\Local AI Film Director\.worktrees\m4-wc-handoff`
 Plan: `docs/superpowers/plans/2026-08-15-m4-wind-comic-production-handoff.md`
+
+**M4 Progress:**
+- M4.A: COMPLETE — WindComicPreproductionClient (SSE + JWT auth, typed events, error taxonomy)
+- M4.B–M4.H: NOT STARTED
+
+**Baseline:** 692 deterministic + 6 live deselected, 0 failed
 
 **M3 Closure Evidence:**
 - Branch: `m3-h3-bridge`

@@ -27,4 +27,8 @@ class Settings(BaseSettings):
     comfyui_base_url: str = "http://127.0.0.1:8188"
     comfyui_generation_timeout: int = 600
 
+    windcomic_base_url: str = "http://127.0.0.1:3000"
+    windcomic_email: str = ""
+    windcomic_password: str = ""
+
     log_level: str = "INFO"

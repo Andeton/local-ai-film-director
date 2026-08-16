@@ -90,3 +90,11 @@ class MediaProcessingError(FilmDirectorError):
 
 class WindComicPreproductionError(FilmDirectorError):
     """Wind Comic pre-production pipeline error, SSE stream failure, or timeout."""
+
+
+class ReferenceGenerationError(FilmDirectorError):
+    """ComfyUI reference image generation failure."""
+
+
+class ReferenceIngestError(FilmDirectorError):
+    """Reference file validation, download, or storage failure."""

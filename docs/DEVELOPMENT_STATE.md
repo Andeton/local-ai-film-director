@@ -17,11 +17,11 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 **M5 Progress:**
 - M5.A: COMPLETE — ReferenceAsset (kind/source/ownership/lifecycle), ReferenceGenerationRequest (immutable), ReferenceGenerationExecution (mutable), 3 DB tables + indexes, 3 repositories
 - M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation (PNG/JPEG/WEBP), SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
-- M5.C1: PREFLIGHT COMPLETE — Z-Image Turbo (~5s, standard KSampler) and Krea 2 Turbo (~25s, Krea2PromptWeight) both verified runnable via ComfyUI REST. Both remain selectable candidates. ComfyUI 0.33.1, RTX 5090.
-- M5.C implementation: NOT STARTED (next — versioned/selectable generator profiles)
-- M5.D–M5.H: NOT STARTED
+- M5.C: COMPLETE — ReferenceGenerationService with versioned/selectable generator profiles (Z-Image Turbo v1 + Krea 2 Turbo v1), immutable ReferenceGenerationRequest snapshot, mutable execution lifecycle, ComfyUI submit/monitor/get_result/download, managed storage + SHA + dimensions on output CANDIDATE asset
+- M5.D: NOT STARTED (next — approval/pinning + deterministic selection)
+- M5.E–M5.H: NOT STARTED
 
-**Baseline:** 985 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1000 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
@@ -83,17 +83,11 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ## Next Approved Action
 
-**M5.C — Production reference-generation layer**
+**M5.D — Approval/pinning lifecycle + deterministic ReferenceSelector**
 
-M5.C1 preflight is COMPLETE (both Z-Image Turbo and Krea 2 Turbo verified runnable).
+M5.C is COMPLETE. Next: implement approval/reject/archive/pin operations and deterministic reference selection (pinned+approved+current > approved+current > error).
 
-Next implementation must create versioned/selectable generator workflow profiles for both verified models:
-- Z-Image Turbo (recommended default for CHARACTER_BODY, ~5s)
-- Krea 2 Turbo (selectable alternative, ~25s)
-
-No permanent single-model hard-code. ReferenceGenerationRequest must snapshot exact selected profile/model/workflow/settings.
-
-M5.D must NOT begin until M5.C is reviewed and accepted.
+M5.E must NOT begin until M5.D is reviewed and accepted.
 
 ---
 

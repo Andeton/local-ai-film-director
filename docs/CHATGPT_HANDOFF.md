@@ -44,19 +44,19 @@
 | Main last merged HEAD | `8a2222d` |
 | Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management` |
 | Active branch | `m5-reference-management` |
-| Current branch HEAD | `3e48b2c` (documentation finalized) |
-| Last production-code HEAD | `1d912d9` (M5.B fix) |
+| Current branch HEAD | *(see git log)* |
+| Last production-code HEAD | M5.C commit (reference generation service) |
 | Deterministic tests | 985 passed, 7 live deselected, 0 failed |
 | Current milestone | M5 — Reference Management |
 
 **M5 Progress:**
 - M5.A: COMPLETE (ReferenceAsset + ReferenceGenerationRequest + ReferenceGenerationExecution)
 - M5.B: COMPLETE (managed file ingest, user + WC HTTP, PIL validation, SHA-256, dedup)
-- M5.C1: PREFLIGHT COMPLETE (Z-Image Turbo + Krea 2 Turbo both verified runnable)
-- M5.C implementation: NOT STARTED (next)
-- M5.D–M5.H: NOT STARTED
+- M5.C: COMPLETE (versioned/selectable generator profiles for Z-Image Turbo + Krea 2 Turbo, ReferenceGenerationService with immutable request/execution audit)
+- M5.D: NOT STARTED (next — approval/pinning + deterministic selection)
+- M5.E–M5.H: NOT STARTED
 
-**Next action:** Continue M5.C — implement production reference-generation layer with versioned/selectable generator profiles for both verified models.
+**Next action:** M5.D — approval/pinning lifecycle and deterministic ReferenceSelector.
 
 ---
 

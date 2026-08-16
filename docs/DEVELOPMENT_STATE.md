@@ -19,11 +19,11 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 - M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation (PNG/JPEG/WEBP), SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
 - M5.C: COMPLETE — ReferenceGenerationService with versioned/selectable generator profiles (Z-Image Turbo v1 + Krea 2 Turbo v1), immutable ReferenceGenerationRequest snapshot, mutable execution lifecycle, ComfyUI submit/monitor/get_result/download, managed storage + SHA + dimensions on output CANDIDATE asset
 - M5.D: COMPLETE — ReferenceLifecycleService (approve/reject/archive/pin/unpin with invariant enforcement), ReferenceSelector (deterministic provider-neutral selection: pinned+approved+current > approved+current, created_at DESC, id ASC tie-break)
-- M5.E.1: PREFLIGHT COMPLETE — Two-reference H3 R2V proven (124 frames, 5.167s, human visual PASS). See docs/M5_E_PREFLIGHT.md.
-- M5.E implementation: NOT STARTED (next — binding evolution + r2v_v2 workflow)
-- M5.F–M5.H: NOT STARTED
+- M5.E: COMPLETE — H3ReferenceBinding evolution (nullable subject_index, independent picture_index, reference_asset_id/kind), r2v_v2 workflow (2 materialized ref slots, fingerprint-verified), WorkflowResolver.resolve_for_reference_count, PromptBuilder M5.E validation. Preflight: 2-ref H3 proven, human visual PASS.
+- M5.F: NOT STARTED (next — reference staleness on character appearance changes)
+- M5.G–M5.H: NOT STARTED
 
-**Baseline:** 1050 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1068 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
@@ -87,9 +87,9 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 **M5.E — H3 multi-reference binding evolution + r2v_v2 workflow**
 
-M5.E.1 preflight COMPLETE (2-reference H3 proven, human visual PASS). Next: implement H3ReferenceBinding evolution (nullable subject_index), new versioned r2v_v2 workflow, updated ParameterResolver/PromptBuilder.
+M5.E is COMPLETE. Next: M5.F — reference staleness on canonical character appearance changes.
 
-M5.F must NOT begin until M5.E is reviewed and accepted.
+M5.G must NOT begin until M5.F is reviewed and accepted.
 
 ---
 

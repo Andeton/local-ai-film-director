@@ -54,11 +54,11 @@
 - M5.B: COMPLETE (managed file ingest, user + WC HTTP, PIL validation, SHA-256, dedup)
 - M5.C: COMPLETE (versioned/selectable generator profiles, atomic finalization, dedup, model snapshot)
 - M5.D: COMPLETE (ReferenceLifecycleService + deterministic ReferenceSelector)
-- M5.E.1: PREFLIGHT COMPLETE (2-ref H3 R2V proven, 124 frames/5.167s, human visual PASS)
-- M5.E implementation: NOT STARTED (next — binding evolution + r2v_v2 workflow)
-- M5.F–M5.H: NOT STARTED
+- M5.E: COMPLETE (H3ReferenceBinding evolution, r2v_v2 workflow, resolve_for_reference_count, PromptBuilder update)
+- M5.F: NOT STARTED (next — reference staleness)
+- M5.G–M5.H: NOT STARTED
 
-**Next action:** M5.E implementation — H3ReferenceBinding evolution, r2v_v2 workflow, ParameterResolver/PromptBuilder updates.
+**Next action:** M5.F — reference staleness on canonical character appearance changes.
 
 ---
 

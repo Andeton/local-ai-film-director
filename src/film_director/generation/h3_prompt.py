@@ -72,23 +72,17 @@ class H3PromptBuilder:
         if not bindings:
             raise ReferenceResolutionError("Empty binding list — R2V requires at least one binding")
 
-        seen_subj: set[int] = set()
         seen_pic: set[int] = set()
         for i, b in enumerate(bindings):
-            expected_subj = i + 1
-            if b.subject_index != expected_subj:
+            expected_pic = i + 1
+            if b.picture_index != expected_pic:
                 raise ReferenceResolutionError(
-                    f"Non-sequential subject_index: expected {expected_subj}, got {b.subject_index}",
-                )
-            if b.subject_index in seen_subj:
-                raise ReferenceResolutionError(
-                    f"Duplicate subject_index: {b.subject_index}",
+                    f"Non-sequential picture_index: expected {expected_pic}, got {b.picture_index}",
                 )
             if b.picture_index in seen_pic:
                 raise ReferenceResolutionError(
                     f"Duplicate picture_index: {b.picture_index}",
                 )
-            seen_subj.add(b.subject_index)
             seen_pic.add(b.picture_index)
 
         # --- build sections ---
@@ -130,23 +124,26 @@ class H3PromptBuilder:
     def _build_subject_definitions(bindings: list[H3ReferenceBinding]) -> str:
         lines: list[str] = []
         for b in bindings:
-            lines.append(
-                f"<Subject {b.subject_index}> is {b.character_name} — {b.appearance} in <Picture {b.picture_index}>"
-            )
+            if b.subject_index is not None and b.character_name:
+                lines.append(
+                    f"<Subject {b.subject_index}> is {b.character_name} — {b.appearance or ''} in <Picture {b.picture_index}>"
+                )
+            # Non-subject bindings do not create Subject definitions
         return "\n".join(lines)
 
     @staticmethod
     def _build_summary(shot: ShotSpecificationV1, bindings: list[H3ReferenceBinding]) -> str:
-        names = ", ".join(b.character_name for b in bindings)
+        names = ", ".join(b.character_name for b in bindings if b.character_name)
         return f"{names}: {shot.action}. {shot.dramatic_purpose}."
 
     @staticmethod
     def _build_retention_analysis(bindings: list[H3ReferenceBinding]) -> str:
         lines: list[str] = []
         for b in bindings:
-            lines.append(
-                f"<Subject {b.subject_index}> fully_preserved — {b.appearance}"
-            )
+            if b.subject_index is not None and b.character_name:
+                lines.append(
+                    f"<Subject {b.subject_index}> fully_preserved — {b.appearance or ''}"
+                )
         return "\n".join(lines)
 
     @staticmethod

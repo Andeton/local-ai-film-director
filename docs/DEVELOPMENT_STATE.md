@@ -67,9 +67,10 @@
 
 ## Next Approved Action
 
-**Pending external review — select next milestone (M4+)**
+**M4 — Wind Comic Production Handoff (PLANNED, NOT STARTED)**
 
-M3 branch `m3-h3-bridge` is CLOSED. Merge to main when instructed.
+M3 merged to main. M4 implementation plan approved.
+Plan: `docs/superpowers/plans/2026-08-15-m4-wind-comic-production-handoff.md`
 
 **M3 Closure Evidence:**
 - Branch: `m3-h3-bridge`

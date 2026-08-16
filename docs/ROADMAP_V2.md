@@ -117,25 +117,35 @@
 
 ---
 
-### M4 — Beat + Coverage Enrichment Polish
+### M4 — Wind Comic Production Handoff
 
-**Goal:** Harden the enrichment layer with better LLM prompts, coverage templates, and human editing flow.
+> **Replaces:** Former M4 "Beat + Coverage Enrichment Polish". Enrichment quality improvements happen organically within source-fact precedence work; they no longer need a standalone milestone.
+
+**Goal:** Close the gap between user idea and canonical production data. Programmatically trigger Wind Comic pre-production, observe completion via SSE, import richer WC outputs (script dialogue/action/emotion, storyboard camera/lighting, Director context), and make enrichment consume source facts instead of regenerating them.
 
 **Tasks:**
-1. Improve beat decomposition prompts based on M3 learnings
-2. Coverage templates (master, medium, close-up, POV, reaction, insert, establishing, transition)
-3. Shot specification refinement based on actual H3 generation results
-4. Batch enrichment (process all shots in a project)
-5. API endpoints for editing beats, coverage, shot specs
+1. WC HTTP SSE client with JWT auth for `/api/create-stream`
+2. Source-neutral DialogueIntent and ShotSourceFacts canonical models
+3. Rich WC import: script shots, storyboard correlation, Director context, storyboard parsing
+4. Deterministic source-fact precedence in ShotSpecBuilder (WC facts > LLM inference)
+5. PreproductionService: idea → WC SSE → import → source-aware enrichment
+6. Reimport/stale propagation for script/storyboard changes
+7. Synchronous POST /projects/from-idea API
 
-**Dependencies:** M3 complete
+**Dependencies:** M3 complete, Wind Comic running with capable LLM
 
 **Exit Criteria:**
-- A 3-scene WC project enriched with beats and coverage
-- Coverage plan is cinematically appropriate
-- All shots have generation strategies assigned
+- User idea triggers WC pre-production programmatically
+- Script dialogue/action/emotion preserved in canonical production data
+- Storyboard camera/lighting extracted where parseable
+- Source facts override LLM re-inference; LLM fills gaps only
+- Re-import propagates stale for changed script/storyboard
+- No direct LFDirector writes to WC SQLite
+- One real idea → WC → canonical import works end-to-end
 
-**Out of Scope:** UI, continuity, review
+**Out of Scope:** Character image generation, reference ranking, multi-reference H3, UI, TTS/lip-sync
+
+**Implementation plan:** `docs/superpowers/plans/2026-08-15-m4-wind-comic-production-handoff.md`
 
 ---
 
@@ -291,7 +301,7 @@
 | M4 Director | DELEGATED to Wind Comic | |
 | M5 Character/Style | DELEGATED to Wind Comic | Our M5 manages references |
 | M6 Scene/Beat | SPLIT — WC scenes; our M2 adds beats |
-| M7 Coverage | Our M2 + M4 | New capability |
+| M7 Coverage | Our M2 + source-fact precedence in M4 | Source-aware enrichment |
 | M8 Storyboard | DELEGATED to Wind Comic | |
 | M9 Shot Spec | Our M2 | ShotSpecificationV1 |
 | M10 H3 Prompt | Our M3 | H3PromptBuilder |

@@ -46,8 +46,8 @@
 | Active branch | `m5-reference-management` |
 | Current branch HEAD | *(see git log)* |
 | Last production-code HEAD | M5.C commit (reference generation service) |
-| Deterministic tests | 1141 passed, 7 live deselected, 0 failed |
-| Current milestone | M5 — Reference Management |
+| Deterministic tests | 1148 passed, 9 live deselected, 0 failed |
+| Current milestone | M5 — Reference Management (CLOSED) |
 
 **M5 Progress:**
 - M5.A: COMPLETE (ReferenceAsset + ReferenceGenerationRequest + ReferenceGenerationExecution)
@@ -57,9 +57,11 @@
 - M5.E: COMPLETE (H3ReferenceResolver.resolve_from_assets + GenerationService ReferenceSelector wiring + count-based v1/v2 workflow + asset-provenance reference_snapshot + production integration tests)
 - M5.F: COMPLETE (shared compute_appearance_fingerprint, atomic stale propagation in import_project, GENERATED-only policy, no reactivation)
 - M5.G: COMPLETE (10 API routes, multipart upload, lifecycle, selection, 34 tests)
-- M5.H: NOT STARTED
+- M5.H: COMPLETE (live reference generation, human reject+approve cycle, real H3 generation, human influence PASS)
 
-**Next action:** M5.H — Live Acceptance. M5.G complete and awaiting review.
+**M5 Status:** COMPLETE / CLOSED — 26/26 exit criteria PASS. Branch ready for merge.
+
+**Next action:** Merge M5 to main, then M6 — Take Management.
 
 ---
 

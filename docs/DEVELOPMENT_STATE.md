@@ -8,7 +8,7 @@
 
 **M5 — Reference Management**
 
-**Status:** IN PROGRESS
+**Status:** COMPLETE / CLOSED
 
 Branch: `m5-reference-management`
 Worktree: `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management`
@@ -46,9 +46,14 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
   - Selected references: ReferenceSelector with default CHARACTER_BODY, missing eligible→409
   - Service wiring: ReferenceIngestService, ReferenceGenerationService, ReferenceLifecycleService, ReferenceSelector
   - 34 API tests (listing, upload, dedup, generation, lifecycle, selection, routing, error mapping)
-- M5.H: NOT STARTED
+- M5.H: COMPLETE — Live acceptance with human checkpoints
+  - H1: First candidate REJECTED (East Asian features), prompt-override correction (commit 88b4a9a), replacement candidate APPROVED + PINNED
+  - H2: Real H3 R2V generation using approved reference, human reference-influence PASS
+  - Path confinement fix for relative managed_path (commit 958d826)
+  - Quality limitations documented (1024x1024 facial detail, 1376x768 video resolution)
+  - 2 @pytest.mark.live tests (evidence verification, no re-generation)
 
-**Baseline:** 1141 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1148 deterministic + 9 live deselected (7 M1-M4 + 2 M5), 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
@@ -110,11 +115,11 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ## Next Approved Action
 
-**M5.H — Live Acceptance**
+**M6 — Take Management**
 
-M5.G is COMPLETE. Next: M5.H — live acceptance with human checkpoints.
+M5 is COMPLETE / CLOSED. Next: M6 — Take Management.
 
-M5.H must NOT begin until M5.G is reviewed and accepted.
+M6 must NOT begin until M5 is merged to main.
 
 ---
 

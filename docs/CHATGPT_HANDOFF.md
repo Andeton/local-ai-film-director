@@ -44,7 +44,8 @@
 | Main last merged HEAD | `8a2222d` |
 | Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management` |
 | Active branch | `m5-reference-management` |
-| Implementation HEAD | `1d912d9` |
+| Current branch HEAD | `3e48b2c` (documentation finalized) |
+| Last production-code HEAD | `1d912d9` (M5.B fix) |
 | Deterministic tests | 985 passed, 7 live deselected, 0 failed |
 | Current milestone | M5 — Reference Management |
 
@@ -213,4 +214,4 @@ Both models executed successfully. No ReferenceAsset or ReferenceGenerationReque
 2. `docs/DEVELOPMENT_STATE.md` (detailed milestone state)
 3. `docs/superpowers/plans/2026-08-16-m5-reference-management.md` (current plan)
 4. `docs/ROADMAP_V2.md` (strategic roadmap)
-5. `docs/ARCHITECTURE_V1.md` (frozen architecture — note: GenerationPlan engine_family/workflow_profile are STALE examples, not implemented)
+5. `docs/ARCHITECTURE_V1.md` (frozen architecture)

@@ -1,7 +1,7 @@
 # Architecture V1 — Local AI Film Director
 
 **Date:** 2026-08-14
-**Status:** Frozen (pending M1 implementation)
+**Status:** Frozen / Active Architecture
 **Architecture:** Hybrid Wind Comic Sidecar
 **ADRs:** ADR-001 through ADR-005
 

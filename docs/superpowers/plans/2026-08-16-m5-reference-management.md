@@ -214,7 +214,7 @@ workflows/
     r2v_v1.json                  # PRESERVE: M3 reproducibility
     r2v_v2.json                  # CREATE: 2-picture R2V (after M5.E preflight)
   reference/
-    z_image_v1.json              # CREATE: character ref generation (after M5.C preflight)
+    <versioned generator profile workflows>  # CREATE: selectable profiles for both Z-Image Turbo + Krea 2 Turbo (after M5.C preflight)
 tests/
   unit/
     test_reference_model.py

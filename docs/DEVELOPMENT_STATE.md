@@ -83,6 +83,18 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ## Next Approved Action
 
+**M5.C — Production reference-generation layer**
+
+M5.C1 preflight is COMPLETE (both Z-Image Turbo and Krea 2 Turbo verified runnable).
+
+Next implementation must create versioned/selectable generator workflow profiles for both verified models:
+- Z-Image Turbo (recommended default for CHARACTER_BODY, ~5s)
+- Krea 2 Turbo (selectable alternative, ~25s)
+
+No permanent single-model hard-code. ReferenceGenerationRequest must snapshot exact selected profile/model/workflow/settings.
+
+M5.D must NOT begin until M5.C is reviewed and accepted.
+
 ---
 
 ## Previous Milestones

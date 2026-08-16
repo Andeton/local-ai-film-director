@@ -78,7 +78,7 @@ def env(tmp_path):
     mock_comfyui = MagicMock()
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     svc = ReferenceGenerationService(
-        asset_repo=asset_repo, request_repo=req_repo, execution_repo=exec_repo,
+        db=db, asset_repo=asset_repo, request_repo=req_repo, execution_repo=exec_repo,
         comfyui=mock_comfyui, storage_root=storage_root, project_root=project_root,
     )
     return dict(db=db, svc=svc, mock_comfyui=mock_comfyui,

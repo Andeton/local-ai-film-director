@@ -194,6 +194,7 @@ class ReferenceGenerationService:
         comfyui: ComfyUIAdapter,
         storage_root: str,
         project_root: str,
+        db=None,  # Database instance for atomic transactions
     ) -> None:
         self._asset_repo = asset_repo
         self._request_repo = request_repo
@@ -201,6 +202,7 @@ class ReferenceGenerationService:
         self._comfyui = comfyui
         self._storage_root = storage_root
         self._project_root = project_root
+        self._db = db
 
     def generate_character_reference(
         self,
@@ -426,7 +428,7 @@ class ReferenceGenerationService:
                 execution_id=execution_id,
             )
 
-        # Create new asset + mark execution succeeded atomically
+        # Create new asset + mark execution succeeded in ONE transaction
         now = _now_iso()
         asset = ReferenceAsset(
             id=asset_id,
@@ -449,12 +451,24 @@ class ReferenceGenerationService:
         )
 
         try:
-            self._asset_repo.save(asset)
-            self._execution_repo.update_status(
-                execution_id, status="succeeded",
-                output_reference_asset_id=asset_id,
-                completed_at=_now_iso(),
-            )
+            if self._db is not None:
+                # Atomic: both operations in one transaction
+                with self._db.connection() as conn:
+                    self._asset_repo.save(asset, conn=conn)
+                    self._execution_repo.update_status(
+                        execution_id, status="succeeded",
+                        output_reference_asset_id=asset_id,
+                        completed_at=_now_iso(),
+                        conn=conn,
+                    )
+            else:
+                # Fallback sequential (no db instance — test-only safety net)
+                self._asset_repo.save(asset)
+                self._execution_repo.update_status(
+                    execution_id, status="succeeded",
+                    output_reference_asset_id=asset_id,
+                    completed_at=_now_iso(),
+                )
         except Exception:
             # Cleanup managed file on persistence failure
             try:

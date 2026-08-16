@@ -72,6 +72,7 @@ def env(tmp_path):
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     svc = ReferenceGenerationService(
+        db=db,
         asset_repo=asset_repo,
         request_repo=req_repo,
         execution_repo=exec_repo,

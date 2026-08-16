@@ -21,7 +21,7 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 - M5.D: NOT STARTED (next — approval/pinning + deterministic selection)
 - M5.E–M5.H: NOT STARTED
 
-**Baseline:** 1000 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1013 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 

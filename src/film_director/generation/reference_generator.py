@@ -14,7 +14,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -65,6 +64,9 @@ class ReferenceGeneratorProfile:
     seed_field: str
     output_node_id: str
     output_prefix_field: str
+    unet_model: str = ""
+    clip_model: str = ""
+    vae_model: str = ""
     default_steps: int = 8
     default_cfg: float = 1.5
     default_width: int = 1024
@@ -92,6 +94,9 @@ _Z_IMAGE_TURBO_V1 = ReferenceGeneratorProfile(
     seed_field="seed",
     output_node_id="9",
     output_prefix_field="filename_prefix",
+    unet_model="z_image_turbo_bf16.safetensors",
+    clip_model="qwen_3_4b.safetensors",
+    vae_model="ae.safetensors",
     default_steps=8,
     default_cfg=1.5,
     default_width=1024,
@@ -115,6 +120,9 @@ _KREA2_TURBO_V1 = ReferenceGeneratorProfile(
     seed_field="seed",
     output_node_id="9",
     output_prefix_field="filename_prefix",
+    unet_model="krea2_turbo_fp8_scaled.safetensors",
+    clip_model="Qwen3-VL-4B-Instruct-abliterated-fp8_scaled.safetensors",
+    vae_model="qwen_image_vae.safetensors",
     default_steps=8,
     default_cfg=1.0,
     default_width=1024,
@@ -241,6 +249,9 @@ class ReferenceGenerationService:
             workflow_definition_version=profile.version,
             workflow_template_fingerprint=profile.template_fingerprint,
             parameters_snapshot=[
+                {"name": "unet_model", "value": profile.unet_model},
+                {"name": "clip_model", "value": profile.clip_model},
+                {"name": "vae_model", "value": profile.vae_model},
                 {"name": "steps", "value": profile.default_steps},
                 {"name": "cfg", "value": profile.default_cfg},
                 {"name": "width", "value": profile.default_width},
@@ -337,7 +348,44 @@ class ReferenceGenerationService:
                 f"Failed to download generated image: {e}",
             ) from e
 
-        # 9. Validate downloaded image
+        # 9-11. Post-download: validate, dedup, persist, finalize
+        #        All failures mark execution failed + cleanup managed file
+        try:
+            return self._finalize_output(
+                managed_absolute=managed_absolute,
+                managed_relative=managed_relative,
+                asset_id=asset_id,
+                project_id=project_id,
+                character_id=character_id,
+                kind=kind,
+                request_id=request_id,
+                execution_id=execution_id,
+                appearance_hash=appearance_hash,
+            )
+        except ReferenceGenerationError:
+            raise
+        except Exception as e:
+            # Cleanup managed file on any unexpected failure
+            try:
+                if os.path.isfile(managed_absolute):
+                    os.remove(managed_absolute)
+                parent = os.path.dirname(managed_absolute)
+                if os.path.isdir(parent) and not os.listdir(parent):
+                    os.rmdir(parent)
+            except OSError:
+                pass
+            self._fail_execution(execution_id, f"finalization failed: {e}")
+            raise ReferenceGenerationError(
+                f"Post-download finalization failed: {e}",
+            ) from e
+
+    def _finalize_output(
+        self, *, managed_absolute, managed_relative, asset_id,
+        project_id, character_id, kind, request_id, execution_id,
+        appearance_hash,
+    ) -> ReferenceGenerationResult:
+        """Validate, dedup, persist asset, and finalize execution atomically."""
+        # Validate image
         img_info = _validate_image(managed_absolute)
         if img_info is None:
             try:
@@ -350,7 +398,36 @@ class ReferenceGenerationService:
         width, height, fmt = img_info
         content_sha256 = _compute_sha256(managed_absolute)
 
-        # 10. Create ReferenceAsset
+        # Dedup check: same project + owner + kind + SHA
+        existing = self._asset_repo.find_duplicate(
+            project_id=project_id,
+            character_id=character_id,
+            kind=kind,
+            content_sha256=content_sha256,
+        )
+        if existing is not None:
+            # Remove redundant downloaded file and its empty directory
+            try:
+                os.remove(managed_absolute)
+                parent = os.path.dirname(managed_absolute)
+                if os.path.isdir(parent) and not os.listdir(parent):
+                    os.rmdir(parent)
+            except OSError:
+                pass
+            # Mark execution succeeded with existing asset
+            self._execution_repo.update_status(
+                execution_id, status="succeeded",
+                output_reference_asset_id=existing.id,
+                completed_at=_now_iso(),
+            )
+            return ReferenceGenerationResult(
+                asset=existing,
+                request_id=request_id,
+                execution_id=execution_id,
+            )
+
+        # Create new asset + mark execution succeeded atomically
+        now = _now_iso()
         asset = ReferenceAsset(
             id=asset_id,
             project_id=project_id,
@@ -367,17 +444,27 @@ class ReferenceGenerationService:
             pinned=False,
             width=width,
             height=height,
-            created_at=_now_iso(),
-            updated_at=_now_iso(),
+            created_at=now,
+            updated_at=now,
         )
-        self._asset_repo.save(asset)
 
-        # 11. Mark execution succeeded
-        self._execution_repo.update_status(
-            execution_id, status="succeeded",
-            output_reference_asset_id=asset_id,
-            completed_at=_now_iso(),
-        )
+        try:
+            self._asset_repo.save(asset)
+            self._execution_repo.update_status(
+                execution_id, status="succeeded",
+                output_reference_asset_id=asset_id,
+                completed_at=_now_iso(),
+            )
+        except Exception:
+            # Cleanup managed file on persistence failure
+            try:
+                os.remove(managed_absolute)
+                parent = os.path.dirname(managed_absolute)
+                if os.path.isdir(parent) and not os.listdir(parent):
+                    os.rmdir(parent)
+            except OSError:
+                pass
+            raise
 
         return ReferenceGenerationResult(
             asset=asset,

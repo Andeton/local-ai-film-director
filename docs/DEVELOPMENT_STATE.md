@@ -77,9 +77,10 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 
 **M5 Progress:**
 - M5.A: COMPLETE — ReferenceAsset (kind/source/ownership/lifecycle), ReferenceGenerationRequest (immutable), ReferenceGenerationExecution (mutable lifecycle), 3 new DB tables + indexes, 3 new repositories
-- M5.B–M5.H: NOT STARTED
+- M5.B: COMPLETE — ReferenceIngestService (user upload + WC media), PIL image validation, SHA-256 content identity, managed storage with path confinement, idempotent semantic dedup, structured IngestOutcome
+- M5.C–M5.H: NOT STARTED
 
-**Baseline:** 941 deterministic + 7 live deselected, 0 failed
+**Baseline:** 965 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 

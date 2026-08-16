@@ -146,22 +146,25 @@ class H3ReferenceResolver:
                     detail=f"character_id={subject.character_id}",
                 )
 
-            local_path = asset.managed_path
-
-            # Path confinement: reject traversal, symlink escapes, outside-root paths
+            # Resolve managed_path: join with storage_root if relative
+            raw_path = asset.managed_path
             if self._storage_root is not None:
+                local_path = os.path.join(self._storage_root, raw_path)
+                # Path confinement: reject traversal, symlink escapes, outside-root paths
                 resolved = Path(local_path).resolve()
                 root = Path(self._storage_root).resolve()
                 if not resolved.is_relative_to(root):
                     raise ReferenceResolutionError(
-                        f"Managed path escapes storage root: {local_path}",
+                        f"Managed path escapes storage root: {raw_path}",
                         detail=f"asset_id={asset.id}, resolved={resolved}, root={root}",
                     )
+            else:
+                local_path = raw_path
 
             if not os.path.isfile(local_path):
                 raise ReferenceResolutionError(
                     f"Managed reference file does not exist: {local_path}",
-                    detail=f"asset_id={asset.id}, managed_path={local_path}",
+                    detail=f"asset_id={asset.id}, managed_path={raw_path}",
                 )
 
             # Re-verify SHA-256 against stored value

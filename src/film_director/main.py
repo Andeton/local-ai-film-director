@@ -48,6 +48,7 @@ from film_director.persistence.repositories import (
     GenerationRequestRepository,
     H3PromptRepository,
     ProjectRepository,
+    ReferenceAssetRepository,
     SceneRepository,
     SequenceRepository,
     ShotRepository,
@@ -127,6 +128,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     adapter = WindComicAdapter(settings.wc_database_path)
 
+    ref_asset_repo = ReferenceAssetRepository(db)
+
     import_service = ImportService(
         adapter=adapter,
         project_repo=project_repo,
@@ -134,6 +137,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         scene_repo=scene_repo,
         character_repo=char_repo,
         db=db,
+        ref_asset_repo=ref_asset_repo,
     )
 
     llm_provider = create_llm_provider(settings)

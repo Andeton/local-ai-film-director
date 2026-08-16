@@ -180,7 +180,9 @@ def _build_prompt(name: str, appearance: str, kind: ReferenceKind) -> str:
 
 
 def _compute_appearance_hash(appearance: str) -> str:
-    return hashlib.sha256(appearance.encode("utf-8")).hexdigest()
+    # Delegate to shared canonical helper (M5.F)
+    from film_director.models.reference import compute_appearance_fingerprint
+    return compute_appearance_fingerprint(appearance)
 
 
 class ReferenceGenerationService:

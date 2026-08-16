@@ -1110,6 +1110,34 @@ class ReferenceAssetRepository:
                 (int(pinned), asset_id),
             )
 
+    def mark_generated_stale_for_character(
+        self,
+        project_id: str,
+        character_id: str,
+        current_fingerprint: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Mark GENERATED + CURRENT refs as STALE when fingerprint mismatches.
+
+        Scoped by project_id + character_id + source=GENERATED + source_state=CURRENT.
+        Refs with source_fingerprint != current_fingerprint (or NULL) become STALE.
+        Already-STALE refs are not touched. USER_UPLOAD and WIND_COMIC are not touched.
+        Preserves status, pinned, SHA, path, provenance, dimensions, created_at.
+        Returns count of rows transitioned.
+        """
+        sql = """
+            UPDATE reference_assets
+            SET source_state = 'stale', updated_at = datetime('now')
+            WHERE project_id = ?
+              AND character_id = ?
+              AND source = 'generated'
+              AND source_state = 'current'
+              AND (source_fingerprint IS NULL OR source_fingerprint != ?)
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (project_id, character_id, current_fingerprint))
+            return cursor.rowcount
+
     @staticmethod
     def _row_to_asset(row: sqlite3.Row) -> ReferenceAsset:
         return ReferenceAsset(

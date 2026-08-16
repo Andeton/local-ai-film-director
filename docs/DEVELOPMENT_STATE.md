@@ -29,10 +29,18 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
   - PromptBuilder validation, M5.E.1 preflight (human visual PASS)
   - Unit tests (resolve_from_assets: order, SHA mismatch, missing file, character mismatch, count mismatch, path escape rejection, confinement acceptance)
   - Integration tests (two-asset: v2 workflow selected, node 200/201 image injection, asset provenance in snapshot, both subjects in prompt, rejected/stale ref errors)
-- M5.F: NOT STARTED
+- M5.F: COMPLETE — Reference staleness on character appearance changes
+  - Shared compute_appearance_fingerprint helper (models/reference.py, used by both generation and stale propagation)
+  - ReferenceAssetRepository.mark_generated_stale_for_character (scoped SQL: project+character+GENERATED+CURRENT, NULL fingerprint → STALE)
+  - Atomic integration in import_project: character UPSERT + stale transition in same DB transaction
+  - Rollback on failure: stale propagation error rolls back character appearance update
+  - GENERATED-only: USER_UPLOAD and WIND_COMIC untouched
+  - No reactivation: already-STALE remains STALE, revert appearance does not re-CURRENT
+  - Status, pinned, SHA, path, provenance, dimensions, created_at preserved
+  - 16 unit tests + 8 integration tests
 - M5.G–M5.H: NOT STARTED
 
-**Baseline:** 1083 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1107 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
@@ -94,11 +102,11 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ## Next Approved Action
 
-**M5.F — Reference Staleness**
+**M5.G — Reference Management API**
 
-M5.E is COMPLETE. Next: M5.F — propagate source freshness when character appearance changes.
+M5.F is COMPLETE. Next: M5.G — backend API endpoints for reference management.
 
-M5.F must NOT begin until M5.E is reviewed and accepted.
+M5.G must NOT begin until M5.F is reviewed and accepted.
 
 ---
 

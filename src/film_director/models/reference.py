@@ -3,9 +3,11 @@
 ReferenceAsset — source-neutral managed image reference.
 ReferenceGenerationRequest — immutable ComfyUI generation input snapshot.
 ReferenceGenerationExecution — mutable generation lifecycle.
+compute_appearance_fingerprint — shared helper for appearance hashing.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from enum import Enum
 from typing import Literal
@@ -13,6 +15,18 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator, field_validator
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def compute_appearance_fingerprint(appearance: str) -> str:
+    """SHA-256 fingerprint of a character appearance string.
+
+    Used by both reference generation (source_appearance_hash on
+    ReferenceGenerationRequest, source_fingerprint on ReferenceAsset)
+    and stale propagation (comparing against stored fingerprints).
+
+    Same canonical appearance value always produces the same fingerprint.
+    """
+    return hashlib.sha256(appearance.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------

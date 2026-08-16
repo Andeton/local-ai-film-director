@@ -246,7 +246,9 @@ class TestCorrelation:
         assert facts[99].action is None
         assert facts[99].duration_sec == 10.0
 
-    def test_duplicate_storyboard_shot_number_excluded(self, tmp_path):
+    def test_duplicate_storyboard_shot_number_raises(self, tmp_path):
+        """Duplicate storyboard shot_number → NormalizationError."""
+        from film_director.errors import NormalizationError
         wc_path = _create_wc_fixture(tmp_path)
         conn = sqlite3.connect(wc_path)
         conn.execute(
@@ -259,22 +261,28 @@ class TestCorrelation:
         conn.close()
         adapter = WindComicAdapter(wc_path)
         bundle = adapter.read_project_bundle("test-proj")
-        facts = build_shot_source_facts("test-proj", bundle.script_shots, bundle.storyboard_shots)
-        # Shot 1 should have script data but NO storyboard (ambiguous)
-        assert 1 in facts
-        assert facts[1].action == "walks into room"
-        assert facts[1].source_storyboard_asset_id is None
-        assert facts[1].storyboard_description == ""
+        with pytest.raises(NormalizationError, match="storyboard.*1"):
+            build_shot_source_facts("test-proj", bundle.script_shots, bundle.storyboard_shots)
 
-    def test_duplicate_script_shot_number_first_wins(self, tmp_path):
-        """Duplicate script shotNumber — first occurrence used, duplicate skipped."""
+    def test_duplicate_script_shot_number_raises(self, tmp_path):
+        """Duplicate script shotNumber → NormalizationError."""
+        from film_director.errors import NormalizationError
         script_shots = [
             WCScriptShot(1, "first", ["A"], "d1", "act1", "em1"),
             WCScriptShot(1, "dupe", ["B"], "d2", "act2", "em2"),
         ]
-        facts = build_shot_source_facts("proj", script_shots, [])
-        assert facts[1].action == "act1"
-        assert facts[1].characters == ["A"]
+        with pytest.raises(NormalizationError, match="script.*1"):
+            build_shot_source_facts("proj", script_shots, [])
+
+    def test_duplicate_error_contains_shot_number(self, tmp_path):
+        """Error message identifies the duplicated shot number."""
+        from film_director.errors import NormalizationError
+        script_shots = [
+            WCScriptShot(7, "a", [], "", "", ""),
+            WCScriptShot(7, "b", [], "", "", ""),
+        ]
+        with pytest.raises(NormalizationError, match="7"):
+            build_shot_source_facts("proj", script_shots, [])
 
 
 # ---------------------------------------------------------------------------

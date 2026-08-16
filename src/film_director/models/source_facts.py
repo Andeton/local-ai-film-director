@@ -149,7 +149,7 @@ def build_shot_source_facts(
     """Build ShotSourceFacts from WC script shots + storyboard shots.
 
     Correlates by shotNumber (project-local). Returns a dict keyed by
-    shotNumber. Deterministic: does NOT silently choose among duplicates.
+    shotNumber. Raises NormalizationError on duplicate shot numbers.
 
     Args:
         wc_project_id: WC project ID for provenance
@@ -158,28 +158,41 @@ def build_shot_source_facts(
 
     Returns:
         dict mapping shotNumber → ShotSourceFacts
+
+    Raises:
+        NormalizationError: duplicate shotNumber in script or storyboard
     """
+    from film_director.errors import NormalizationError
+
     # Index storyboard by shot_number (detect duplicates)
     sb_by_num: dict[int, Any] = {}
-    sb_dupes: set[int] = set()
     for sb in storyboard_shots:
         num = sb.shot_number
         if num in sb_by_num:
-            sb_dupes.add(num)
-        else:
-            sb_by_num[num] = sb
+            raise NormalizationError(
+                f"Duplicate storyboard shot_number {num} in WC project {wc_project_id}",
+                detail=f"storyboard shot_number={num}, project={wc_project_id}",
+            )
+        sb_by_num[num] = sb
 
-    result: dict[int, ShotSourceFacts] = {}
+    # Detect duplicate script shotNumbers
     seen_script_nums: set[int] = set()
-
     for ss in script_shots:
         num = ss.shot_number
         if num in seen_script_nums:
-            continue  # skip duplicate script shotNumber
+            raise NormalizationError(
+                f"Duplicate script shotNumber {num} in WC project {wc_project_id}",
+                detail=f"script shotNumber={num}, project={wc_project_id}",
+            )
         seen_script_nums.add(num)
 
+    result: dict[int, ShotSourceFacts] = {}
+
+    for ss in script_shots:
+        num = ss.shot_number
+
         # Correlate with storyboard
-        sb = sb_by_num.get(num) if num not in sb_dupes else None
+        sb = sb_by_num.get(num)
 
         # Parse storyboard description if available
         sb_desc = ""
@@ -220,7 +233,7 @@ def build_shot_source_facts(
 
     # Storyboard shots with no matching script shot — include as source facts
     for num, sb in sb_by_num.items():
-        if num not in result and num not in sb_dupes:
+        if num not in result:
             sb_desc = sb.data.get("description", "")
             sb_dur = sb.data.get("duration")
             duration = float(sb_dur) if isinstance(sb_dur, (int, float)) and sb_dur > 0 else None

@@ -38,9 +38,17 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
   - No reactivation: already-STALE remains STALE, revert appearance does not re-CURRENT
   - Status, pinned, SHA, path, provenance, dimensions, created_at preserved
   - 16 unit tests + 8 integration tests
-- M5.G–M5.H: NOT STARTED
+- M5.G: COMPLETE — Reference management API endpoints
+  - 10 routes: project/character listing, multipart upload/register, synchronous generate, approve/reject/archive/pin/unpin, shot selected-references
+  - Multipart upload: 50MB byte-bounded streaming, temp file cleanup on success+failure, client filename never controls path
+  - ReferenceNotFoundError(404) vs ReferenceLifecycleError(409) typed distinction
+  - ReferenceIngestError→422, ReferenceGenerationError→502, oversized→413
+  - Selected references: ReferenceSelector with default CHARACTER_BODY, missing eligible→409
+  - Service wiring: ReferenceIngestService, ReferenceGenerationService, ReferenceLifecycleService, ReferenceSelector
+  - 34 API tests (listing, upload, dedup, generation, lifecycle, selection, routing, error mapping)
+- M5.H: NOT STARTED
 
-**Baseline:** 1107 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1141 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
@@ -102,11 +110,11 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ## Next Approved Action
 
-**M5.G — Reference Management API**
+**M5.H — Live Acceptance**
 
-M5.F is COMPLETE. Next: M5.G — backend API endpoints for reference management.
+M5.G is COMPLETE. Next: M5.H — live acceptance with human checkpoints.
 
-M5.G must NOT begin until M5.F is reviewed and accepted.
+M5.H must NOT begin until M5.G is reviewed and accepted.
 
 ---
 

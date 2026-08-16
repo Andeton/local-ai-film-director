@@ -27,6 +27,10 @@ from film_director.errors import (
     NormalizationError,
     ParameterResolutionError,
     PersistenceError,
+    ReferenceGenerationError,
+    ReferenceIngestError,
+    ReferenceLifecycleError,
+    ReferenceNotFoundError,
     ReferenceResolutionError,
     UnsupportedStrategyError,
     WindComicArtifactMalformedError,
@@ -58,6 +62,8 @@ from film_director.adapters.wind_comic_preproduction import WindComicPreproducti
 from film_director.services.enrichment_service import EnrichmentService
 from film_director.services.import_service import ImportService
 from film_director.services.preproduction_service import PreproductionService
+from film_director.services.reference_lifecycle import ReferenceLifecycleService, ReferenceSelector
+from film_director.services.reference_service import ReferenceIngestService
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +82,10 @@ _ERROR_STATUS: dict[type, int] = {
     ComfyUIResultError: 502,
     UnsupportedStrategyError: 422,
     ReferenceResolutionError: 422,
+    ReferenceIngestError: 422,
+    ReferenceGenerationError: 502,
+    ReferenceNotFoundError: 404,
+    ReferenceLifecycleError: 409,
     ParameterResolutionError: 422,
     WorkflowTemplateError: 500,
     GenerationError: 500,
@@ -185,6 +195,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     request_repo = GenerationRequestRepository(db)
 
+    # M5 services
+    from film_director.persistence.repositories import (
+        ReferenceGenerationRequestRepository as RefGenReqRepo,
+        ReferenceGenerationExecutionRepository as RefGenExecRepo,
+    )
+    from film_director.generation.reference_generator import ReferenceGenerationService
+
+    ref_gen_req_repo = RefGenReqRepo(db)
+    ref_gen_exec_repo = RefGenExecRepo(db)
+    ref_ingest_service = ReferenceIngestService(
+        repo=ref_asset_repo,
+        storage_root=settings.storage_root,
+    )
+    ref_generation_service = ReferenceGenerationService(
+        asset_repo=ref_asset_repo,
+        request_repo=ref_gen_req_repo,
+        execution_repo=ref_gen_exec_repo,
+        comfyui=comfyui_adapter,
+        storage_root=settings.storage_root,
+        project_root=project_root,
+        db=db,
+    )
+    ref_lifecycle_service = ReferenceLifecycleService(ref_asset_repo)
+    ref_selector = ReferenceSelector()
+
     # M4 services
     wc_preproduction_client = WindComicPreproductionClient(
         base_url=settings.windcomic_base_url,
@@ -214,6 +249,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         comfyui_adapter=comfyui_adapter,
         request_repo=request_repo,
         preproduction_service=preproduction_service,
+        ref_asset_repo=ref_asset_repo,
+        ref_ingest_service=ref_ingest_service,
+        ref_generation_service=ref_generation_service,
+        ref_lifecycle_service=ref_lifecycle_service,
+        ref_selector=ref_selector,
     )
     app.include_router(router)
 

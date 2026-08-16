@@ -96,6 +96,10 @@ class ReferenceLifecycleError(FilmDirectorError):
     """Illegal lifecycle operation on a ReferenceAsset."""
 
 
+class ReferenceNotFoundError(FilmDirectorError):
+    """ReferenceAsset not found."""
+
+
 class ReferenceGenerationError(FilmDirectorError):
     """ComfyUI reference image generation failure."""
 

@@ -7,7 +7,7 @@ No H3 binding (M5.E). No API (M5.G).
 """
 from __future__ import annotations
 
-from film_director.errors import ReferenceLifecycleError, ReferenceResolutionError
+from film_director.errors import ReferenceLifecycleError, ReferenceNotFoundError, ReferenceResolutionError
 from film_director.models.canonical import CharacterReference, ShotSpecificationV1
 from film_director.models.reference import (
     ReferenceAsset,
@@ -31,7 +31,7 @@ class ReferenceLifecycleService:
     def _get_or_raise(self, reference_id: str) -> ReferenceAsset:
         asset = self._repo.get(reference_id)
         if asset is None:
-            raise ReferenceLifecycleError(f"Reference not found: {reference_id}")
+            raise ReferenceNotFoundError(f"Reference not found: {reference_id}")
         return asset
 
     def approve(self, reference_id: str) -> None:

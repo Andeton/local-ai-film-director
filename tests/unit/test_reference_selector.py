@@ -179,7 +179,8 @@ class TestLifecycle:
         assert a.managed_path == "references/proj-1/ref-1/original.png"
 
     def test_missing_reference(self, env):
-        with pytest.raises(ReferenceLifecycleError):
+        from film_director.errors import ReferenceNotFoundError
+        with pytest.raises(ReferenceNotFoundError):
             env["svc"].approve("nonexistent")
 
 

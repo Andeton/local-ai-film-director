@@ -77,9 +77,10 @@ Plan: `docs/superpowers/plans/2026-08-15-m4-wind-comic-production-handoff.md`
 - M4.A: COMPLETE — WindComicPreproductionClient (SSE + JWT auth, typed events, error taxonomy)
 - M4.B: COMPLETE — DialogueIntent, ShotSourceFacts (frozen transport), StoryboardParser (conservative regex), ProductionProject.director_context + DB migration
 - M4.C: COMPLETE — WCScriptShot/WCDirectorPlan DTOs, extended WCProjectBundle (script+storyboard+plan), shotNumber correlation, build_shot_source_facts, director_context import, source hash includes script_data
-- M4.D–M4.H: NOT STARTED
+- M4.D: COMPLETE — Deterministic source-fact precedence in ShotSpecBuilder, EnrichmentService recomputation path, sentinel handling, partial camera merge, dialogue speaker resolution, project-scoped subject resolution
+- M4.E–M4.H: NOT STARTED
 
-**Baseline:** 749 deterministic + 6 live deselected, 0 failed
+**Baseline:** 803 deterministic + 6 live deselected, 0 failed
 
 **M3 Closure Evidence:**
 - Branch: `m3-h3-bridge`

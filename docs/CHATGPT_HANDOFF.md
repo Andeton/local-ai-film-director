@@ -46,7 +46,7 @@
 | Active branch | `m5-reference-management` |
 | Current branch HEAD | *(see git log)* |
 | Last production-code HEAD | M5.C commit (reference generation service) |
-| Deterministic tests | 985 passed, 7 live deselected, 0 failed |
+| Deterministic tests | 1083 passed, 7 live deselected, 0 failed |
 | Current milestone | M5 — Reference Management |
 
 **M5 Progress:**
@@ -54,12 +54,10 @@
 - M5.B: COMPLETE (managed file ingest, user + WC HTTP, PIL validation, SHA-256, dedup)
 - M5.C: COMPLETE (versioned/selectable generator profiles, atomic finalization, dedup, model snapshot)
 - M5.D: COMPLETE (ReferenceLifecycleService + deterministic ReferenceSelector)
-- M5.E: PARTIAL — foundation complete, production integration remaining
-  - DONE: binding evolution, r2v_v2 workflow, WorkflowResolver, PromptBuilder, preflight, unit tests
-  - REMAINING: H3ReferenceResolver → ReferenceSelector/Asset integration, GenerationService count-based workflow selection, ParameterResolver two-slot injection, GenerationRequest snapshot with asset provenance, production-path integration tests
+- M5.E: COMPLETE (H3ReferenceResolver.resolve_from_assets + GenerationService ReferenceSelector wiring + count-based v1/v2 workflow + asset-provenance reference_snapshot + production integration tests)
 - M5.F–M5.H: NOT STARTED
 
-**Next action:** Finish M5.E production integration — replace legacy H3ReferenceResolver with ReferenceSelector/ReferenceAsset path, wire GenerationService to resolve_for_reference_count, add two-asset production integration tests.
+**Next action:** M5.F — Reference Staleness. M5.E complete and awaiting review.
 
 ---
 
@@ -180,7 +178,7 @@ Both models executed successfully. No ReferenceAsset or ReferenceGenerationReque
 - One ordered list drives: prompt Picture tags, upload order, workflow slots, GenerationRequest reference snapshot
 - No independent sorting in later layers
 - Multi-picture H3 behavior PROVEN at ComfyUI level — M5.E.1 preflight: 2 references, human visual PASS (see docs/M5_E_PREFLIGHT.md)
-- Production integration (H3ReferenceResolver → ReferenceSelector/Asset) NOT YET WIRED — M5.E PARTIAL
+- Production integration COMPLETE — GenerationService uses ReferenceSelector → resolve_from_assets → count-based workflow → asset-provenance snapshot
 - `workflows/h3/r2v_v1.json` must remain unchanged for M3 reproducibility
 
 ---

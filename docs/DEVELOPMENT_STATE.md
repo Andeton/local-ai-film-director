@@ -19,13 +19,20 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 - M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation (PNG/JPEG/WEBP), SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
 - M5.C: COMPLETE — ReferenceGenerationService with versioned/selectable generator profiles (Z-Image Turbo v1 + Krea 2 Turbo v1), immutable ReferenceGenerationRequest snapshot, mutable execution lifecycle, ComfyUI submit/monitor/get_result/download, managed storage + SHA + dimensions on output CANDIDATE asset
 - M5.D: COMPLETE — ReferenceLifecycleService (approve/reject/archive/pin/unpin with invariant enforcement), ReferenceSelector (deterministic provider-neutral selection: pinned+approved+current > approved+current, created_at DESC, id ASC tie-break)
-- M5.E: PARTIAL — binding/prompt/workflow foundation complete, production integration incomplete
-  - DONE: H3ReferenceBinding evolution (nullable subject_index, reference_asset_id/kind), r2v_v2 workflow (fingerprint-verified), WorkflowResolver.resolve_for_reference_count, PromptBuilder validation, M5.E.1 preflight (human visual PASS), unit tests
-  - REMAINING: ReferenceSelector/ReferenceAsset integration in H3ReferenceResolver, managed-path + SHA verification, two-binding construction with asset provenance, two-image upload ordering, ParameterResolver two-slot injection, GenerationService count-based v1/v2 selection, complete ordered GenerationRequest reference snapshots, full production-path integration tests
+- M5.E: COMPLETE — H3 multi-reference binding evolution + r2v_v2 workflow + production integration
+  - H3ReferenceBinding evolution (nullable subject_index, reference_asset_id/kind)
+  - r2v_v2 workflow (fingerprint-verified, 2 materialized LoadImage slots)
+  - WorkflowResolver.resolve_for_reference_count (v1 for 1 ref, v2 for 2)
+  - H3ReferenceResolver.resolve_from_assets() — builds bindings from ReferenceSelector output with managed-path confinement + SHA re-verification
+  - GenerationService wired: ReferenceSelector → resolve_from_assets → count-based workflow → asset-provenance reference_snapshot
+  - GenerationRequest.reference_snapshot includes reference_asset_id + reference_kind
+  - PromptBuilder validation, M5.E.1 preflight (human visual PASS)
+  - Unit tests (resolve_from_assets: order, SHA mismatch, missing file, character mismatch, count mismatch, path escape rejection, confinement acceptance)
+  - Integration tests (two-asset: v2 workflow selected, node 200/201 image injection, asset provenance in snapshot, both subjects in prompt, rejected/stale ref errors)
 - M5.F: NOT STARTED
 - M5.G–M5.H: NOT STARTED
 
-**Baseline:** 1068 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1083 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
@@ -87,17 +94,9 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ## Next Approved Action
 
-**M5.E — H3 multi-reference binding evolution + r2v_v2 workflow**
+**M5.F — Reference Staleness**
 
-M5.E is PARTIAL. Next: finish M5.E production integration only.
-
-Remaining M5.E work:
-- Replace legacy H3ReferenceResolver (first ref_images[0]) with ReferenceSelector + ReferenceAsset path
-- GenerationService must call resolve_for_reference_count (not hardcoded v1)
-- ParameterResolver must inject ref_image_0 + ref_image_1 for two-binding case
-- GenerationRequest.reference_snapshot must include reference_asset_id, reference_kind, SHA
-- Integration tests for complete two-asset production path
-- Review empty binding defaults (reference_asset_id="", reference_kind="")
+M5.E is COMPLETE. Next: M5.F — propagate source freshness when character appearance changes.
 
 M5.F must NOT begin until M5.E is reviewed and accepted.
 

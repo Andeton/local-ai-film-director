@@ -35,6 +35,13 @@ from film_director.models.canonical import (
     ShotSubject,
 )
 from film_director.models.provenance import Provenance
+from film_director.models.reference import (
+    ReferenceAsset,
+    ReferenceKind,
+    ReferenceSource,
+    ReferenceSourceState,
+    ReferenceStatus,
+)
 from film_director.persistence.database import Database
 from film_director.persistence.repositories import (
     BeatRepository,
@@ -43,6 +50,7 @@ from film_director.persistence.repositories import (
     GenerationRequestRepository,
     H3PromptRepository,
     ProjectRepository,
+    ReferenceAssetRepository,
     SceneRepository,
     SequenceRepository,
     ShotRepository,
@@ -79,8 +87,9 @@ def api_env(tmp_path):
     storage = os.path.join(str(tmp_path), "storage")
     os.makedirs(storage)
 
-    ref_dir = os.path.join(str(tmp_path), "refs")
-    os.makedirs(ref_dir)
+    # Place ref inside storage root (confinement-safe)
+    ref_dir = os.path.join(storage, "references", "proj-1")
+    os.makedirs(ref_dir, exist_ok=True)
     ref_path = os.path.join(ref_dir, "alice.png")
     with open(ref_path, "wb") as f:
         f.write(b"fake ref")
@@ -123,6 +132,21 @@ def api_env(tmp_path):
             duration_sec=5.0, resolution_intent={"aspect": "16:9"},
             seed_policy="fixed", seed=42,
             created_at="2026-01-01", updated_at="2026-01-01",
+        ), conn=conn)
+
+        # M5: Approved ReferenceAsset for char-1
+        import hashlib
+        ref_sha = hashlib.sha256(b"fake ref").hexdigest()
+        ReferenceAssetRepository(db).save(ReferenceAsset(
+            id="ref-1", project_id="proj-1", character_id="char-1",
+            kind=ReferenceKind.CHARACTER_BODY,
+            source=ReferenceSource.USER_UPLOAD,
+            managed_path=ref_path, content_sha256=ref_sha,
+            source_provenance="test-upload",
+            status=ReferenceStatus.APPROVED,
+            source_state=ReferenceSourceState.CURRENT,
+            width=64, height=64,
+            created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
         ), conn=conn)
 
     # Create mock ComfyUI

@@ -1075,6 +1075,34 @@ class ReferenceAssetRepository:
                 (state.value, asset_id),
             )
 
+    def find_duplicate(
+        self,
+        project_id: str,
+        kind: ReferenceKind,
+        content_sha256: str,
+        character_id: str | None = None,
+        shot_id: str | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> ReferenceAsset | None:
+        """Find existing asset with same project+owner+kind+SHA."""
+        if character_id:
+            sql = """SELECT * FROM reference_assets
+                     WHERE project_id = ? AND character_id = ? AND kind = ? AND content_sha256 = ?
+                     LIMIT 1"""
+            params = (project_id, character_id, kind.value, content_sha256)
+        elif shot_id:
+            sql = """SELECT * FROM reference_assets
+                     WHERE project_id = ? AND shot_id = ? AND kind = ? AND content_sha256 = ?
+                     LIMIT 1"""
+            params = (project_id, shot_id, kind.value, content_sha256)
+        else:
+            return None
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(sql, params).fetchone()
+        if row is None:
+            return None
+        return self._row_to_asset(row)
+
     def update_pinned(self, asset_id: str, pinned: bool, conn: sqlite3.Connection | None = None) -> None:
         with _use_conn(self._db, conn) as c:
             c.execute(

@@ -73,7 +73,8 @@ def env(tmp_path):
     _seed_project(db, "proj-002")
     repo = ReferenceAssetRepository(db)
     storage_root = str(tmp_path / "storage")
-    svc = ReferenceIngestService(repo=repo, storage_root=storage_root)
+    svc = ReferenceIngestService(repo=repo, storage_root=storage_root,
+                                 windcomic_base_url="http://wc.local:3000")
     return dict(db=db, repo=repo, svc=svc, tmp_path=tmp_path, storage_root=storage_root)
 
 

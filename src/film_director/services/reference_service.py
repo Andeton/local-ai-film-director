@@ -12,12 +12,14 @@ import hashlib
 import logging
 import os
 import shutil
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Literal
+from pathlib import Path
 
+import httpx
 from PIL import Image
 
 from film_director.models.reference import (
@@ -33,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 _SHA256_BUF = 65_536
 _SUPPORTED_FORMATS = {"PNG", "JPEG", "WEBP"}
+_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_HTTP_TIMEOUT = 30.0
+_SUPPORTED_SCHEMES = {"http", "https"}
 
 
 class IngestOutcome(str, Enum):
@@ -66,7 +71,6 @@ def _validate_image(path: str) -> tuple[int, int, str] | None:
     try:
         with Image.open(path) as img:
             img.verify()
-        # Re-open after verify (verify may invalidate the file object)
         with Image.open(path) as img:
             fmt = img.format
             if fmt not in _SUPPORTED_FORMATS:
@@ -84,12 +88,35 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_path_confined(absolute_path: str, storage_root: str) -> bool:
+    """Check that absolute_path is strictly inside storage_root using pathlib."""
+    try:
+        resolved = Path(absolute_path).resolve()
+        root = Path(storage_root).resolve()
+        return resolved.is_relative_to(root)
+    except (ValueError, OSError):
+        return False
+
+
 class ReferenceIngestService:
     """Manages reference asset file ingestion into managed storage."""
 
-    def __init__(self, repo: ReferenceAssetRepository, storage_root: str) -> None:
+    def __init__(
+        self,
+        repo: ReferenceAssetRepository,
+        storage_root: str,
+        windcomic_base_url: str = "http://127.0.0.1:3000",
+        http_client: httpx.Client | None = None,
+    ) -> None:
         self._repo = repo
         self._storage_root = storage_root
+        self._wc_base_url = windcomic_base_url.rstrip("/")
+        self._http_client = http_client
+
+    def _get_http_client(self) -> httpx.Client:
+        if self._http_client is not None:
+            return self._http_client
+        return httpx.Client(timeout=_HTTP_TIMEOUT)
 
     def register_user_reference(
         self,
@@ -100,13 +127,8 @@ class ReferenceIngestService:
         shot_id: str | None = None,
         source_fingerprint: str | None = None,
     ) -> IngestResult:
-        """Register a user-provided local file as a reference asset.
-
-        Validates image, computes SHA, copies to managed storage, persists
-        ReferenceAsset(CANDIDATE). Idempotent: returns DUPLICATE if same
-        project+owner+kind+SHA already exists.
-        """
-        return self._ingest(
+        """Register a user-provided local file as a reference asset."""
+        return self._ingest_from_file(
             project_id=project_id,
             kind=kind,
             source_path=source_path,
@@ -127,22 +149,37 @@ class ReferenceIngestService:
         shot_id: str | None = None,
         source_fingerprint: str | None = None,
     ) -> IngestResult:
-        """Ingest a Wind Comic media reference from a URL or local path.
-
-        For M5.B: supports local file paths and WC-served URLs.
-        Returns structured outcome per item.
-        """
+        """Ingest a Wind Comic media reference from a URL or local path."""
         if not media_url or not media_url.strip():
             return IngestResult(outcome=IngestOutcome.MISSING_SOURCE, detail="empty media_url")
 
-        # Resolve source: local file path or HTTP URL
+        media_url = media_url.strip()
+
+        # Relative URL → resolve against WC base
+        if media_url.startswith("/"):
+            media_url = f"{self._wc_base_url}{media_url}"
+
+        # HTTP/HTTPS download
         if media_url.startswith(("http://", "https://")):
-            # HTTP download — deferred to when real WC HTTP media is needed
-            # For now, treat as download_failed (M5.B supports local paths)
-            return IngestResult(
-                outcome=IngestOutcome.DOWNLOAD_FAILED,
-                detail=f"HTTP download not yet implemented: {media_url[:100]}",
+            return self._ingest_from_http(
+                project_id=project_id,
+                kind=kind,
+                url=media_url,
+                source=ReferenceSource.WIND_COMIC,
+                character_id=character_id,
+                shot_id=shot_id,
+                source_provenance=source_provenance,
+                source_fingerprint=source_fingerprint,
             )
+
+        # Check for unsupported schemes
+        if "://" in media_url:
+            scheme = media_url.split("://")[0].lower()
+            if scheme not in _SUPPORTED_SCHEMES:
+                return IngestResult(
+                    outcome=IngestOutcome.DOWNLOAD_FAILED,
+                    detail=f"unsupported scheme: {scheme}",
+                )
 
         # Local file path
         if not os.path.isfile(media_url):
@@ -151,7 +188,7 @@ class ReferenceIngestService:
                 detail=f"file not found: {media_url}",
             )
 
-        return self._ingest(
+        return self._ingest_from_file(
             project_id=project_id,
             kind=kind,
             source_path=media_url,
@@ -163,10 +200,83 @@ class ReferenceIngestService:
         )
 
     # ------------------------------------------------------------------
-    # Internal
+    # HTTP download
     # ------------------------------------------------------------------
 
-    def _ingest(
+    def _ingest_from_http(
+        self,
+        project_id: str,
+        kind: ReferenceKind,
+        url: str,
+        source: ReferenceSource,
+        character_id: str | None,
+        shot_id: str | None,
+        source_provenance: str,
+        source_fingerprint: str | None,
+    ) -> IngestResult:
+        """Download image from HTTP/HTTPS URL, then ingest from temp file."""
+        tmp_path = None
+        try:
+            client = self._get_http_client()
+            owns_client = self._http_client is None
+            try:
+                resp = client.get(url)
+            except (httpx.HTTPError, httpx.TransportError) as e:
+                return IngestResult(
+                    outcome=IngestOutcome.DOWNLOAD_FAILED,
+                    detail=f"transport error: {type(e).__name__}",
+                )
+            finally:
+                if owns_client:
+                    client.close()
+
+            if resp.status_code != 200:
+                return IngestResult(
+                    outcome=IngestOutcome.DOWNLOAD_FAILED,
+                    detail=f"HTTP {resp.status_code}",
+                )
+
+            content = resp.content
+            if len(content) > _MAX_DOWNLOAD_BYTES:
+                return IngestResult(
+                    outcome=IngestOutcome.DOWNLOAD_FAILED,
+                    detail=f"response exceeds {_MAX_DOWNLOAD_BYTES} bytes",
+                )
+
+            if not content:
+                return IngestResult(
+                    outcome=IngestOutcome.DOWNLOAD_FAILED,
+                    detail="empty response body",
+                )
+
+            # Write to temp file for image validation
+            suffix = os.path.splitext(url.split("?")[0])[-1] or ".tmp"
+            fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+
+            return self._ingest_from_file(
+                project_id=project_id,
+                kind=kind,
+                source_path=tmp_path,
+                source=source,
+                character_id=character_id,
+                shot_id=shot_id,
+                source_provenance=source_provenance,
+                source_fingerprint=source_fingerprint,
+            )
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    # ------------------------------------------------------------------
+    # File-based ingest (shared by user + local WC + downloaded HTTP)
+    # ------------------------------------------------------------------
+
+    def _ingest_from_file(
         self,
         project_id: str,
         kind: ReferenceKind,
@@ -190,8 +300,14 @@ class ReferenceIngestService:
         # 2. Compute SHA of source bytes
         content_sha256 = _compute_sha256(source_path)
 
-        # 3. Dedup check
-        existing = self._find_duplicate(project_id, character_id, shot_id, kind, content_sha256)
+        # 3. Dedup check via dedicated repository query
+        existing = self._repo.find_duplicate(
+            project_id=project_id,
+            character_id=character_id,
+            shot_id=shot_id,
+            kind=kind,
+            content_sha256=content_sha256,
+        )
         if existing is not None:
             return IngestResult(outcome=IngestOutcome.DUPLICATE, asset=existing)
 
@@ -199,30 +315,29 @@ class ReferenceIngestService:
         asset_id = f"ref_{uuid.uuid4().hex[:12]}"
         ext = _format_extension(fmt)
         relative_path = os.path.join("references", project_id, asset_id, f"original{ext}")
-        absolute_path = os.path.normpath(os.path.join(self._storage_root, relative_path))
-        # Path confinement: ensure resolved path stays within storage root
-        storage_real = os.path.normpath(self._storage_root)
-        if not absolute_path.startswith(storage_real + os.sep) and absolute_path != storage_real:
+        absolute_path = os.path.join(self._storage_root, relative_path)
+
+        # 5. Path confinement check (pathlib-based)
+        if not _is_path_confined(absolute_path, self._storage_root):
             return IngestResult(outcome=IngestOutcome.INVALID_IMAGE, detail="path confinement violation")
 
-        # 5. Copy to managed storage (preserving original bytes)
+        # 6. Copy to managed storage (preserving original bytes)
         os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
         try:
             shutil.copy2(source_path, absolute_path)
         except OSError as e:
             return IngestResult(outcome=IngestOutcome.INVALID_IMAGE, detail=f"copy failed: {e}")
 
-        # 6. Verify managed copy SHA matches
+        # 7. Verify managed copy SHA matches
         managed_sha = _compute_sha256(absolute_path)
         if managed_sha != content_sha256:
-            # Cleanup failed copy
             try:
                 os.remove(absolute_path)
             except OSError:
                 pass
             return IngestResult(outcome=IngestOutcome.INVALID_IMAGE, detail="SHA mismatch after copy")
 
-        # 7. Persist ReferenceAsset
+        # 8. Persist ReferenceAsset
         now = _now_iso()
         asset = ReferenceAsset(
             id=asset_id,
@@ -247,7 +362,6 @@ class ReferenceIngestService:
         try:
             self._repo.save(asset)
         except Exception:
-            # Cleanup managed file on DB failure
             try:
                 shutil.rmtree(os.path.dirname(absolute_path), ignore_errors=True)
             except OSError:
@@ -255,26 +369,3 @@ class ReferenceIngestService:
             raise
 
         return IngestResult(outcome=IngestOutcome.IMPORTED, asset=asset)
-
-    def _find_duplicate(
-        self,
-        project_id: str,
-        character_id: str | None,
-        shot_id: str | None,
-        kind: ReferenceKind,
-        content_sha256: str,
-    ) -> ReferenceAsset | None:
-        """Find existing asset with same project+owner+kind+SHA."""
-        if character_id:
-            candidates = self._repo.list_by_character(character_id)
-        elif shot_id:
-            candidates = self._repo.list_by_shot(shot_id)
-        else:
-            return None
-
-        for c in candidates:
-            if (c.project_id == project_id
-                    and c.kind == kind
-                    and c.content_sha256 == content_sha256):
-                return c
-        return None

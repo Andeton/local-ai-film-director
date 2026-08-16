@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from film_director.models.wind_comic_dto import WCCharacter, WCProject, WCScene
+    from film_director.models.wind_comic_dto import (
+        WCCharacter,
+        WCDirectorPlan,
+        WCProject,
+        WCScene,
+        WCStoryboardShot,
+    )
 
 
 @dataclass(frozen=True)
@@ -26,19 +32,42 @@ def compute_source_hash(data: dict) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def build_project_source_payload(wc: WCProject) -> dict:
+def build_project_source_payload(
+    wc: WCProject,
+    director_plan: WCDirectorPlan | None = None,
+    storyboard_shots: list[WCStoryboardShot] | None = None,
+) -> dict:
     """Return the stable fields from a WCProject used for hashing.
 
     Excludes volatile WC fields: status, user_id.
-    Includes script_data for M4 change detection.
+    Includes script_data (M4.C), director_plan and storyboard data (M4.F)
+    for comprehensive change detection.
     """
-    return {
+    payload: dict = {
         "id": wc.id,
         "title": wc.title,
         "aspect": wc.aspect,
         "style_id": wc.style_id,
         "script_data": wc.script_data,
     }
+    if director_plan is not None:
+        payload["director_plan"] = {
+            "genre": director_plan.genre,
+            "style": director_plan.style,
+            "story_structure": director_plan.story_structure,
+        }
+    if storyboard_shots:
+        payload["storyboard_data"] = [
+            {
+                "asset_id": sb.asset_id,
+                "shot_number": sb.shot_number,
+                "data": sb.data,
+                "media_urls": sb.media_urls,
+                "version": sb.version,
+            }
+            for sb in sorted(storyboard_shots, key=lambda s: s.shot_number)
+        ]
+    return payload
 
 
 def build_scene_source_payload(wc: WCScene) -> dict:

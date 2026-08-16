@@ -79,3 +79,61 @@ def test_project_payload_detects_aspect_change():
     p1 = WCProject(id="p1", title="F", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
     p2 = WCProject(id="p1", title="F", status="active", aspect="9:16", style_id=None, script_data=None, locked_characters=[])
     assert compute_source_hash(build_project_source_payload(p1)) != compute_source_hash(build_project_source_payload(p2))
+
+
+# ---------------------------------------------------------------------------
+# M4.F — director and storyboard hash detection
+# ---------------------------------------------------------------------------
+
+from film_director.models.wind_comic_dto import WCDirectorPlan, WCStoryboardShot
+
+
+def _proj():
+    return WCProject(id="p1", title="F", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
+
+
+def test_project_payload_detects_director_genre_change():
+    dp1 = WCDirectorPlan(genre="drama", style="noir", story_structure={})
+    dp2 = WCDirectorPlan(genre="comedy", style="noir", story_structure={})
+    h1 = compute_source_hash(build_project_source_payload(_proj(), director_plan=dp1))
+    h2 = compute_source_hash(build_project_source_payload(_proj(), director_plan=dp2))
+    assert h1 != h2
+
+
+def test_project_payload_detects_director_style_change():
+    dp1 = WCDirectorPlan(genre="drama", style="noir", story_structure={})
+    dp2 = WCDirectorPlan(genre="drama", style="cyberpunk", story_structure={})
+    h1 = compute_source_hash(build_project_source_payload(_proj(), director_plan=dp1))
+    h2 = compute_source_hash(build_project_source_payload(_proj(), director_plan=dp2))
+    assert h1 != h2
+
+
+def test_project_payload_detects_storyboard_description_change():
+    sb1 = [WCStoryboardShot("sb1", "p1", 1, {"description": "Wide shot"}, [], None, 1)]
+    sb2 = [WCStoryboardShot("sb1", "p1", 1, {"description": "Close up"}, [], None, 1)]
+    h1 = compute_source_hash(build_project_source_payload(_proj(), storyboard_shots=sb1))
+    h2 = compute_source_hash(build_project_source_payload(_proj(), storyboard_shots=sb2))
+    assert h1 != h2
+
+
+def test_project_payload_detects_storyboard_duration_change():
+    sb1 = [WCStoryboardShot("sb1", "p1", 1, {"duration": 5.0}, [], None, 1)]
+    sb2 = [WCStoryboardShot("sb1", "p1", 1, {"duration": 10.0}, [], None, 1)]
+    h1 = compute_source_hash(build_project_source_payload(_proj(), storyboard_shots=sb1))
+    h2 = compute_source_hash(build_project_source_payload(_proj(), storyboard_shots=sb2))
+    assert h1 != h2
+
+
+def test_project_payload_detects_storyboard_version_change():
+    sb1 = [WCStoryboardShot("sb1", "p1", 1, {}, [], None, 1)]
+    sb2 = [WCStoryboardShot("sb1", "p1", 1, {}, [], None, 2)]
+    h1 = compute_source_hash(build_project_source_payload(_proj(), storyboard_shots=sb1))
+    h2 = compute_source_hash(build_project_source_payload(_proj(), storyboard_shots=sb2))
+    assert h1 != h2
+
+
+def test_project_payload_no_director_backward_compat():
+    """Without director_plan/storyboard, hash matches old behavior."""
+    h1 = compute_source_hash(build_project_source_payload(_proj()))
+    h2 = compute_source_hash(build_project_source_payload(_proj(), director_plan=None, storyboard_shots=None))
+    assert h1 == h2

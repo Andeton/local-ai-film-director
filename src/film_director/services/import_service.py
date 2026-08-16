@@ -128,7 +128,11 @@ class ImportService:
                 existing_project = self._project_repo.get_project_by_wc_id(wc_project_id, conn=conn)
                 project_id = existing_project.id if existing_project else _gen_id("proj_")
 
-                proj_payload = build_project_source_payload(bundle.project)
+                proj_payload = build_project_source_payload(
+                    bundle.project,
+                    director_plan=bundle.director_plan,
+                    storyboard_shots=bundle.storyboard_shots,
+                )
                 proj_hash = compute_source_hash(proj_payload)
 
                 # Build director_context from plan if available
@@ -298,8 +302,12 @@ class ImportService:
 
         changes: list[ChangeDetection] = []
 
-        # --- Project-level ---
-        proj_payload = build_project_source_payload(bundle.project)
+        # --- Project-level (includes script, director, storyboard — M4.F) ---
+        proj_payload = build_project_source_payload(
+            bundle.project,
+            director_plan=bundle.director_plan,
+            storyboard_shots=bundle.storyboard_shots,
+        )
         proj_hash = compute_source_hash(proj_payload)
         if proj_hash != project.provenance.source_hash:
             changes.append(ChangeDetection(

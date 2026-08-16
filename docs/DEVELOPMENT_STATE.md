@@ -6,9 +6,9 @@
 
 ## Current Milestone
 
-**M3 — H3 Bridge (Vertical Slice)**
+**M4 — Wind Comic Production Handoff**
 
-**Status:** CLOSED — All 15 exit criteria PASS including human visual acceptance
+**Status:** CLOSED — 13/13 exit criteria PASS, real live acceptance with WC 12.320.0 + qwen3:14b. Known WC Writer quality limitation: empty dialogue + sentinel action/emotion in M4.H run (architecture handles correctly via fallback).
 
 ---
 
@@ -25,6 +25,7 @@
 | M1 | 2026-08-15 | Integration Core: Python 3.14.3, FastAPI scaffold, WC SQLite read-only adapter (real WC schema verified), canonical Project/Sequence/Scene/CharacterReference with provenance, atomic import with change detection (added/modified/deleted), SQLite persistence with UPSERT/UNIQUE/FK, Ollama LLM provider (gemma4:e4b structured JSON verified), API with 11 endpoints. 185 tests (182 deterministic + 3 live Ollama). |
 | M2 | 2026-08-16 | Production Specification: Beat/ShotSpecificationV1/GenerationPlan canonical models (model-agnostic, zero provider fields), BeatEnricher + CoveragePlanner (LLM object-wrapper contract, domain repair), deterministic ShotSpecBuilder (non-lossy character refs), deterministic StrategySelector (explicit context, 5-priority precedence), history-preserving re-enrichment (OUTDATED + new IDs, never delete), human editing API with stale propagation + force protection (409), atomic M1+M2 source-change cascade, 23 API endpoints total. 418 tests (413 deterministic + 5 live Ollama). Exit criteria 12/12 PASS. Backlog: _find_project_id_for_scene O(N) scan (MINOR). |
 | M3 | 2026-08-16 | H3 Bridge Vertical Slice: Shot → H3 R2V → ComfyUI → Take. H3ReferenceResolver (content SHA-256, first-ref-only), H3PromptBuilder (deterministic, binding-authority), WorkflowRegistry (fingerprint-verified r2v_v1.json), ParameterResolver (seconds injection, trained 124-362 frame range, explicit aspect mapping), ComfyUIAdapter (sync REST+WS, prompt_id filtering), INSERT-only GenerationRequest + UNIQUE Take repositories with atomic finalization, GenerationService (22-step pipeline with pre/post-request failure boundary), media staging (ffprobe + true last-frame extraction), API (POST generate, GET request, GET comfyui health). Real H3 R2V execution: 1376x768 h264+aac 5.167s in 3:51 on RTX 5090. Human visual acceptance PASS. 673 deterministic + 1 live ComfyUI + 5 live Ollama tests. Exit criteria 15/15 PASS. |
+| M4 | 2026-08-16 | Wind Comic Production Handoff: idea → WC SSE → canonical import → source-aware enrichment. WindComicPreproductionClient (JWT+SSE), ShotSourceFacts (frozen transport DTO), StoryboardParser (conservative regex), DialogueIntent (speaker resolution), deterministic source-fact precedence in ShotSpecBuilder (sentinel handling, partial camera merge), PreproductionService (synchronous orchestrator), reimport stale propagation (director+storyboard in hash), POST /projects/from-idea API. Real live acceptance: WC 12.320.0 + qwen3:14b, project 2NNXzW98y4CXQSVM5D8iY → proj_b8b1b8ab40b5 (1 scene, 2 chars, 18 shots, 18 plans). 884 deterministic + 7 live deselected. Exit criteria 13/13 PASS. Known limitation: WC Writer dialogue/action quality with qwen3:14b not production-ready. |
 
 ---
 
@@ -67,7 +68,7 @@
 
 ## Next Approved Action
 
-**M4 — Wind Comic Production Handoff (TECHNICAL COMPLETE — pending merge)**
+**M4 — Wind Comic Production Handoff (CLOSED)**
 
 Branch: `m4-wc-handoff`
 Worktree: `D:\Ai\Local AI Film Director\.worktrees\m4-wc-handoff`
@@ -83,7 +84,7 @@ Plan: `docs/superpowers/plans/2026-08-15-m4-wind-comic-production-handoff.md`
 - M4.G: COMPLETE — POST /projects/from-idea synchronous API, PreproductionService wiring, WindComicPreproductionError→502 mapping, request/response DTOs
 - M4.H: COMPLETE — Live acceptance: real idea → WC qwen3:14b pipeline → canonical import with source-fact precedence, 1 live test
 
-**M4 Status:** TECHNICAL COMPLETE (pending merge)
+**M4 Status:** CLOSED — 13/13 exit criteria PASS
 
 **Baseline:** 884 deterministic + 7 live deselected, 0 failed
 

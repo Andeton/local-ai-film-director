@@ -68,6 +68,19 @@
 
 ## Next Approved Action
 
+**M5 — Reference Management (PLANNED — NOT STARTED)**
+
+Architecture: FROZEN
+Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
+
+M5.A–M5.H: NOT STARTED
+
+Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
+
+---
+
+## Previous Milestones
+
 **M4 — Wind Comic Production Handoff (CLOSED)**
 
 Branch: `m4-wc-handoff`

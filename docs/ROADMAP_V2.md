@@ -151,24 +151,34 @@
 
 ### M5 — Reference Management
 
-**Goal:** Automatically collect and prepare reference images for H3 generation.
+> **Rescoped after M4:** Original M5 assumed WC reliably provides character images. M4 proved they may be absent. M5 now covers reference entity model, user/WC/generated ingestion, approval lifecycle, deterministic selection, and empirically-proven multi-reference H3 support.
+
+**Goal:** Manage image reference assets for canonical characters — ingestion (user/WC/ComfyUI-generated), provenance + review lifecycle with source freshness tracking, deterministic selection, provider-specific H3 multi-reference binding, and real character-reference generation with human approval.
 
 **Tasks:**
-1. Character reference collector — WC character images → ComfyUI input dir
-2. Scene reference collector — WC scene images
-3. Style reference collector — style bible frame
-4. Previous-frame reference — last frame from approved take
-5. Reference priority system (direct > prev_frame > character > scene > style)
-6. Image upload to ComfyUI input directory
+1. ReferenceAsset entity with kind/source separation, managed storage, SHA-256 provenance
+2. User-provided and WC media reference ingestion with image validation
+3. ComfyUI character reference generation (installed local model, versioned workflow)
+4. Approval/pinning lifecycle independent from source freshness/staleness
+5. Deterministic ReferenceSelector (pinned+approved+current priority)
+6. H3 multi-reference binding evolution + empirically proven r2v_v2 workflow
+7. Reference staleness propagation on character appearance changes
+8. Reference management backend API
 
-**Dependencies:** M3 complete (take generation proven)
+**Dependencies:** M4 complete (canonical characters with appearance data), ComfyUI with installed image model
 
 **Exit Criteria:**
-- For each shot, appropriate references auto-selected
-- References uploaded to ComfyUI input dir before submission
-- Reference images appear correctly in H3 R2V prompt as `<Picture N>`
+- Multiple managed ReferenceAssets per character with SHA-256 provenance
+- User-provided and generated references supported with approval lifecycle
+- CANDIDATE never auto-enters production; STALE never selected
+- Deterministic selection drives one authoritative binding list for H3
+- H3 R2V v2 workflow empirically consumes 2 real picture inputs
+- Real M4 character generates reference via ComfyUI, human approves, real H3 generation uses it
+- M0-M4 regressions green
 
-**Out of Scope:** UI, review
+**Out of Scope:** UI, previous-frame continuity (M7), multi-take queue (M6), AI visual reviewer (M8), scene/style references, prompt enhancer
+
+**Implementation plan:** `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 
 ---
 

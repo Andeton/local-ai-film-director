@@ -68,12 +68,18 @@
 
 ## Next Approved Action
 
-**M5 — Reference Management (PLANNED — NOT STARTED)**
+**M5 — Reference Management (IN PROGRESS)**
 
 Architecture: FROZEN
+Branch: `m5-reference-management`
+Worktree: `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management`
 Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 
-M5.A–M5.H: NOT STARTED
+**M5 Progress:**
+- M5.A: COMPLETE — ReferenceAsset (kind/source/ownership/lifecycle), ReferenceGenerationRequest (immutable), ReferenceGenerationExecution (mutable lifecycle), 3 new DB tables + indexes, 3 new repositories
+- M5.B–M5.H: NOT STARTED
+
+**Baseline:** 941 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 

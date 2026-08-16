@@ -17,6 +17,15 @@ from typing import Generator
 
 from film_director.errors import PersistenceError
 from film_director.generation.generation_request import GenerationRequest, Take
+from film_director.models.reference import (
+    ReferenceAsset,
+    ReferenceGenerationExecution,
+    ReferenceGenerationRequest,
+    ReferenceKind,
+    ReferenceSource,
+    ReferenceSourceState,
+    ReferenceStatus,
+)
 from film_director.generation.h3_prompt import H3PromptV1
 from film_director.models.canonical import (
     Beat,
@@ -969,4 +978,289 @@ class TakeRepository:
             last_frame_path=row["last_frame_path"],
             status=row["status"],
             created_at=row["created_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# ReferenceAssetRepository (M5)
+# ---------------------------------------------------------------------------
+
+class ReferenceAssetRepository:
+    """UPSERT-based persistence for ReferenceAsset."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save(self, asset: ReferenceAsset, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO reference_assets
+                (id, project_id, character_id, shot_id, kind, source,
+                 managed_path, content_sha256, source_provenance,
+                 source_fingerprint, status, source_state, pinned,
+                 width, height, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                project_id         = excluded.project_id,
+                character_id       = excluded.character_id,
+                shot_id            = excluded.shot_id,
+                kind               = excluded.kind,
+                source             = excluded.source,
+                managed_path       = excluded.managed_path,
+                content_sha256     = excluded.content_sha256,
+                source_provenance  = excluded.source_provenance,
+                source_fingerprint = excluded.source_fingerprint,
+                status             = excluded.status,
+                source_state       = excluded.source_state,
+                pinned             = excluded.pinned,
+                width              = excluded.width,
+                height             = excluded.height,
+                created_at         = excluded.created_at,
+                updated_at         = excluded.updated_at
+        """
+        params = (
+            asset.id, asset.project_id, asset.character_id, asset.shot_id,
+            asset.kind.value, asset.source.value, asset.managed_path,
+            asset.content_sha256, asset.source_provenance, asset.source_fingerprint,
+            asset.status.value, asset.source_state.value, int(asset.pinned),
+            asset.width, asset.height, asset.created_at, asset.updated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save reference asset", str(exc)) from exc
+
+    def get(self, asset_id: str, conn: sqlite3.Connection | None = None) -> ReferenceAsset | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute("SELECT * FROM reference_assets WHERE id = ?", (asset_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_asset(row)
+
+    def list_by_project(self, project_id: str, conn: sqlite3.Connection | None = None) -> list[ReferenceAsset]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM reference_assets WHERE project_id = ? ORDER BY created_at, id",
+                (project_id,),
+            ).fetchall()
+        return [self._row_to_asset(r) for r in rows]
+
+    def list_by_character(self, character_id: str, conn: sqlite3.Connection | None = None) -> list[ReferenceAsset]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM reference_assets WHERE character_id = ? ORDER BY created_at, id",
+                (character_id,),
+            ).fetchall()
+        return [self._row_to_asset(r) for r in rows]
+
+    def list_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> list[ReferenceAsset]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM reference_assets WHERE shot_id = ? ORDER BY created_at, id",
+                (shot_id,),
+            ).fetchall()
+        return [self._row_to_asset(r) for r in rows]
+
+    def update_status(self, asset_id: str, status: ReferenceStatus, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute(
+                "UPDATE reference_assets SET status = ?, updated_at = datetime('now') WHERE id = ?",
+                (status.value, asset_id),
+            )
+
+    def update_source_state(self, asset_id: str, state: ReferenceSourceState, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute(
+                "UPDATE reference_assets SET source_state = ?, updated_at = datetime('now') WHERE id = ?",
+                (state.value, asset_id),
+            )
+
+    def update_pinned(self, asset_id: str, pinned: bool, conn: sqlite3.Connection | None = None) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute(
+                "UPDATE reference_assets SET pinned = ?, updated_at = datetime('now') WHERE id = ?",
+                (int(pinned), asset_id),
+            )
+
+    @staticmethod
+    def _row_to_asset(row: sqlite3.Row) -> ReferenceAsset:
+        return ReferenceAsset(
+            id=row["id"],
+            project_id=row["project_id"],
+            character_id=row["character_id"],
+            shot_id=row["shot_id"],
+            kind=ReferenceKind(row["kind"]),
+            source=ReferenceSource(row["source"]),
+            managed_path=row["managed_path"],
+            content_sha256=row["content_sha256"],
+            source_provenance=row["source_provenance"],
+            source_fingerprint=row["source_fingerprint"],
+            status=ReferenceStatus(row["status"]),
+            source_state=ReferenceSourceState(row["source_state"]),
+            pinned=bool(row["pinned"]),
+            width=row["width"],
+            height=row["height"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# ReferenceGenerationRequestRepository (M5) — INSERT-ONLY
+# ---------------------------------------------------------------------------
+
+class ReferenceGenerationRequestRepository:
+    """INSERT-ONLY persistence for immutable reference generation requests."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create(self, request: ReferenceGenerationRequest, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO reference_generation_requests
+                (id, project_id, character_id, requested_kind,
+                 source_appearance_hash, prompt, negative_prompt,
+                 workflow_definition_id, workflow_definition_version,
+                 workflow_template_fingerprint, parameters_snapshot,
+                 seed, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """
+        params = (
+            request.id, request.project_id, request.character_id,
+            request.requested_kind.value, request.source_appearance_hash,
+            request.prompt, request.negative_prompt,
+            request.workflow_definition_id, request.workflow_definition_version,
+            request.workflow_template_fingerprint,
+            json.dumps(request.parameters_snapshot),
+            request.seed, request.created_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to create ref gen request", str(exc)) from exc
+
+    def get(self, request_id: str, conn: sqlite3.Connection | None = None) -> ReferenceGenerationRequest | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM reference_generation_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return ReferenceGenerationRequest(
+            id=row["id"],
+            project_id=row["project_id"],
+            character_id=row["character_id"],
+            requested_kind=ReferenceKind(row["requested_kind"]),
+            source_appearance_hash=row["source_appearance_hash"],
+            prompt=row["prompt"],
+            negative_prompt=row["negative_prompt"],
+            workflow_definition_id=row["workflow_definition_id"],
+            workflow_definition_version=row["workflow_definition_version"],
+            workflow_template_fingerprint=row["workflow_template_fingerprint"],
+            parameters_snapshot=json.loads(row["parameters_snapshot"]),
+            seed=row["seed"],
+            created_at=row["created_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# ReferenceGenerationExecutionRepository (M5)
+# ---------------------------------------------------------------------------
+
+class ReferenceGenerationExecutionRepository:
+    """Persistence for reference generation executions. INSERT + lifecycle updates."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create(self, execution: ReferenceGenerationExecution, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO reference_generation_executions
+                (id, request_id, status, comfyui_prompt_id,
+                 output_reference_asset_id, submitted_at, completed_at,
+                 error, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        """
+        params = (
+            execution.id, execution.request_id, execution.status,
+            execution.comfyui_prompt_id, execution.output_reference_asset_id,
+            execution.submitted_at, execution.completed_at, execution.error,
+            execution.created_at, execution.updated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to create ref gen execution", str(exc)) from exc
+
+    def get(self, execution_id: str, conn: sqlite3.Connection | None = None) -> ReferenceGenerationExecution | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM reference_generation_executions WHERE id = ?", (execution_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_execution(row)
+
+    def list_by_request(self, request_id: str, conn: sqlite3.Connection | None = None) -> list[ReferenceGenerationExecution]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM reference_generation_executions WHERE request_id = ? ORDER BY created_at, id",
+                (request_id,),
+            ).fetchall()
+        return [self._row_to_execution(r) for r in rows]
+
+    def update_status(
+        self, execution_id: str, *,
+        status: str,
+        comfyui_prompt_id: str | None = None,
+        output_reference_asset_id: str | None = None,
+        submitted_at: str | None = None,
+        completed_at: str | None = None,
+        error: str | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        sets = ["status = ?", "updated_at = datetime('now')"]
+        params: list = [status]
+        if comfyui_prompt_id is not None:
+            sets.append("comfyui_prompt_id = ?")
+            params.append(comfyui_prompt_id)
+        if output_reference_asset_id is not None:
+            sets.append("output_reference_asset_id = ?")
+            params.append(output_reference_asset_id)
+        if submitted_at is not None:
+            sets.append("submitted_at = ?")
+            params.append(submitted_at)
+        if completed_at is not None:
+            sets.append("completed_at = ?")
+            params.append(completed_at)
+        if error is not None:
+            sets.append("error = ?")
+            params.append(error)
+        params.append(execution_id)
+        sql = f"UPDATE reference_generation_executions SET {', '.join(sets)} WHERE id = ?"
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to update ref gen execution", str(exc)) from exc
+
+    @staticmethod
+    def _row_to_execution(row: sqlite3.Row) -> ReferenceGenerationExecution:
+        return ReferenceGenerationExecution(
+            id=row["id"],
+            request_id=row["request_id"],
+            status=row["status"],
+            comfyui_prompt_id=row["comfyui_prompt_id"],
+            output_reference_asset_id=row["output_reference_asset_id"],
+            submitted_at=row["submitted_at"],
+            completed_at=row["completed_at"],
+            error=row["error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )

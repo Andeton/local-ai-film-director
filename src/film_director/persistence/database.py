@@ -197,6 +197,68 @@ CREATE TABLE IF NOT EXISTS takes (
     FOREIGN KEY (shot_id) REFERENCES shots(id),
     FOREIGN KEY (generation_request_id) REFERENCES generation_requests(id)
 );
+
+CREATE TABLE IF NOT EXISTS reference_assets (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    character_id TEXT,
+    shot_id TEXT,
+    kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    managed_path TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    source_provenance TEXT NOT NULL,
+    source_fingerprint TEXT,
+    status TEXT NOT NULL DEFAULT 'candidate',
+    source_state TEXT NOT NULL DEFAULT 'current',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES production_projects(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reference_assets_project ON reference_assets(project_id);
+CREATE INDEX IF NOT EXISTS idx_reference_assets_character ON reference_assets(character_id);
+CREATE INDEX IF NOT EXISTS idx_reference_assets_shot ON reference_assets(shot_id);
+CREATE INDEX IF NOT EXISTS idx_reference_assets_sha ON reference_assets(content_sha256);
+
+CREATE TABLE IF NOT EXISTS reference_generation_requests (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    character_id TEXT NOT NULL,
+    requested_kind TEXT NOT NULL,
+    source_appearance_hash TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    negative_prompt TEXT NOT NULL DEFAULT '',
+    workflow_definition_id TEXT NOT NULL,
+    workflow_definition_version TEXT NOT NULL,
+    workflow_template_fingerprint TEXT NOT NULL,
+    parameters_snapshot TEXT NOT NULL DEFAULT '[]',
+    seed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES production_projects(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ref_gen_requests_project ON reference_generation_requests(project_id);
+CREATE INDEX IF NOT EXISTS idx_ref_gen_requests_character ON reference_generation_requests(character_id);
+
+CREATE TABLE IF NOT EXISTS reference_generation_executions (
+    id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    comfyui_prompt_id TEXT,
+    output_reference_asset_id TEXT,
+    submitted_at TEXT,
+    completed_at TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (request_id) REFERENCES reference_generation_requests(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ref_gen_exec_request ON reference_generation_executions(request_id);
 """
 
 

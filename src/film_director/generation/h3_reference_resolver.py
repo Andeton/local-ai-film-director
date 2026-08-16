@@ -1,14 +1,14 @@
-"""H3ReferenceResolver — minimal M3 reference resolution.
+"""H3ReferenceResolver — reference resolution for H3 R2V generation.
 
-Iterates shot.subjects in declaration order, matches each to a
-CharacterReference by character_id, selects the first ref_images path,
-validates the file, computes SHA-256, and returns frozen H3ReferenceBinding
-instances.  Upload filenames remain empty — M3.G owns the upload transition.
+M3 legacy: resolve() iterates shot.subjects, selects first ref_images path.
+M5 production: resolve_from_assets() builds bindings from ReferenceSelector
+output (ReferenceAsset list) with full asset provenance.
 """
 from __future__ import annotations
 
 import hashlib
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from film_director.errors import ReferenceResolutionError
@@ -16,12 +16,21 @@ from film_director.generation.h3_types import H3ReferenceBinding
 
 if TYPE_CHECKING:
     from film_director.models.canonical import CharacterReference, ShotSpecificationV1
+    from film_director.models.reference import ReferenceAsset
 
 _SHA256_BUF = 65_536  # 64 KiB read chunks
 
 
 class H3ReferenceResolver:
-    """Minimal M3 reference resolver — first ref_images path only."""
+    """Reference resolution for H3 R2V generation.
+
+    M3 legacy path: resolve() reads from shot.subjects[].ref_images.
+    M5 production path: resolve_from_assets() uses ReferenceSelector output
+    with managed-path confinement + SHA re-verification.
+    """
+
+    def __init__(self, storage_root: str | None = None) -> None:
+        self._storage_root = storage_root
 
     def resolve(
         self,
@@ -85,6 +94,99 @@ class H3ReferenceResolver:
                     picture_index=idx,
                     local_path=local_path,
                     content_sha256=content_sha256,
+                )
+            )
+
+        return bindings
+
+    def resolve_from_assets(
+        self,
+        shot: ShotSpecificationV1,
+        selected_assets: list[ReferenceAsset],
+        characters: list[CharacterReference],
+    ) -> list[H3ReferenceBinding]:
+        """Build H3ReferenceBindings from ReferenceSelector output.
+
+        selected_assets must be in subject order (one per shot subject),
+        as returned by ReferenceSelector.select(). Each asset's managed_path
+        is verified to exist and its SHA-256 is re-verified against the stored
+        content_sha256.
+
+        Returns frozen bindings with reference_asset_id + reference_kind set.
+        """
+        if not shot.subjects:
+            raise ReferenceResolutionError(
+                "Shot has no subjects — at least one subject required for R2V",
+            )
+        if len(selected_assets) != len(shot.subjects):
+            raise ReferenceResolutionError(
+                f"Expected {len(shot.subjects)} asset(s) for {len(shot.subjects)} "
+                f"subject(s), got {len(selected_assets)}",
+                detail=f"subjects={len(shot.subjects)}, assets={len(selected_assets)}",
+            )
+
+        char_map: dict[str, CharacterReference] = {c.id: c for c in characters}
+        bindings: list[H3ReferenceBinding] = []
+
+        for idx, (subject, asset) in enumerate(
+            zip(shot.subjects, selected_assets), start=1,
+        ):
+            # Validate asset belongs to the correct character
+            if asset.character_id != subject.character_id:
+                raise ReferenceResolutionError(
+                    f"Asset {asset.id} character_id={asset.character_id!r} does not "
+                    f"match subject character_id={subject.character_id!r}",
+                    detail=f"asset_id={asset.id}",
+                )
+
+            char = char_map.get(subject.character_id)
+            if char is None:
+                raise ReferenceResolutionError(
+                    f"No CharacterReference for character_id={subject.character_id!r}",
+                    detail=f"character_id={subject.character_id}",
+                )
+
+            # Resolve managed_path: join with storage_root if relative
+            raw_path = asset.managed_path
+            if self._storage_root is not None:
+                local_path = os.path.join(self._storage_root, raw_path)
+                # Path confinement: reject traversal, symlink escapes, outside-root paths
+                resolved = Path(local_path).resolve()
+                root = Path(self._storage_root).resolve()
+                if not resolved.is_relative_to(root):
+                    raise ReferenceResolutionError(
+                        f"Managed path escapes storage root: {raw_path}",
+                        detail=f"asset_id={asset.id}, resolved={resolved}, root={root}",
+                    )
+            else:
+                local_path = raw_path
+
+            if not os.path.isfile(local_path):
+                raise ReferenceResolutionError(
+                    f"Managed reference file does not exist: {local_path}",
+                    detail=f"asset_id={asset.id}, managed_path={raw_path}",
+                )
+
+            # Re-verify SHA-256 against stored value
+            actual_sha = _compute_sha256(local_path)
+            if actual_sha != asset.content_sha256:
+                raise ReferenceResolutionError(
+                    f"SHA-256 mismatch for asset {asset.id}: "
+                    f"stored={asset.content_sha256}, actual={actual_sha}",
+                    detail=f"asset_id={asset.id}",
+                )
+
+            bindings.append(
+                H3ReferenceBinding(
+                    reference_asset_id=asset.id,
+                    reference_kind=asset.kind.value,
+                    subject_index=idx,
+                    character_id=char.id,
+                    character_name=char.name,
+                    appearance=char.appearance,
+                    picture_index=idx,
+                    local_path=local_path,
+                    content_sha256=asset.content_sha256,
                 )
             )
 

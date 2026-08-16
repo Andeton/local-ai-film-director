@@ -7,25 +7,26 @@ _SHA256_RE = re.compile(r'^[0-9a-f]{64}$')
 
 @dataclass(frozen=True)
 class H3ReferenceBinding:
-    """Frozen immutable subject→reference binding. Upload creates NEW instance via replace()."""
-    subject_index: int          # 1-based
-    character_id: str
-    character_name: str
-    appearance: str
-    picture_index: int          # 1-based
-    local_path: str
-    content_sha256: str         # SHA-256 hex of local file bytes
+    """Frozen immutable reference binding for H3 R2V generation.
+
+    M5.E evolution: subject_index and character fields are nullable to support
+    future non-subject references. picture_index derives from authoritative
+    selected-reference list position (1-based). subject_index is independent.
+    """
+    reference_asset_id: str = ""    # canonical ReferenceAsset ID (empty for M3 compat)
+    reference_kind: str = ""        # ReferenceKind value (empty for M3 compat)
+    subject_index: int | None = None  # associated ShotSubject index, may repeat/be None
+    character_id: str | None = None
+    character_name: str | None = None
+    appearance: str | None = None
+    picture_index: int = 1          # 1-based, from position in selected list
+    local_path: str = ""
+    content_sha256: str = ""
     uploaded_filename: str = ""
 
     def __post_init__(self):
-        if self.subject_index < 1:
-            raise ValueError("subject_index must be >= 1")
         if self.picture_index < 1:
             raise ValueError("picture_index must be >= 1")
-        if not self.character_id:
-            raise ValueError("character_id required")
-        if not self.character_name:
-            raise ValueError("character_name required")
         if not self.local_path:
             raise ValueError("local_path required")
         if not _SHA256_RE.match(self.content_sha256):

@@ -86,6 +86,50 @@ def _build_h3_r2v_v1(project_root: str) -> WorkflowDefinition:
 
 
 # ---------------------------------------------------------------------------
+# H3 R2V v2 definition — two materialized reference slots (M5.E)
+# ---------------------------------------------------------------------------
+
+_H3_R2V_V2_FINGERPRINT = (
+    "b4930400f0433fdd09f3bd4f8a20d55394050c7d4558eddd6f2e7046e110f3b9"
+)
+
+_H3_R2V_V2_MAPPINGS: dict[str, dict[str, str]] = {
+    "prompt": {"node_id": "104", "field": "prompt"},
+    "ref_image_0": {"node_id": "200", "field": "image"},
+    "ref_image_1": {"node_id": "201", "field": "image"},
+    "duration": {"node_id": "111", "field": "value"},
+    "seed": {"node_id": "15", "field": "noise_seed"},
+    "aspect": {"node_id": "115", "field": "aspect_ratio"},
+    "output_prefix": {"node_id": "92", "field": "filename_prefix"},
+}
+
+_H3_R2V_V2_REQUIRED_NODES = ["104", "200", "201", "111", "15", "115", "92", "107"]
+
+
+def _build_h3_r2v_v2(project_root: str) -> WorkflowDefinition:
+    return WorkflowDefinition(
+        id="h3_r2v_v2",
+        version="2.0.0",
+        strategy="REFERENCE_TO_VIDEO",
+        template_path=os.path.join(project_root, "workflows", "h3", "r2v_v2.json"),
+        template_fingerprint=_H3_R2V_V2_FINGERPRINT,
+        parameter_mappings=dict(_H3_R2V_V2_MAPPINGS),
+        required_models=list(_H3_R2V_V1_REQUIRED_MODELS),
+        required_nodes=list(_H3_R2V_V2_REQUIRED_NODES),
+        capabilities=["reference_to_video", "audio_muxed", "multi_reference"],
+        constraints={
+            "max_reference_images": 9,
+            "materialized_reference_slots": 2,
+            "min_duration_sec": 0.21,
+            "max_duration_sec": 15.08,
+            "fps": 24,
+            "frame_grid": "17k+5",
+            "seed_max": 0xFFFFFFFFFFFFFFFF,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # WorkflowResolver
 # ---------------------------------------------------------------------------
 
@@ -94,18 +138,38 @@ class WorkflowResolver:
 
     def __init__(self, project_root: str) -> None:
         self._project_root = project_root
+        self._v1 = _build_h3_r2v_v1(project_root)
+        self._v2 = _build_h3_r2v_v2(project_root)
         self._definitions: dict[str, WorkflowDefinition] = {
-            "REFERENCE_TO_VIDEO": _build_h3_r2v_v1(project_root),
+            "REFERENCE_TO_VIDEO": self._v1,  # default: 1-ref
         }
 
     def resolve(self, strategy: str) -> WorkflowDefinition:
         defn = self._definitions.get(strategy)
         if defn is None:
             raise UnsupportedStrategyError(
-                f"Strategy {strategy!r} not supported in M3",
+                f"Strategy {strategy!r} not supported",
                 detail=f"strategy={strategy}",
             )
         return defn
+
+    def resolve_for_reference_count(self, reference_count: int) -> WorkflowDefinition:
+        """Select R2V workflow version based on reference count."""
+        if reference_count == 1:
+            return self._v1
+        elif reference_count == 2:
+            return self._v2
+        elif reference_count == 0:
+            from film_director.errors import ReferenceResolutionError
+            raise ReferenceResolutionError(
+                "No references provided for REFERENCE_TO_VIDEO",
+            )
+        else:
+            from film_director.errors import ParameterResolutionError
+            raise ParameterResolutionError(
+                f"Reference count {reference_count} exceeds maximum materialized slots (2)",
+                detail=f"reference_count={reference_count}, max_slots=2",
+            )
 
     def load_template(self, definition: WorkflowDefinition) -> dict:
         path = definition.template_path

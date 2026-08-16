@@ -1,7 +1,7 @@
 # Architecture V1 — Local AI Film Director
 
 **Date:** 2026-08-14
-**Status:** Frozen (pending M1 implementation)
+**Status:** Frozen / Active Architecture
 **Architecture:** Hybrid Wind Comic Sidecar
 **ADRs:** ADR-001 through ADR-005
 
@@ -185,26 +185,28 @@ WindComicAdapter
 ### GenerationPlan — Model-Agnostic
 
 > Describes HOW a shot should be generated, using generic strategy concepts.
-> Does not contain provider-specific prompt text or workflow IDs.
+> Does not contain provider-specific prompt text, workflow IDs, or model/engine identifiers.
+> Provider/model/workflow selection is a derived provider-layer concern below this canonical layer.
 
 | Field | Type | Purpose |
 |---|---|---|
 | id | TEXT PK | |
 | shot_id | TEXT FK | Target shot |
 | shot_version | INT | Shot version this plan targets |
-| engine_family | TEXT | "minimax_h3" / "ltx" / "wan" (extensible) |
 | strategy | ENUM | TEXT_TO_VIDEO / IMAGE_TO_VIDEO / REFERENCE_TO_VIDEO / FIRST_LAST_FRAME / MULTI_PANEL |
 | reference_requirements | TEXT JSON | {character_refs: bool, scene_ref: bool, prev_frame: bool, style_ref: bool} |
 | duration_sec | REAL | Planned duration |
-| resolution_intent | TEXT JSON | {aspect: "16:9", megapixels: 0.98} |
+| resolution_intent | TEXT JSON | {aspect: "16:9"} |
 | seed_policy | ENUM | random / fixed / vary_per_take |
 | seed | INT | Fixed seed (null if random/vary) |
 | continuity_mode | ENUM | none / last_frame / first_last |
-| workflow_profile | TEXT | Workflow capability profile name (e.g. "r2v_character_consistent") |
+| selection_reason | TEXT | Why this strategy was chosen |
 | status | ENUM | draft / ready / outdated |
 | version | INT | Version counter |
 | created_at | TEXT ISO | |
 | updated_at | TEXT ISO | |
+
+> **Note (post-M2):** `engine_family` and `workflow_profile` were removed during implementation to maintain strict model-agnosticism. The provider layer (WorkflowResolver, ParameterResolver) maps strategy → concrete workflow/model at generation time. Multiple models/workflows may coexist as versioned profiles. Historical GenerationRequests preserve exact model/workflow/fingerprint used.
 
 ### H3PromptV1 — Provider-Specific Derived Artifact
 
@@ -372,7 +374,7 @@ ShotSpecificationV1 (model-agnostic)
         ↓
     H3PromptV1 (provider-specific derived artifact, persisted separately)
         ↓
-    WorkflowRegistry selects workflow by GenerationPlan.workflow_profile
+    WorkflowResolver maps GenerationPlan.strategy → versioned workflow definition
         ↓
     ComfyUIAdapter injects H3PromptV1 + references into workflow template
         ↓
@@ -403,15 +405,19 @@ or ShotSpecification changes, the H3PromptV1 is rebuilt (old version preserved).
 | overall_soundscape | Shot.audio_intent.ambient | OPTIONAL |
 | non_diegetic_music | Shot.audio_intent.music | OPTIONAL |
 
-### H3 Workflow Mapping (engine_family = "minimax_h3")
+### H3 Workflow Mapping (MiniMax H3 provider layer)
 
-| GenerationPlan.strategy | H3 Model | H3 Workflow | Workflow Profile |
+> Provider-layer mapping from canonical strategy to concrete H3 workflow.
+> Versioned WorkflowDefinitions are registered in WorkflowResolver.
+> Multiple workflow versions may coexist; historical requests are reproducible.
+
+| GenerationPlan.strategy | H3 Model | H3 Workflow | Verified |
 |---|---|---|---|
-| TEXT_TO_VIDEO | fl2va | MiniMaxH3ImageToVideo (no frames) | h3_t2v |
-| IMAGE_TO_VIDEO | fl2va | MiniMaxH3ImageToVideo + first_frame | h3_i2v |
-| REFERENCE_TO_VIDEO | ref2va | MiniMaxH3ReferenceToVideo + ref_images | h3_r2v |
-| FIRST_LAST_FRAME | fl2va | MiniMaxH3ImageToVideo + first_frame + last_frame | h3_fl |
-| MULTI_PANEL | fl2va | GAPStoryboardManager + panels | h3_storyboard |
+| REFERENCE_TO_VIDEO | ref2va | MiniMaxH3ReferenceToVideo + ref_images | M3 live |
+| TEXT_TO_VIDEO | fl2va | MiniMaxH3ImageToVideo (no frames) | Not yet |
+| IMAGE_TO_VIDEO | fl2va | MiniMaxH3ImageToVideo + first_frame | Not yet |
+| FIRST_LAST_FRAME | fl2va | MiniMaxH3ImageToVideo + first_frame + last_frame | Not yet |
+| MULTI_PANEL | fl2va | GAPStoryboardManager + panels | Not yet |
 
 ### Invalidation Chain
 

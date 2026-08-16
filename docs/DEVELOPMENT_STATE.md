@@ -6,9 +6,56 @@
 
 ## Current Milestone
 
-**M4 — Wind Comic Production Handoff**
+**M5 — Reference Management**
 
-**Status:** CLOSED — 13/13 exit criteria PASS, real live acceptance with WC 12.320.0 + qwen3:14b. Known WC Writer quality limitation: empty dialogue + sentinel action/emotion in M4.H run (architecture handles correctly via fallback).
+**Status:** COMPLETE / CLOSED
+
+Branch: `m5-reference-management`
+Worktree: `D:\Ai\Local AI Film Director\.worktrees\m5-reference-management`
+Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
+
+**M5 Progress:**
+- M5.A: COMPLETE — ReferenceAsset (kind/source/ownership/lifecycle), ReferenceGenerationRequest (immutable), ReferenceGenerationExecution (mutable), 3 DB tables + indexes, 3 repositories
+- M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation (PNG/JPEG/WEBP), SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
+- M5.C: COMPLETE — ReferenceGenerationService with versioned/selectable generator profiles (Z-Image Turbo v1 + Krea 2 Turbo v1), immutable ReferenceGenerationRequest snapshot, mutable execution lifecycle, ComfyUI submit/monitor/get_result/download, managed storage + SHA + dimensions on output CANDIDATE asset
+- M5.D: COMPLETE — ReferenceLifecycleService (approve/reject/archive/pin/unpin with invariant enforcement), ReferenceSelector (deterministic provider-neutral selection: pinned+approved+current > approved+current, created_at DESC, id ASC tie-break)
+- M5.E: COMPLETE — H3 multi-reference binding evolution + r2v_v2 workflow + production integration
+  - H3ReferenceBinding evolution (nullable subject_index, reference_asset_id/kind)
+  - r2v_v2 workflow (fingerprint-verified, 2 materialized LoadImage slots)
+  - WorkflowResolver.resolve_for_reference_count (v1 for 1 ref, v2 for 2)
+  - H3ReferenceResolver.resolve_from_assets() — builds bindings from ReferenceSelector output with managed-path confinement + SHA re-verification
+  - GenerationService wired: ReferenceSelector → resolve_from_assets → count-based workflow → asset-provenance reference_snapshot
+  - GenerationRequest.reference_snapshot includes reference_asset_id + reference_kind
+  - PromptBuilder validation, M5.E.1 preflight (human visual PASS)
+  - Unit tests (resolve_from_assets: order, SHA mismatch, missing file, character mismatch, count mismatch, path escape rejection, confinement acceptance)
+  - Integration tests (two-asset: v2 workflow selected, node 200/201 image injection, asset provenance in snapshot, both subjects in prompt, rejected/stale ref errors)
+- M5.F: COMPLETE — Reference staleness on character appearance changes
+  - Shared compute_appearance_fingerprint helper (models/reference.py, used by both generation and stale propagation)
+  - ReferenceAssetRepository.mark_generated_stale_for_character (scoped SQL: project+character+GENERATED+CURRENT, NULL fingerprint → STALE)
+  - Atomic integration in import_project: character UPSERT + stale transition in same DB transaction
+  - Rollback on failure: stale propagation error rolls back character appearance update
+  - GENERATED-only: USER_UPLOAD and WIND_COMIC untouched
+  - No reactivation: already-STALE remains STALE, revert appearance does not re-CURRENT
+  - Status, pinned, SHA, path, provenance, dimensions, created_at preserved
+  - 16 unit tests + 8 integration tests
+- M5.G: COMPLETE — Reference management API endpoints
+  - 10 routes: project/character listing, multipart upload/register, synchronous generate, approve/reject/archive/pin/unpin, shot selected-references
+  - Multipart upload: 50MB byte-bounded streaming, temp file cleanup on success+failure, client filename never controls path
+  - ReferenceNotFoundError(404) vs ReferenceLifecycleError(409) typed distinction
+  - ReferenceIngestError→422, ReferenceGenerationError→502, oversized→413
+  - Selected references: ReferenceSelector with default CHARACTER_BODY, missing eligible→409
+  - Service wiring: ReferenceIngestService, ReferenceGenerationService, ReferenceLifecycleService, ReferenceSelector
+  - 34 API tests (listing, upload, dedup, generation, lifecycle, selection, routing, error mapping)
+- M5.H: COMPLETE — Live acceptance with human checkpoints
+  - H1: First candidate REJECTED (East Asian features), prompt-override correction (commit 88b4a9a), replacement candidate APPROVED + PINNED
+  - H2: Real H3 R2V generation using approved reference, human reference-influence PASS
+  - Path confinement fix for relative managed_path (commit 958d826)
+  - Quality limitations documented (1024x1024 facial detail, 1376x768 video resolution)
+  - 2 @pytest.mark.live tests (evidence verification, no re-generation)
+
+**Baseline:** 1148 deterministic + 9 live deselected (7 M1-M4 + 2 M5), 0 failed
+
+Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ---
 
@@ -68,14 +115,11 @@
 
 ## Next Approved Action
 
-**M5 — Reference Management (PLANNED — NOT STARTED)**
+**M6 — Take Management**
 
-Architecture: FROZEN
-Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
+M5 is COMPLETE / CLOSED. Next: M6 — Take Management.
 
-M5.A–M5.H: NOT STARTED
-
-Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
+M6 must NOT begin until M5 is merged to main.
 
 ---
 

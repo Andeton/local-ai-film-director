@@ -1,7 +1,8 @@
-"""GenerationService — M3 one-shot orchestration from Shot to Take.
+"""GenerationService — shot-to-Take orchestration.
 
-Connects existing M3.A–M3.F components into the verified 22-step pipeline.
-Synchronous. No API routes. No background workers. No multiple takes.
+M3 baseline: one-shot synchronous pipeline.
+M5.E evolution: ReferenceSelector + ReferenceAsset → count-based workflow
+selection (v1/v2), asset-provenance reference_snapshot.
 """
 from __future__ import annotations
 
@@ -32,21 +33,24 @@ from film_director.generation.media_utils import (
 )
 from film_director.generation.parameter_resolver import ParameterResolver
 from film_director.generation.workflow_registry import WorkflowResolver
+from film_director.models.reference import ReferenceKind
 from film_director.persistence.database import Database
 from film_director.persistence.repositories import (
     CharacterRepository,
     GenerationPlanRepository,
     GenerationRequestRepository,
     H3PromptRepository,
+    ReferenceAssetRepository,
     ShotRepository,
     TakeRepository,
 )
+from film_director.services.reference_lifecycle import ReferenceSelector
 
 logger = logging.getLogger(__name__)
 
 
 class GenerationService:
-    """One-shot synchronous generation orchestrator for M3."""
+    """Synchronous generation orchestrator — M5.E production path."""
 
     def __init__(
         self,
@@ -67,9 +71,11 @@ class GenerationService:
         self._prompt_repo = H3PromptRepository(db)
         self._request_repo = GenerationRequestRepository(db)
         self._take_repo = TakeRepository(db)
+        self._ref_asset_repo = ReferenceAssetRepository(db)
 
         # Domain components
-        self._ref_resolver = H3ReferenceResolver()
+        self._ref_resolver = H3ReferenceResolver(storage_root=storage_root)
+        self._ref_selector = ReferenceSelector()
         self._prompt_builder = H3PromptBuilder()
         self._workflow_resolver = WorkflowResolver(project_root=project_root)
         self._param_resolver = ParameterResolver()
@@ -106,21 +112,31 @@ class GenerationService:
                 detail=f"shot_id={shot_id}",
             )
 
-        # Step 3: Resolve characters
+        # Step 3: Resolve characters + reference assets
         project_id = self._find_project_id(shot_id)
         characters = self._char_repo.get_characters_by_project(project_id)
+        all_assets = self._ref_asset_repo.list_by_project(project_id)
 
-        # Step 7: Resolve workflow definition (need capacity for reference resolver)
-        workflow_def = self._workflow_resolver.resolve(plan.strategy)
-        max_refs = workflow_def.constraints.get("materialized_reference_slots", 1)
+        # Step 4: M5 production path — ReferenceSelector + asset-based resolution
+        selected_assets = self._ref_selector.select(
+            shot=shot,
+            project_id=project_id,
+            kind=ReferenceKind.CHARACTER_BODY,
+            characters=characters,
+            assets=all_assets,
+        )
 
-        # Step 4: H3 reference resolution
-        resolved_bindings = self._ref_resolver.resolve(shot, characters, max_refs)
+        # Step 5: Count-based workflow selection (v1 for 1 ref, v2 for 2)
+        workflow_def = self._workflow_resolver.resolve_for_reference_count(
+            len(selected_assets),
+        )
 
-        # Step 5: Validate reference count vs template capacity
-        # (already handled by resolver's max_refs parameter)
+        # Step 6: Build H3ReferenceBindings from selected assets
+        resolved_bindings = self._ref_resolver.resolve_from_assets(
+            shot, selected_assets, characters,
+        )
 
-        # Step 6: Build or reuse H3 prompt
+        # Step 7: Build or reuse H3 prompt
         prompt = self._prompt_repo.get_current_prompt(
             shot.id, shot.version, plan.id, plan.version,
         )
@@ -179,6 +195,8 @@ class GenerationService:
             ],
             reference_snapshot=[
                 {
+                    "reference_asset_id": b.reference_asset_id,
+                    "reference_kind": b.reference_kind,
                     "subject_index": b.subject_index,
                     "character_id": b.character_id,
                     "character_name": b.character_name,
@@ -308,8 +326,9 @@ class GenerationService:
 
     def _upload_references(self, resolved_bindings):
         uploaded = []
-        for binding in resolved_bindings:
-            filename = f"m3_ref_{binding.subject_index}_{uuid.uuid4().hex[:8]}{os.path.splitext(binding.local_path)[1]}"
+        for i, binding in enumerate(resolved_bindings):
+            ext = os.path.splitext(binding.local_path)[1]
+            filename = f"ref_{i}_{uuid.uuid4().hex[:8]}{ext}"
             actual_name = self._comfyui.upload_image(binding.local_path, filename)
             uploaded.append(dataclasses.replace(binding, uploaded_filename=actual_name))
         return uploaded

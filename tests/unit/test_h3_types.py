@@ -39,14 +39,15 @@ def test_h3_reference_binding_frozen():
         b.subject_index = 99  # type: ignore[misc]
 
 
-def test_h3_reference_binding_invalid_subject_index():
-    with pytest.raises(ValueError, match="subject_index"):
-        _valid_binding(subject_index=0)
+def test_h3_reference_binding_subject_index_none_allowed():
+    """M5.E: subject_index is nullable for non-subject references."""
+    b = _valid_binding(subject_index=None, character_id=None, character_name=None)
+    assert b.subject_index is None
 
 
-def test_h3_reference_binding_invalid_subject_index_negative():
-    with pytest.raises(ValueError, match="subject_index"):
-        _valid_binding(subject_index=-1)
+def test_h3_reference_binding_subject_index_positive_allowed():
+    b = _valid_binding(subject_index=1)
+    assert b.subject_index == 1
 
 
 def test_h3_reference_binding_invalid_content_sha256_short():
@@ -59,14 +60,16 @@ def test_h3_reference_binding_invalid_content_sha256_uppercase():
         _valid_binding(content_sha256="A" * 64)
 
 
-def test_h3_reference_binding_empty_character_id():
-    with pytest.raises(ValueError, match="character_id"):
-        _valid_binding(character_id="")
+def test_h3_reference_binding_nullable_character_id():
+    """M5.E: character_id is nullable for non-subject references."""
+    b = _valid_binding(character_id=None, character_name=None, subject_index=None)
+    assert b.character_id is None
 
 
-def test_h3_reference_binding_empty_character_name():
-    with pytest.raises(ValueError, match="character_name"):
-        _valid_binding(character_name="")
+def test_h3_reference_binding_nullable_character_name():
+    """M5.E: character_name is nullable for non-subject references."""
+    b = _valid_binding(character_name=None, character_id=None, subject_index=None)
+    assert b.character_name is None
 
 
 def test_h3_reference_binding_empty_local_path():

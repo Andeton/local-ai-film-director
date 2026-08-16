@@ -86,11 +86,12 @@ class TestBindingValidation:
         with pytest.raises(ReferenceResolutionError, match="binding"):
             builder.build(_shot(), _plan(), [])
 
-    def test_duplicate_subject_index_raises(self):
+    def test_duplicate_subject_index_allowed(self):
+        """M5.E: subject_index may repeat (two pictures for same subject)."""
         builder = H3PromptBuilder()
         bindings = [_binding(subject_index=1, picture_index=1), _binding(subject_index=1, picture_index=2, character_id="c2", character_name="Bob")]
-        with pytest.raises(ReferenceResolutionError, match="subject_index"):
-            builder.build(_shot(), _plan(), bindings)
+        prompt = builder.build(_shot(), _plan(), bindings)
+        assert prompt is not None
 
     def test_duplicate_picture_index_raises(self):
         builder = H3PromptBuilder()
@@ -98,11 +99,12 @@ class TestBindingValidation:
         with pytest.raises(ReferenceResolutionError, match="picture_index"):
             builder.build(_shot(), _plan(), bindings)
 
-    def test_non_sequential_subject_index_raises(self):
+    def test_non_sequential_subject_index_allowed(self):
+        """M5.E: subject_index is independent from picture_index."""
         builder = H3PromptBuilder()
         bindings = [_binding(subject_index=1, picture_index=1), _binding(subject_index=3, picture_index=2, character_id="c2", character_name="Bob")]
-        with pytest.raises(ReferenceResolutionError, match="subject_index"):
-            builder.build(_shot(), _plan(), bindings)
+        prompt = builder.build(_shot(), _plan(), bindings)
+        assert prompt is not None
 
 
 # ---------------------------------------------------------------------------

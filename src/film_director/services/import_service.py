@@ -29,9 +29,11 @@ from film_director.models.provenance import (
     build_scene_source_payload,
     compute_source_hash,
 )
+from film_director.models.reference import compute_appearance_fingerprint
 from film_director.persistence.repositories import (
     CharacterRepository,
     ProjectRepository,
+    ReferenceAssetRepository,
     SceneRepository,
     SequenceRepository,
 )
@@ -95,6 +97,7 @@ class ImportService:
         scene_repo: SceneRepository,
         character_repo: CharacterRepository,
         db: Database,
+        ref_asset_repo: ReferenceAssetRepository | None = None,
     ) -> None:
         self._adapter = adapter
         self._project_repo = project_repo
@@ -102,6 +105,7 @@ class ImportService:
         self._scene_repo = scene_repo
         self._character_repo = character_repo
         self._db = db
+        self._ref_asset_repo = ref_asset_repo
 
     # ------------------------------------------------------------------
     # import_project
@@ -257,6 +261,21 @@ class ImportService:
                         ),
                     )
                     self._character_repo.save_character(char, conn=conn)
+
+                    # M5.F: stale GENERATED refs when appearance changes
+                    if (
+                        self._ref_asset_repo is not None
+                        and existing is not None
+                        and existing.appearance != char.appearance
+                    ):
+                        new_fp = compute_appearance_fingerprint(char.appearance)
+                        self._ref_asset_repo.mark_generated_stale_for_character(
+                            project_id=project_id,
+                            character_id=char_id,
+                            current_fingerprint=new_fp,
+                            conn=conn,
+                        )
+
                     chars_imported += 1
 
                 # Mark characters deleted upstream as OUTDATED

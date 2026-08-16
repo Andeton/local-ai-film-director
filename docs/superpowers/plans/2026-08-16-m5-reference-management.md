@@ -214,7 +214,7 @@ workflows/
     r2v_v1.json                  # PRESERVE: M3 reproducibility
     r2v_v2.json                  # CREATE: 2-picture R2V (after M5.E preflight)
   reference/
-    z_image_v1.json              # CREATE: character ref generation (after M5.C preflight)
+    <versioned generator profile workflows>  # CREATE: selectable profiles for both Z-Image Turbo + Krea 2 Turbo (after M5.C preflight)
 tests/
   unit/
     test_reference_model.py
@@ -301,22 +301,28 @@ git commit -m "M5.B: managed reference file ingest with validation"
 
 ### Task M5.C: Character Reference Generation Workflow
 
-**Goal:** Discover and build a versioned ComfyUI txt2img workflow for character reference generation using installed local models.
+**Goal:** Build versioned/selectable ComfyUI txt2img workflow profiles for character reference generation using verified installed local models.
 
-**Files:** Create `generation/reference_generator.py`, `workflows/reference/z_image_v1.json` (or equivalent). Modify `generation/workflow_registry.py`.
+**Files:** Create `generation/reference_generator.py`, versioned workflow JSON files under `workflows/reference/`. Modify `generation/workflow_registry.py`.
 
-**Preflight (M5.C.1):**
-1. Start ComfyUI if not running
-2. Inspect installed models via object_info or direct file inspection
-3. Verify Z-Image Turbo + qwen_3_4b text encoder + ae.safetensors VAE
-4. If Z-Image workflow cannot be constructed, evaluate Krea 2 Turbo
-5. Build minimal API-format JSON for txt2img
-6. Execute one controlled test (simple prompt, fixed seed)
-7. Verify output is a valid image file
+**Preflight (M5.C.1) — COMPLETE:**
+Both Z-Image Turbo and Krea 2 Turbo verified runnable via ComfyUI REST API:
+- Z-Image Turbo: ~5s, UNETLoader → CLIPLoader(qwen_image) → KSampler, cfg 1.5
+- Krea 2 Turbo: ~25s, UNETLoader → CLIPLoader(krea2) → Krea2PromptWeight → KSampler, cfg 1.0
+- Both produced valid 1024x1024 character reference images from canonical character description
+- No ReferenceAsset or ReferenceGenerationRequest created during preflight
 
-**Implementation:**
-- WorkflowDefinition for reference generation (versioned, fingerprint-verified)
-- ReferenceGenerationService: character description → prompt → ComfyUI → image → ReferenceAsset(CANDIDATE)
+**Model/Workflow Profile Policy (M5.C.2 — Frozen):**
+- Both models remain available/selectable as versioned generator profiles
+- Z-Image Turbo is currently recommended default for CHARACTER_BODY (faster, strong canonical adherence)
+- Krea 2 Turbo remains supported/selectable
+- ReferenceGenerationRequest must snapshot exact selected profile/model/workflow/settings
+- Existing workflow versions NEVER silently overwritten; new versions added alongside
+- Do NOT permanently hard-code one model; implement selectable versioned profiles
+
+**Implementation (M5.C.3):**
+- Versioned WorkflowDefinitions for each verified image generator (fingerprint-verified)
+- ReferenceGenerationService: character description → prompt → selected profile → ComfyUI → image → ReferenceAsset(CANDIDATE)
 - Immutable ReferenceGenerationRequest + ReferenceGenerationExecution records
 - ComfyUI submission reuses existing ComfyUIAdapter patterns
 

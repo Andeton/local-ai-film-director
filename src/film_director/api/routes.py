@@ -1,28 +1,42 @@
-"""API routes for Local AI Film Director (M1 + M2)."""
+"""API routes for Local AI Film Director (M1–M5)."""
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, model_validator
 
 from film_director.adapters.wind_comic import WindComicAdapter
+from film_director.errors import (
+    ReferenceGenerationError,
+    ReferenceIngestError,
+    ReferenceLifecycleError,
+    ReferenceNotFoundError,
+    ReferenceResolutionError,
+)
 from film_director.generation.comfyui_adapter import ComfyUIAdapter
 from film_director.generation.generation_service import GenerationService
 from film_director.models.canonical import CameraIntent, ShotSubject
+from film_director.models.reference import ReferenceKind
 from film_director.persistence.repositories import (
     BeatRepository,
     CharacterRepository,
     GenerationPlanRepository,
     GenerationRequestRepository,
     ProjectRepository,
+    ReferenceAssetRepository,
     SceneRepository,
     SequenceRepository,
     ShotRepository,
 )
 from film_director.services.enrichment_service import EnrichmentService
 from film_director.services.import_service import ImportService
+
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_UPLOAD_CHUNK = 65_536  # 64 KiB
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +92,21 @@ class ShotEditRequest(BaseModel):
         return self
 
 
+class GenerateReferenceRequest(BaseModel):
+    kind: str = "character_body"
+    profile_id: str | None = None
+    seed: int | None = None
+    prompt_override: str | None = None
+    negative_prompt_override: str | None = None
+
+    @model_validator(mode="after")
+    def _valid_kind(self):
+        allowed = {"character_face", "character_body"}
+        if self.kind not in allowed:
+            raise ValueError(f"kind must be one of {allowed}")
+        return self
+
+
 def create_router(
     adapter: WindComicAdapter,
     import_service: ImportService,
@@ -97,6 +126,12 @@ def create_router(
     request_repo: GenerationRequestRepository | None = None,
     # M4 services
     preproduction_service=None,  # PreproductionService | None
+    # M5 services
+    ref_asset_repo: ReferenceAssetRepository | None = None,
+    ref_ingest_service=None,  # ReferenceIngestService | None
+    ref_generation_service=None,  # ReferenceGenerationService | None
+    ref_lifecycle_service=None,  # ReferenceLifecycleService | None
+    ref_selector=None,  # ReferenceSelector | None
 ) -> APIRouter:
     router = APIRouter()
 
@@ -363,5 +398,208 @@ def create_router(
             "shots_created": result.enrichment_result.shots_created,
             "plans_created": result.enrichment_result.plans_created,
         }
+
+    # ------------------------------------------------------------------
+    # M5 — Reference Management
+    # ------------------------------------------------------------------
+
+    def _m5_guard():
+        if ref_asset_repo is None:
+            raise HTTPException(status_code=501, detail="M5 reference management not available")
+
+    def _resolve_character(character_id: str):
+        """Resolve canonical character and its project. Raises 404 if missing."""
+        _m5_guard()
+        char = char_repo.get_character(character_id)
+        if char is None:
+            raise HTTPException(status_code=404, detail="Character not found")
+        return char
+
+    @router.get("/projects/{project_id}/references")
+    def list_project_references(project_id: str) -> list[dict]:
+        _m5_guard()
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        assets = ref_asset_repo.list_by_project(project_id)
+        return [a.model_dump() for a in assets]
+
+    @router.get("/characters/{character_id}/references")
+    def list_character_references(character_id: str) -> list[dict]:
+        char = _resolve_character(character_id)
+        assets = ref_asset_repo.list_by_character(character_id)
+        return [a.model_dump() for a in assets]
+
+    @router.post("/characters/{character_id}/references/register")
+    async def register_reference(
+        character_id: str,
+        kind: str = Form(...),
+        file: UploadFile = File(...),
+    ) -> dict:
+        char = _resolve_character(character_id)
+        if ref_ingest_service is None:
+            raise HTTPException(status_code=501, detail="M5 reference management not available")
+
+        allowed = {"character_face", "character_body"}
+        if kind not in allowed:
+            raise HTTPException(status_code=422, detail=f"kind must be one of {allowed}")
+        ref_kind = ReferenceKind(kind)
+
+        tmp_path = None
+        try:
+            # Stream upload to temp file with size limit
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".upload")
+            total = 0
+            try:
+                with os.fdopen(tmp_fd, "wb") as tmp_f:
+                    while True:
+                        chunk = await file.read(_UPLOAD_CHUNK)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > _MAX_UPLOAD_BYTES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=f"Upload exceeds {_MAX_UPLOAD_BYTES} byte limit",
+                            )
+                        tmp_f.write(chunk)
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=422, detail=f"Upload failed: {e}")
+
+            if total == 0:
+                raise HTTPException(status_code=422, detail="Empty upload")
+
+            result = ref_ingest_service.register_user_reference(
+                project_id=char.project_id,
+                kind=ref_kind,
+                source_path=tmp_path,
+                character_id=character_id,
+            )
+
+            if result.outcome == "invalid_image":
+                raise ReferenceIngestError(
+                    "Invalid image file", detail=result.detail,
+                )
+            if result.asset is None:
+                raise ReferenceIngestError(
+                    f"Ingest failed: {result.outcome}", detail=result.detail,
+                )
+
+            return result.asset.model_dump()
+
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    @router.post("/characters/{character_id}/references/generate")
+    def generate_reference(
+        character_id: str,
+        body: GenerateReferenceRequest,
+    ) -> dict:
+        char = _resolve_character(character_id)
+        if ref_generation_service is None:
+            raise HTTPException(status_code=501, detail="M5 reference management not available")
+
+        ref_kind = ReferenceKind(body.kind)
+        result = ref_generation_service.generate_character_reference(
+            project_id=char.project_id,
+            character_id=character_id,
+            character_name=char.name,
+            character_appearance=char.appearance,
+            kind=ref_kind,
+            profile_id=body.profile_id,
+            seed=body.seed,
+            prompt_override=body.prompt_override,
+            negative_prompt_override=body.negative_prompt_override,
+        )
+        return {
+            "asset": result.asset.model_dump(),
+            "request_id": result.request_id,
+            "execution_id": result.execution_id,
+        }
+
+    def _lifecycle_action(reference_id: str, action: str) -> dict:
+        _m5_guard()
+        if ref_lifecycle_service is None:
+            raise HTTPException(status_code=501, detail="M5 reference management not available")
+        try:
+            getattr(ref_lifecycle_service, action)(reference_id)
+        except ReferenceNotFoundError:
+            raise HTTPException(status_code=404, detail="Reference not found")
+        except ReferenceLifecycleError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        asset = ref_asset_repo.get(reference_id)
+        return asset.model_dump()
+
+    @router.post("/references/{reference_id}/approve")
+    def approve_reference(reference_id: str) -> dict:
+        return _lifecycle_action(reference_id, "approve")
+
+    @router.post("/references/{reference_id}/reject")
+    def reject_reference(reference_id: str) -> dict:
+        return _lifecycle_action(reference_id, "reject")
+
+    @router.post("/references/{reference_id}/archive")
+    def archive_reference(reference_id: str) -> dict:
+        return _lifecycle_action(reference_id, "archive")
+
+    @router.post("/references/{reference_id}/pin")
+    def pin_reference(reference_id: str) -> dict:
+        return _lifecycle_action(reference_id, "pin")
+
+    @router.post("/references/{reference_id}/unpin")
+    def unpin_reference(reference_id: str) -> dict:
+        return _lifecycle_action(reference_id, "unpin")
+
+    @router.get("/shots/{shot_id}/selected-references")
+    def get_selected_references(
+        shot_id: str,
+        kind: str = Query(default="character_body"),
+    ) -> list[dict]:
+        _m5_guard()
+        if ref_selector is None or shot_repo is None:
+            raise HTTPException(status_code=501, detail="M5 reference management not available")
+
+        shot = shot_repo.get_shot(shot_id)
+        if shot is None:
+            raise HTTPException(status_code=404, detail="Shot not found")
+
+        # Derive project_id through beat→scene→sequence→project
+        from film_director.persistence.database import Database
+        project_id = None
+        if hasattr(ref_asset_repo, '_db'):
+            with ref_asset_repo._db.connection() as conn:
+                row = conn.execute(
+                    """SELECT seq.project_id FROM shots s
+                       JOIN beats b ON s.beat_id = b.id
+                       JOIN scenes sc ON b.scene_id = sc.id
+                       JOIN sequences seq ON sc.sequence_id = seq.id
+                       WHERE s.id = ?""",
+                    (shot_id,),
+                ).fetchone()
+                if row:
+                    project_id = row["project_id"]
+        if project_id is None:
+            raise HTTPException(status_code=404, detail="Shot project not found")
+
+        try:
+            ref_kind = ReferenceKind(kind)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid kind: {kind}")
+
+        characters = char_repo.get_characters_by_project(project_id)
+        all_assets = ref_asset_repo.list_by_project(project_id)
+
+        try:
+            selected = ref_selector.select(
+                shot=shot, project_id=project_id,
+                kind=ref_kind, characters=characters, assets=all_assets,
+            )
+        except ReferenceResolutionError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+
+        return [a.model_dump() for a in selected]
 
     return router

@@ -338,3 +338,164 @@ class TestReturnedBindings:
         bindings = resolver.resolve(shot, chars, max_refs=9)
         assert bindings[0].character_name == "Alice"
         assert bindings[0].appearance == "red hair"
+
+
+# ---------------------------------------------------------------------------
+# M5.E: resolve_from_assets
+# ---------------------------------------------------------------------------
+
+class TestResolveFromAssets:
+    def _asset(self, asset_id, character_id, path, sha):
+        from film_director.models.reference import (
+            ReferenceAsset, ReferenceKind, ReferenceSource,
+            ReferenceSourceState, ReferenceStatus,
+        )
+        return ReferenceAsset(
+            id=asset_id, project_id="proj-1", character_id=character_id,
+            kind=ReferenceKind.CHARACTER_BODY, source=ReferenceSource.GENERATED,
+            managed_path=path, content_sha256=sha,
+            source_provenance="gen-req-1",
+            status=ReferenceStatus.APPROVED,
+            source_state=ReferenceSourceState.CURRENT,
+            width=64, height=64,
+            created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
+        )
+
+    def test_single_asset_binding(self, tmp_path):
+        content = b"test image data"
+        img = _write_file(tmp_path, "ref.png", content)
+        sha = _sha256(content)
+        asset = self._asset("ref-1", "c1", img, sha)
+        shot = _shot([_subject("c1", "Alice", [])])
+        chars = [_char("c1", "Alice", "dark hair")]
+
+        resolver = H3ReferenceResolver()
+        bindings = resolver.resolve_from_assets(shot, [asset], chars)
+
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.reference_asset_id == "ref-1"
+        assert b.reference_kind == "character_body"
+        assert b.subject_index == 1
+        assert b.picture_index == 1
+        assert b.character_id == "c1"
+        assert b.character_name == "Alice"
+        assert b.local_path == img
+        assert b.content_sha256 == sha
+        assert b.uploaded_filename == ""
+
+    def test_two_assets_preserve_order(self, tmp_path):
+        content_a = b"alice data"
+        content_b = b"bob data"
+        img_a = _write_file(tmp_path, "alice.png", content_a)
+        img_b = _write_file(tmp_path, "bob.png", content_b)
+        sha_a = _sha256(content_a)
+        sha_b = _sha256(content_b)
+        asset_a = self._asset("ref-a", "c1", img_a, sha_a)
+        asset_b = self._asset("ref-b", "c2", img_b, sha_b)
+        shot = _shot([_subject("c1", "Alice", []), _subject("c2", "Bob", [])])
+        chars = [_char("c1", "Alice"), _char("c2", "Bob")]
+
+        resolver = H3ReferenceResolver()
+        bindings = resolver.resolve_from_assets(shot, [asset_a, asset_b], chars)
+
+        assert len(bindings) == 2
+        assert bindings[0].picture_index == 1
+        assert bindings[0].reference_asset_id == "ref-a"
+        assert bindings[1].picture_index == 2
+        assert bindings[1].reference_asset_id == "ref-b"
+
+    def test_sha_mismatch_raises(self, tmp_path):
+        img = _write_file(tmp_path, "ref.png", b"actual content")
+        wrong_sha = "b" * 64
+        asset = self._asset("ref-1", "c1", img, wrong_sha)
+        shot = _shot([_subject("c1", "Alice", [])])
+        chars = [_char("c1", "Alice")]
+
+        resolver = H3ReferenceResolver()
+        with pytest.raises(ReferenceResolutionError, match="SHA-256 mismatch"):
+            resolver.resolve_from_assets(shot, [asset], chars)
+
+    def test_missing_file_raises(self, tmp_path):
+        missing = os.path.join(str(tmp_path), "gone.png")
+        asset = self._asset("ref-1", "c1", missing, "a" * 64)
+        shot = _shot([_subject("c1", "Alice", [])])
+        chars = [_char("c1", "Alice")]
+
+        resolver = H3ReferenceResolver()
+        with pytest.raises(ReferenceResolutionError, match="does not exist"):
+            resolver.resolve_from_assets(shot, [asset], chars)
+
+    def test_character_mismatch_raises(self, tmp_path):
+        img = _write_file(tmp_path, "ref.png", b"data")
+        sha = _sha256(b"data")
+        asset = self._asset("ref-1", "c-wrong", img, sha)
+        shot = _shot([_subject("c1", "Alice", [])])
+        chars = [_char("c1", "Alice")]
+
+        resolver = H3ReferenceResolver()
+        with pytest.raises(ReferenceResolutionError, match="does not match"):
+            resolver.resolve_from_assets(shot, [asset], chars)
+
+    def test_asset_count_mismatch_raises(self, tmp_path):
+        img = _write_file(tmp_path, "ref.png", b"data")
+        sha = _sha256(b"data")
+        asset = self._asset("ref-1", "c1", img, sha)
+        # Shot has 2 subjects, but only 1 asset
+        shot = _shot([_subject("c1", "Alice", []), _subject("c2", "Bob", [])])
+        chars = [_char("c1", "Alice"), _char("c2", "Bob")]
+
+        resolver = H3ReferenceResolver()
+        with pytest.raises(ReferenceResolutionError, match="Expected 2"):
+            resolver.resolve_from_assets(shot, [asset], chars)
+
+    def test_path_escape_dot_dot_rejected(self, tmp_path):
+        """managed_path with .. that escapes storage root is rejected."""
+        storage_root = os.path.join(str(tmp_path), "storage")
+        os.makedirs(storage_root, exist_ok=True)
+        # Create file outside storage root
+        outside = _write_file(tmp_path, "outside.png", b"escape data")
+        sha = _sha256(b"escape data")
+        # managed_path uses .. to escape storage root
+        escape_path = os.path.join(storage_root, "..", "outside.png")
+        asset = self._asset("ref-1", "c1", escape_path, sha)
+        shot = _shot([_subject("c1", "Alice", [])])
+        chars = [_char("c1", "Alice")]
+
+        resolver = H3ReferenceResolver(storage_root=storage_root)
+        with pytest.raises(ReferenceResolutionError, match="escapes storage root"):
+            resolver.resolve_from_assets(shot, [asset], chars)
+
+    def test_absolute_path_outside_root_rejected(self, tmp_path):
+        """Absolute managed_path outside storage root is rejected."""
+        storage_root = os.path.join(str(tmp_path), "storage")
+        os.makedirs(storage_root, exist_ok=True)
+        outside = _write_file(tmp_path, "outside.png", b"data")
+        sha = _sha256(b"data")
+        asset = self._asset("ref-1", "c1", outside, sha)
+        shot = _shot([_subject("c1", "Alice", [])])
+        chars = [_char("c1", "Alice")]
+
+        resolver = H3ReferenceResolver(storage_root=storage_root)
+        with pytest.raises(ReferenceResolutionError, match="escapes storage root"):
+            resolver.resolve_from_assets(shot, [asset], chars)
+
+    def test_confined_path_accepted(self, tmp_path):
+        """managed_path inside storage root passes confinement."""
+        storage_root = os.path.join(str(tmp_path), "storage")
+        refs_dir = os.path.join(storage_root, "references", "proj-1")
+        os.makedirs(refs_dir, exist_ok=True)
+        content = b"confined ref data"
+        img = _write_file(tmp_path, "confined.png", content)  # write to a temp location first
+        confined = os.path.join(refs_dir, "ref.png")
+        import shutil
+        shutil.copy2(img, confined)
+        sha = _sha256(content)
+        asset = self._asset("ref-1", "c1", confined, sha)
+        shot = _shot([_subject("c1", "Alice", [])])
+        chars = [_char("c1", "Alice")]
+
+        resolver = H3ReferenceResolver(storage_root=storage_root)
+        bindings = resolver.resolve_from_assets(shot, [asset], chars)
+        assert len(bindings) == 1
+        assert bindings[0].reference_asset_id == "ref-1"

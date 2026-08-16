@@ -54,11 +54,12 @@
 - M5.B: COMPLETE (managed file ingest, user + WC HTTP, PIL validation, SHA-256, dedup)
 - M5.C: COMPLETE (versioned/selectable generator profiles, atomic finalization, dedup, model snapshot)
 - M5.D: COMPLETE (ReferenceLifecycleService + deterministic ReferenceSelector)
-- M5.E: COMPLETE (H3ReferenceBinding evolution, r2v_v2 workflow, resolve_for_reference_count, PromptBuilder update)
-- M5.F: NOT STARTED (next — reference staleness)
-- M5.G–M5.H: NOT STARTED
+- M5.E: PARTIAL — foundation complete, production integration remaining
+  - DONE: binding evolution, r2v_v2 workflow, WorkflowResolver, PromptBuilder, preflight, unit tests
+  - REMAINING: H3ReferenceResolver → ReferenceSelector/Asset integration, GenerationService count-based workflow selection, ParameterResolver two-slot injection, GenerationRequest snapshot with asset provenance, production-path integration tests
+- M5.F–M5.H: NOT STARTED
 
-**Next action:** M5.F — reference staleness on canonical character appearance changes.
+**Next action:** Finish M5.E production integration — replace legacy H3ReferenceResolver with ReferenceSelector/ReferenceAsset path, wire GenerationService to resolve_for_reference_count, add two-asset production integration tests.
 
 ---
 
@@ -178,7 +179,8 @@ Both models executed successfully. No ReferenceAsset or ReferenceGenerationReque
 - `subject_index` = associated ShotSubject index (may repeat, may be None for non-subject refs)
 - One ordered list drives: prompt Picture tags, upload order, workflow slots, GenerationRequest reference snapshot
 - No independent sorting in later layers
-- Multi-picture H3 behavior PROVEN — M5.E.1 preflight: 2 references, human visual PASS (see docs/M5_E_PREFLIGHT.md)
+- Multi-picture H3 behavior PROVEN at ComfyUI level — M5.E.1 preflight: 2 references, human visual PASS (see docs/M5_E_PREFLIGHT.md)
+- Production integration (H3ReferenceResolver → ReferenceSelector/Asset) NOT YET WIRED — M5.E PARTIAL
 - `workflows/h3/r2v_v1.json` must remain unchanged for M3 reproducibility
 
 ---

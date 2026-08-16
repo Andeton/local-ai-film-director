@@ -19,7 +19,8 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 - M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation (PNG/JPEG/WEBP), SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
 - M5.C: COMPLETE — ReferenceGenerationService with versioned/selectable generator profiles (Z-Image Turbo v1 + Krea 2 Turbo v1), immutable ReferenceGenerationRequest snapshot, mutable execution lifecycle, ComfyUI submit/monitor/get_result/download, managed storage + SHA + dimensions on output CANDIDATE asset
 - M5.D: COMPLETE — ReferenceLifecycleService (approve/reject/archive/pin/unpin with invariant enforcement), ReferenceSelector (deterministic provider-neutral selection: pinned+approved+current > approved+current, created_at DESC, id ASC tie-break)
-- M5.E: NOT STARTED (next — H3 multi-reference binding + r2v_v2 workflow)
+- M5.E.1: PREFLIGHT COMPLETE — Two-reference H3 R2V proven (124 frames, 5.167s, human visual PASS). See docs/M5_E_PREFLIGHT.md.
+- M5.E implementation: NOT STARTED (next — binding evolution + r2v_v2 workflow)
 - M5.F–M5.H: NOT STARTED
 
 **Baseline:** 1050 deterministic + 7 live deselected, 0 failed
@@ -86,7 +87,7 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 **M5.E — H3 multi-reference binding evolution + r2v_v2 workflow**
 
-M5.D is COMPLETE. Next: empirical H3 2-picture preflight, H3ReferenceBinding evolution (nullable subject_index), new versioned r2v_v2 workflow.
+M5.E.1 preflight COMPLETE (2-reference H3 proven, human visual PASS). Next: implement H3ReferenceBinding evolution (nullable subject_index), new versioned r2v_v2 workflow, updated ParameterResolver/PromptBuilder.
 
 M5.F must NOT begin until M5.E is reviewed and accepted.
 

@@ -54,10 +54,11 @@
 - M5.B: COMPLETE (managed file ingest, user + WC HTTP, PIL validation, SHA-256, dedup)
 - M5.C: COMPLETE (versioned/selectable generator profiles, atomic finalization, dedup, model snapshot)
 - M5.D: COMPLETE (ReferenceLifecycleService + deterministic ReferenceSelector)
-- M5.E: NOT STARTED (next — H3 multi-reference binding + r2v_v2 workflow)
+- M5.E.1: PREFLIGHT COMPLETE (2-ref H3 R2V proven, 124 frames/5.167s, human visual PASS)
+- M5.E implementation: NOT STARTED (next — binding evolution + r2v_v2 workflow)
 - M5.F–M5.H: NOT STARTED
 
-**Next action:** M5.E — H3 multi-reference empirical preflight, binding evolution, r2v_v2 workflow.
+**Next action:** M5.E implementation — H3ReferenceBinding evolution, r2v_v2 workflow, ParameterResolver/PromptBuilder updates.
 
 ---
 
@@ -177,7 +178,7 @@ Both models executed successfully. No ReferenceAsset or ReferenceGenerationReque
 - `subject_index` = associated ShotSubject index (may repeat, may be None for non-subject refs)
 - One ordered list drives: prompt Picture tags, upload order, workflow slots, GenerationRequest reference snapshot
 - No independent sorting in later layers
-- Multi-picture H3 behavior NOT YET PROVEN — M5.E owns empirical 2-picture proof
+- Multi-picture H3 behavior PROVEN — M5.E.1 preflight: 2 references, human visual PASS (see docs/M5_E_PREFLIGHT.md)
 - `workflows/h3/r2v_v1.json` must remain unchanged for M3 reproducibility
 
 ---

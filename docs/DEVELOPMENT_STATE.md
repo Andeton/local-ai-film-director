@@ -18,10 +18,11 @@ Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
 - M5.A: COMPLETE — ReferenceAsset (kind/source/ownership/lifecycle), ReferenceGenerationRequest (immutable), ReferenceGenerationExecution (mutable), 3 DB tables + indexes, 3 repositories
 - M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation (PNG/JPEG/WEBP), SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
 - M5.C: COMPLETE — ReferenceGenerationService with versioned/selectable generator profiles (Z-Image Turbo v1 + Krea 2 Turbo v1), immutable ReferenceGenerationRequest snapshot, mutable execution lifecycle, ComfyUI submit/monitor/get_result/download, managed storage + SHA + dimensions on output CANDIDATE asset
-- M5.D: NOT STARTED (next — approval/pinning + deterministic selection)
-- M5.E–M5.H: NOT STARTED
+- M5.D: COMPLETE — ReferenceLifecycleService (approve/reject/archive/pin/unpin with invariant enforcement), ReferenceSelector (deterministic provider-neutral selection: pinned+approved+current > approved+current, created_at DESC, id ASC tie-break)
+- M5.E: NOT STARTED (next — H3 multi-reference binding + r2v_v2 workflow)
+- M5.F–M5.H: NOT STARTED
 
-**Baseline:** 1017 deterministic + 7 live deselected, 0 failed
+**Baseline:** 1044 deterministic + 7 live deselected, 0 failed
 
 Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
@@ -83,11 +84,11 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ## Next Approved Action
 
-**M5.D — Approval/pinning lifecycle + deterministic ReferenceSelector**
+**M5.E — H3 multi-reference binding evolution + r2v_v2 workflow**
 
-M5.C is COMPLETE. Next: implement approval/reject/archive/pin operations and deterministic reference selection (pinned+approved+current > approved+current > error).
+M5.D is COMPLETE. Next: empirical H3 2-picture preflight, H3ReferenceBinding evolution (nullable subject_index), new versioned r2v_v2 workflow.
 
-M5.E must NOT begin until M5.D is reviewed and accepted.
+M5.F must NOT begin until M5.E is reviewed and accepted.
 
 ---
 

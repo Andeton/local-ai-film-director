@@ -52,11 +52,12 @@
 **M5 Progress:**
 - M5.A: COMPLETE (ReferenceAsset + ReferenceGenerationRequest + ReferenceGenerationExecution)
 - M5.B: COMPLETE (managed file ingest, user + WC HTTP, PIL validation, SHA-256, dedup)
-- M5.C: COMPLETE (versioned/selectable generator profiles for Z-Image Turbo + Krea 2 Turbo, ReferenceGenerationService with immutable request/execution audit)
-- M5.D: NOT STARTED (next — approval/pinning + deterministic selection)
-- M5.E–M5.H: NOT STARTED
+- M5.C: COMPLETE (versioned/selectable generator profiles, atomic finalization, dedup, model snapshot)
+- M5.D: COMPLETE (ReferenceLifecycleService + deterministic ReferenceSelector)
+- M5.E: NOT STARTED (next — H3 multi-reference binding + r2v_v2 workflow)
+- M5.F–M5.H: NOT STARTED
 
-**Next action:** M5.D — approval/pinning lifecycle and deterministic ReferenceSelector.
+**Next action:** M5.E — H3 multi-reference empirical preflight, binding evolution, r2v_v2 workflow.
 
 ---
 

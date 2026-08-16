@@ -44,7 +44,7 @@
 
 | Blocker | Severity | Impact | Mitigation |
 |---|---|---|---|
-| No 14B+ LLM model installed locally | HIGH | Enrichment agents (beats, coverage) need reliable structured output | Download qwen2.5:14b or use OpenRouter |
+| ~~No 14B+ LLM model installed locally~~ | ~~HIGH~~ | ~~Enrichment agents need reliable structured output~~ | RESOLVED: qwen3:14b installed, works for both WC and LFDirector enrichment |
 | No T2V/I2V API-format workflow template | LOW | Only R2V is API-ready; T2V/I2V need construction from native nodes | Use MCP to construct in future milestone |
 | No H3 Turbo LoRA installed | LOW | Generation will be slower (20 steps vs 6-10) | Download when needed |
 | Wind Comic requires budget hack for demo user | LOW | Budget cap blocks project creation | Set budget_hard_cap_cny to 99999 |
@@ -86,6 +86,22 @@ Plan: `docs/superpowers/plans/2026-08-15-m4-wind-comic-production-handoff.md`
 **M4 Status:** TECHNICAL COMPLETE (pending merge)
 
 **Baseline:** 884 deterministic + 7 live deselected, 0 failed
+
+**M4.H Live Evidence:**
+- WC project: `2NNXzW98y4CXQSVM5D8iY` (qwen3:14b, WC 12.320.0)
+- Canonical project: `proj_b8b1b8ab40b5`
+- API: POST /projects/from-idea → HTTP 200 in ~267s
+- Counts: 1 scene, 2 characters, 6 script shots, 6 storyboard shots, 3 beats, 18 canonical shots, 18 plans
+- Source precedence: storyboard duration (10.0s), camera angle, lighting all applied from source; sentinels (動作/情緒) correctly fell back to LLM
+- Exit criteria: 13/13 PASS
+
+**M4.H Known Limitations (not architecture blockers — WC Writer quality):**
+- WC Writer (qwen3:14b) did NOT generate the explicitly requested detective dialogue — all dialogue fields empty
+- Script action/emotion remained WC template sentinels (動作/情緒) in all 6 shots — M4.D correctly treated as non-meaningful and used LLM fallback
+- WC Writer mixed movement/lighting text into `camera angle:` field — StoryboardParser field boundary is correct (stops at `, lighting:` marker), but extracted camera_angle contains movement/lighting text because WC Writer put it there
+- Dialogue preservation mechanism PASS (empty source preserved as empty); non-empty dialogue live round-trip NOT EXERCISED
+- M4 handoff architecture verified; meaningful WC Writer dialogue/action quality with qwen3:14b is NOT proven
+- Future improvement: evaluate WC with higher-quality models or prompt engineering for richer structured output
 
 **M3 Closure Evidence:**
 - Branch: `m3-h3-bridge`

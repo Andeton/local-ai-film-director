@@ -29,6 +29,7 @@ from film_director.models.canonical import (
     GenerationPlan,
     ShotSpecificationV1,
 )
+from film_director.models.source_facts import ShotSourceFacts, build_shot_source_facts
 from film_director.persistence.database import Database
 from film_director.persistence.repositories import (
     BeatRepository,
@@ -118,6 +119,11 @@ class EnrichmentService:
         for seq in sequences:
             scenes.extend(self._scene_repo.get_scenes_by_sequence(seq.id))
 
+        # --- M4.D: recompute source facts from authoritative WC bundle ---
+        source_facts, storyboard_shots = self._load_source_facts(
+            project.wc_project_id,
+        )
+
         # --- Phase 1: LLM work in memory ---
         new_beats: list[Beat] = []
         new_shots: list[ShotSpecificationV1] = []
@@ -148,9 +154,10 @@ class EnrichmentService:
                     shots_for_beat = self._shot_spec_builder.build_shots(
                         beat=beat,
                         coverage=coverage,
-                        storyboard_shots=[],  # No reliable scene linkage in WC data
+                        storyboard_shots=storyboard_shots,
                         characters=characters,
                         scene=scene,
+                        source_facts=source_facts,
                     )
                     new_shots.extend(shots_for_beat)
 
@@ -269,14 +276,23 @@ class EnrichmentService:
                 detail=f"beat_id={beat_id}, human_shot_ids={[s.id for s in human_shots]}",
             )
 
+        # M4.D: recompute source facts from authoritative WC bundle
+        wc_project_id = None
+        if project_id:
+            proj = self._project_repo.get_project(project_id)
+            if proj:
+                wc_project_id = proj.wc_project_id
+        source_facts, storyboard_shots = self._load_source_facts(wc_project_id)
+
         # LLM work — outside transaction
         coverage = self._coverage_planner.plan_coverage(beat, scene)
         new_shots = self._shot_spec_builder.build_shots(
             beat=beat,
             coverage=coverage,
-            storyboard_shots=[],
+            storyboard_shots=storyboard_shots,
             characters=characters,
             scene=scene,
+            source_facts=source_facts,
         )
 
         # ONE transaction: mark old outdated, save new
@@ -465,6 +481,32 @@ class EnrichmentService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _load_source_facts(
+        self, wc_project_id: str | None,
+    ) -> tuple[dict[int, ShotSourceFacts] | None, list]:
+        """Recompute source facts from the authoritative WC bundle.
+
+        Returns (source_facts_dict, storyboard_shots) or (None, []) when
+        WC data is unavailable. Errors from the WC adapter are logged and
+        treated as "no source facts" rather than failing enrichment.
+        """
+        if self._adapter is None or not wc_project_id:
+            return None, []
+        try:
+            bundle = self._adapter.read_project_bundle(wc_project_id)
+            if not bundle.script_shots and not bundle.storyboard_shots:
+                return None, []
+            facts = build_shot_source_facts(
+                wc_project_id, bundle.script_shots, bundle.storyboard_shots,
+            )
+            return facts, bundle.storyboard_shots
+        except Exception:
+            logger.debug(
+                "Could not load source facts for WC project %s", wc_project_id,
+                exc_info=True,
+            )
+            return None, []
 
     def _find_project_id_for_scene(self, scene) -> str | None:
         """Walk scene -> sequence -> project to find the project_id."""

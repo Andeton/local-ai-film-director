@@ -146,8 +146,8 @@ def _make_db():
 def _seed_prerequisites(conn):
     """Insert minimal rows required by FK constraints."""
     conn.execute(
-        "INSERT INTO production_projects VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        ("proj-1", "wc-1", "Test Project", "draft", "16:9",
+        "INSERT INTO production_projects VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("proj-1", "wc-1", "Test Project", "draft", "16:9", "{}",
          "2024-01-01", "2024-01-01",
          "wind_comic", "wc-1", "asset-1", 1, "2024-01-01", "abc"),
     )

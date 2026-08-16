@@ -31,6 +31,7 @@ from film_director.errors import (
     UnsupportedStrategyError,
     WindComicArtifactMalformedError,
     WindComicNotFoundError,
+    WindComicPreproductionError,
     WindComicSchemaError,
     WindComicUnavailableError,
     WorkflowTemplateError,
@@ -52,8 +53,10 @@ from film_director.persistence.repositories import (
     ShotRepository,
     TakeRepository,
 )
+from film_director.adapters.wind_comic_preproduction import WindComicPreproductionClient
 from film_director.services.enrichment_service import EnrichmentService
 from film_director.services.import_service import ImportService
+from film_director.services.preproduction_service import PreproductionService
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +66,7 @@ _ERROR_STATUS: dict[type, int] = {
     LLMStructuredOutputError: 422,
     EnrichmentError: 422,
     HumanEditConflictError: 409,
+    WindComicPreproductionError: 502,
     WindComicSchemaError: 502,
     WindComicUnavailableError: 503,
     LLMUnavailableError: 503,
@@ -177,6 +181,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     request_repo = GenerationRequestRepository(db)
 
+    # M4 services
+    wc_preproduction_client = WindComicPreproductionClient(
+        base_url=settings.windcomic_base_url,
+        email=settings.windcomic_email,
+        password=settings.windcomic_password,
+    )
+    preproduction_service = PreproductionService(
+        wc_client=wc_preproduction_client,
+        adapter=adapter,
+        import_service=import_service,
+        enrichment_service=enrichment_service,
+    )
+
     router = create_router(
         adapter=adapter,
         import_service=import_service,
@@ -192,6 +209,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         generation_service=generation_service,
         comfyui_adapter=comfyui_adapter,
         request_repo=request_repo,
+        preproduction_service=preproduction_service,
     )
     app.include_router(router)
 

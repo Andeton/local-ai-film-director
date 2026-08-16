@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS production_projects (
     title                   TEXT NOT NULL,
     status                  TEXT NOT NULL DEFAULT 'draft',
     aspect                  TEXT NOT NULL DEFAULT '16:9',
+    director_context        TEXT NOT NULL DEFAULT '{}',
     created_at              TEXT NOT NULL,
     updated_at              TEXT NOT NULL,
     prov_source_system      TEXT NOT NULL,
@@ -212,7 +213,21 @@ class Database:
             os.makedirs(dir_part, exist_ok=True)
         with self.connection() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._apply_migrations(conn)
         logger.debug("Schema initialised at %s", self._db_path)
+
+    @staticmethod
+    def _apply_migrations(conn) -> None:
+        """Idempotent schema migrations for existing databases."""
+        # M4.B: Add director_context column to production_projects
+        existing = {
+            row[1] for row in conn.execute("PRAGMA table_info(production_projects)").fetchall()
+        }
+        if "director_context" not in existing:
+            conn.execute(
+                "ALTER TABLE production_projects ADD COLUMN director_context TEXT NOT NULL DEFAULT '{}'"
+            )
+            logger.debug("Migration: added director_context to production_projects")
 
     @contextmanager
     def connection(self):

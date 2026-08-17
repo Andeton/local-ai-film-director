@@ -8,9 +8,31 @@
 
 **M7 — Continuity**
 
-**Status:** NOT STARTED
+**Status:** PLANNING COMPLETE / IMPLEMENTATION NOT STARTED
 
-Next action: M7 planning only. No M7 implementation or plan exists yet.
+Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
+Branch: `m7-continuity`
+Worktree: `D:\Ai\Local AI Film Director\.worktrees\m7-continuity`
+Base: main at `18c6405`
+Baseline: 1320 passed, 12 live deselected, 0 failed
+
+**Architecture decisions (A–L):**
+- Within-scene-only automatic continuity chains (no cross-scene)
+- Deterministic predecessor resolution via canonical scene ordering
+- ContinuityState model (unresolved/current/outdated) per shot, separate from Take.status
+- continuity_snapshot JSON in GenerationRequest (nullable, backward-compatible)
+- Replace-approved with superseded status (atomic, CAS-protected)
+- Cascading downstream invalidation (deterministic, idempotent, non-destructive)
+- Generation eligibility requires predecessor approved Take + current continuity
+- FLF workflow (MiniMaxH3ImageToVideo/fl2va) for continuity shots; R2V (ref2va) for chain heads
+- Strict frame validation (path confinement, SHA-256, PNG format, dimensions)
+- 5 new API endpoints (continuity-state, predecessor, replace-approved, chain, outdated-shots)
+
+**Independent review:** 8 PASS, 2 WARN (non-blocking: scene_id derivation clarity, audio_vae handling), 0 FAIL.
+
+**Subtasks:** M7.A → M7.B → M7.C → M7.D → M7.E → M7.F
+
+Next action: M7.A implementation only.
 
 ---
 
@@ -82,11 +104,12 @@ Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
 
 **Baseline:** 1320 deterministic + 12 live deselected (9 M1-M5 + 3 M6), 0 failed
 
-Next: M7 — Continuity. NOT STARTED. Next action is M7 planning only.
+Next: M7 — Continuity. PLANNING COMPLETE. Next action is M7.A implementation only.
 
 **Non-blocking hardening observations (deferred to M10):**
 1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.
 2. claim_next() retrieves the claimed row using claimed_at timestamp matching; consider SQLite UPDATE ... RETURNING for stronger identification.
+3. Explicit H3 output-language control and native-audio validation.
 
 ---
 

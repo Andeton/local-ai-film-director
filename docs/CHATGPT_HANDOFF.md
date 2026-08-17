@@ -45,7 +45,9 @@
 | M6 feature commit | `3a2fac7` (branch `m6-take-management`) |
 | M6 merge commit | `6b6e6e2` |
 | Deterministic tests | 1320 passed, 12 live deselected, 0 failed |
-| Current milestone | M7 — Continuity (NOT STARTED) |
+| Current milestone | M7 — Continuity (PLANNING COMPLETE) |
+| M7 planning branch | `m7-continuity` |
+| M7 worktree | `D:\Ai\Local AI Film Director\.worktrees\m7-continuity` |
 
 **M5 Status:** COMPLETE / CLOSED / MERGED at `d4e0fbe`.
 
@@ -55,11 +57,19 @@
 - Live acceptance: 3 real queued Takes (visual PASS), restart recovery proven, 20-shot/60-job queue proof.
 - Chinese-audio observation: H3 inferred Chinese from WC source text (deferred to M10).
 
+**M7 Status:** PLANNING COMPLETE / IMPLEMENTATION NOT STARTED.
+- Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
+- Architecture decisions A–L resolved: within-scene continuity chains, ContinuityState model, deterministic predecessor resolution, replace-approved with superseded status, cascading downstream invalidation, FLF workflow (MiniMaxH3ImageToVideo/fl2va) for continuity shots, R2V as secondary preflight candidate, continuity_snapshot in GenerationRequest.
+- Independent review: 8 PASS, 2 WARN (non-blocking), 0 FAIL.
+- Key H3 finding: R2V (ref2va) supports character refs but NO first/last frame; FLF (fl2va) supports first/last frame but NO ref_images. These are different UNET models.
+- Subtasks: M7.A (models/persistence) → M7.B (workflow preflight) → M7.C (generation integration) → M7.D (replace-approved/invalidation) → M7.E (API) → M7.F (live acceptance).
+
 **Non-blocking hardening observations (deferred to M10):**
 1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.
 2. claim_next() retrieves the claimed row using claimed_at timestamp matching; consider SQLite UPDATE ... RETURNING for stronger identification.
+3. Explicit H3 output-language control and native-audio validation.
 
-**Next action:** M7 planning only. No M7 implementation or plan exists yet.
+**Next action:** M7.A implementation only. Do not skip to later subtasks.
 
 ---
 

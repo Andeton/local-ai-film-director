@@ -52,6 +52,63 @@ class H3PromptBuilder:
     Does NOT re-resolve characters, read the filesystem, or call any LLM.
     """
 
+    def build_continuity_prompt(
+        self,
+        shot: ShotSpecificationV1,
+        plan: GenerationPlan,
+    ) -> H3PromptV1:
+        """Build an FLF prompt for a continuity shot (no character reference bindings).
+
+        No <Subject N> or <Picture N> tags — identity comes from the first frame.
+        Preserves the shot's action, camera, environment, and dialogue intent.
+        """
+        if plan.shot_id != shot.id:
+            raise ReferenceResolutionError(
+                f"Plan/shot ID mismatch: plan.shot_id={plan.shot_id!r} != shot.id={shot.id!r}",
+            )
+
+        # Subject descriptions without Picture tags
+        subject_lines: list[str] = []
+        for s in (shot.subjects or []):
+            name = s.name if hasattr(s, "name") else s.get("name", "Unknown")
+            subject_lines.append(f"{name} continues from the supplied first frame.")
+        subject_definitions = "\n".join(subject_lines) if subject_lines else "Action continues from the supplied first frame."
+
+        summary = self._build_summary_no_bindings(shot)
+        retention_analysis = "All subjects preserved from the supplied first frame."
+        detailed_description = self._build_detailed_description(shot)
+        overall_soundscape = shot.audio_intent.get("ambient", "") if shot.audio_intent else ""
+        non_diegetic_music = shot.audio_intent.get("music", "") if shot.audio_intent else ""
+
+        rendered_prompt_text = self._render(
+            subject_definitions, summary, retention_analysis,
+            detailed_description, overall_soundscape, non_diegetic_music,
+        )
+
+        return H3PromptV1(
+            id=f"h3p{uuid.uuid4().hex[:12]}",
+            shot_id=shot.id,
+            generation_plan_id=plan.id,
+            source_shot_version=shot.version,
+            source_generation_plan_version=plan.version,
+            subject_definitions=subject_definitions,
+            summary=summary,
+            retention_analysis=retention_analysis,
+            detailed_description=detailed_description,
+            overall_soundscape=overall_soundscape,
+            non_diegetic_music=non_diegetic_music,
+            rendered_prompt_text=rendered_prompt_text,
+        )
+
+    @staticmethod
+    def _build_summary_no_bindings(shot: ShotSpecificationV1) -> str:
+        names = ", ".join(
+            (s.name if hasattr(s, "name") else s.get("name", "Character"))
+            for s in (shot.subjects or [])
+        )
+        prefix = f"{names}: " if names else ""
+        return f"{prefix}{shot.action}. {shot.dramatic_purpose}."
+
     def build(
         self,
         shot: ShotSpecificationV1,

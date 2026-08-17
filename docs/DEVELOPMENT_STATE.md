@@ -8,7 +8,7 @@
 
 **M7 — Continuity**
 
-**Status:** M7.B COMPLETE / M7.C NOT STARTED
+**Status:** M7.C COMPLETE / M7.D NOT STARTED
 
 Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
 Branch: `m7-continuity`
@@ -34,9 +34,21 @@ Base: main at `18c6405`
 - M7.B review: 9 PASS, 0 WARN, 0 FAIL
 - Baseline: 1413 passed, 12 deselected, 0 failed (1380 + 33 new)
 
-**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C → M7.D → M7.E → M7.F
+**M7.C — Continuity Resolution and GenerationService Integration: COMPLETE**
+- ContinuityService: resolve_for_generation (predecessor lookup, frame validation, SHA verification)
+- Frame validation: path confinement under storage_root, PNG magic, size limit (50MB), SHA-256
+- Chain head: R2V path unchanged (ReferenceSelector → H3ReferenceBinding → r2v_v1/v2)
+- Downstream: FLF path (predecessor last frame → ContinuityBinding → h3_flf_v1)
+- FLF prompt: no `<Picture N>` tags, preserves shot source facts, identity from first frame
+- Immutable continuity_snapshot with relative path, all provenance fields
+- ContinuityState persisted as CURRENT after successful resolution
+- Outdated/conflicting state rejected before submission
+- M7.C review: 8 PASS, 2 WARN (symlink no-op fixed, state/request non-atomic but retry-safe), 1 FAIL (missing import — fixed)
+- Baseline: 1431 passed, 12 deselected, 0 failed (1413 + 18 new)
 
-Next action: M7.C implementation only.
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D → M7.E → M7.F
+
+Next action: M7.D implementation only.
 
 ---
 

@@ -3,6 +3,8 @@
 M3 baseline: one-shot synchronous pipeline.
 M5.E evolution: ReferenceSelector + ReferenceAsset → count-based workflow
 selection (v1/v2), asset-provenance reference_snapshot.
+M7.C evolution: continuity-aware — chain heads use R2V, downstream shots
+use FLF with predecessor's approved Take's last frame.
 """
 from __future__ import annotations
 
@@ -12,7 +14,10 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+from film_director.continuity.continuity_resolver import ContinuityResolver
+from film_director.continuity.continuity_service import ContinuityService
 from film_director.errors import (
+    ContinuityError,
     GenerationError,
     MediaProcessingError,
     ReferenceResolutionError,
@@ -37,6 +42,7 @@ from film_director.models.reference import ReferenceKind
 from film_director.persistence.database import Database
 from film_director.persistence.repositories import (
     CharacterRepository,
+    ContinuityStateRepository,
     GenerationPlanRepository,
     GenerationRequestRepository,
     H3PromptRepository,
@@ -80,6 +86,9 @@ class GenerationService:
         self._workflow_resolver = WorkflowResolver(project_root=project_root)
         self._param_resolver = ParameterResolver()
 
+        # M7: continuity service
+        self._continuity_service = ContinuityService(db, storage_root)
+
         self._timeout = generation_timeout
         self._finalize_callback = None  # M6: set by QueueWorker for atomic finalization
 
@@ -122,72 +131,168 @@ class GenerationService:
                 f"Plan shot_version={plan.shot_version} != shot.version={shot.version}"
             )
 
-        if plan.strategy != "REFERENCE_TO_VIDEO":
+        if plan.strategy not in ("REFERENCE_TO_VIDEO", "FIRST_LAST_FRAME"):
             raise UnsupportedStrategyError(
-                f"Strategy {plan.strategy!r} not supported in M3",
+                f"Strategy {plan.strategy!r} not supported",
                 detail=f"shot_id={shot_id}",
             )
 
-        # Step 3: Resolve characters + reference assets
+        # Step 3: Resolve project context
         project_id = self._find_project_id(shot_id)
-        characters = self._char_repo.get_characters_by_project(project_id)
-        all_assets = self._ref_asset_repo.list_by_project(project_id)
 
-        # Step 4: M5 production path — ReferenceSelector + asset-based resolution
-        selected_assets = self._ref_selector.select(
-            shot=shot,
-            project_id=project_id,
-            kind=ReferenceKind.CHARACTER_BODY,
-            characters=characters,
-            assets=all_assets,
-        )
+        # Step 4: M7 continuity resolution — determines chain head vs downstream
+        continuity_input = self._continuity_service.resolve_for_generation(shot_id)
+        is_continuity_shot = continuity_input is not None
 
-        # Step 5: Count-based workflow selection (v1 for 1 ref, v2 for 2)
-        workflow_def = self._workflow_resolver.resolve_for_reference_count(
-            len(selected_assets),
-        )
+        if is_continuity_shot:
+            # ---- DOWNSTREAM CONTINUITY PATH (FLF) ----
+            import dataclasses as _dc
+            from film_director.continuity.continuity_binding import ContinuityBinding
 
-        # Step 6: Build H3ReferenceBindings from selected assets
-        resolved_bindings = self._ref_resolver.resolve_from_assets(
-            shot, selected_assets, characters,
-        )
+            # Select FLF workflow
+            workflow_def = self._workflow_resolver.resolve_for_continuity(
+                has_continuity_frame=True, reference_count=0,
+            )
 
-        # Step 7: Build or reuse H3 prompt
-        prompt = self._prompt_repo.get_current_prompt(
-            shot.id, shot.version, plan.id, plan.version,
-        )
-        if prompt is None:
-            prompt = self._prompt_builder.build(shot, plan, resolved_bindings)
-            self._prompt_repo.save_prompt(prompt)
+            # Build continuity prompt (no <Picture N> tags)
+            prompt = self._prompt_repo.get_current_prompt(
+                shot.id, shot.version, plan.id, plan.version,
+            )
+            if prompt is None:
+                prompt = self._prompt_builder.build_continuity_prompt(shot, plan)
+                self._prompt_repo.save_prompt(prompt)
 
-        # Step 8: Load and verify workflow template
-        template = self._workflow_resolver.load_template(workflow_def)
+            # Load and verify FLF workflow template
+            template = self._workflow_resolver.load_template(workflow_def)
 
-        # Step 9: Upload references in binding order
-        uploaded_bindings = self._upload_references(resolved_bindings)
+            # Upload the predecessor's last frame
+            frame_ext = os.path.splitext(continuity_input.frame_path)[1]
+            frame_filename = f"cont_{uuid.uuid4().hex[:8]}{frame_ext}"
+            uploaded_frame_name = self._comfyui.upload_image(
+                continuity_input.frame_path, frame_filename,
+            )
 
-        # Step 10-11: Resolve seed, duration, aspect
-        if seed_override is not None:
-            seed = seed_override
+            # Build ContinuityBinding with uploaded filename
+            binding = ContinuityBinding(
+                continuity_state_id=continuity_input.continuity_state_id,
+                upstream_shot_id=continuity_input.upstream_shot_id,
+                upstream_take_id=continuity_input.upstream_take_id,
+                upstream_take_number=continuity_input.upstream_take_number,
+                local_path=continuity_input.frame_path,
+                content_sha256=continuity_input.frame_sha256,
+                continuity_revision=continuity_input.continuity_revision,
+                continuity_fingerprint=continuity_input.continuity_fingerprint,
+                uploaded_filename=uploaded_frame_name,
+            )
+
+            # Resolve seed
+            if seed_override is not None:
+                seed = seed_override
+            else:
+                seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+
+            output_prefix = f"flf/{shot_id}/{uuid.uuid4().hex[:8]}"
+
+            # Build FLF injections
+            injections = self._param_resolver.build_continuity_injections(
+                plan=plan,
+                prompt_text=prompt.rendered_prompt_text,
+                workflow_def=workflow_def,
+                continuity_binding=binding,
+                seed=seed,
+                output_prefix=output_prefix,
+            )
+
+            # Build continuity snapshot for immutable request
+            continuity_snapshot = {
+                "continuity_state_id": binding.continuity_state_id,
+                "upstream_shot_id": binding.upstream_shot_id,
+                "upstream_take_id": binding.upstream_take_id,
+                "upstream_take_number": binding.upstream_take_number,
+                "upstream_last_frame_managed_path": os.path.relpath(
+                    binding.local_path, self._storage_root,
+                ),
+                "upstream_last_frame_sha256": binding.content_sha256,
+                "continuity_revision": binding.continuity_revision,
+                "continuity_fingerprint": binding.continuity_fingerprint,
+                "uploaded_filename": binding.uploaded_filename,
+                "workflow_definition_id": workflow_def.id,
+                "workflow_definition_version": workflow_def.version,
+                "workflow_template_fingerprint": workflow_def.template_fingerprint,
+                "first_frame_node_id": workflow_def.parameter_mappings["first_frame"]["node_id"],
+                "first_frame_field": workflow_def.parameter_mappings["first_frame"]["field"],
+            }
+
+            # No character reference bindings for FLF
+            uploaded_bindings = []
+
+            # Apply injections
+            submission_workflow = self._param_resolver.apply_injections(template, injections)
+
+            # Persist continuity state
+            scene_id = None
+            with self._db.connection() as conn:
+                scene_id = ContinuityResolver.get_scene_id_for_shot(shot_id, conn)
+            if scene_id:
+                self._continuity_service.persist_state(shot_id, scene_id, continuity_input)
+
         else:
-            seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+            # ---- CHAIN HEAD PATH (R2V) — unchanged from M5.E ----
+            if plan.strategy != "REFERENCE_TO_VIDEO":
+                raise UnsupportedStrategyError(
+                    f"Strategy {plan.strategy!r} not supported for chain head",
+                    detail=f"shot_id={shot_id}",
+                )
 
-        # Step 12: Build output prefix
-        output_prefix = f"m3/{shot_id}/{uuid.uuid4().hex[:8]}"
+            characters = self._char_repo.get_characters_by_project(project_id)
+            all_assets = self._ref_asset_repo.list_by_project(project_id)
 
-        # Build one authoritative injection list
-        injections = self._param_resolver.build_injections(
-            plan=plan,
-            shot=shot,
-            prompt=prompt,
-            workflow_def=workflow_def,
-            uploaded_bindings=uploaded_bindings,
-            seed=seed,
-            output_prefix=output_prefix,
-        )
+            selected_assets = self._ref_selector.select(
+                shot=shot,
+                project_id=project_id,
+                kind=ReferenceKind.CHARACTER_BODY,
+                characters=characters,
+                assets=all_assets,
+            )
 
-        # Step 13: Apply injections to template copy
-        submission_workflow = self._param_resolver.apply_injections(template, injections)
+            workflow_def = self._workflow_resolver.resolve_for_reference_count(
+                len(selected_assets),
+            )
+
+            resolved_bindings = self._ref_resolver.resolve_from_assets(
+                shot, selected_assets, characters,
+            )
+
+            prompt = self._prompt_repo.get_current_prompt(
+                shot.id, shot.version, plan.id, plan.version,
+            )
+            if prompt is None:
+                prompt = self._prompt_builder.build(shot, plan, resolved_bindings)
+                self._prompt_repo.save_prompt(prompt)
+
+            template = self._workflow_resolver.load_template(workflow_def)
+
+            uploaded_bindings = self._upload_references(resolved_bindings)
+
+            if seed_override is not None:
+                seed = seed_override
+            else:
+                seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+
+            output_prefix = f"m3/{shot_id}/{uuid.uuid4().hex[:8]}"
+
+            injections = self._param_resolver.build_injections(
+                plan=plan,
+                shot=shot,
+                prompt=prompt,
+                workflow_def=workflow_def,
+                uploaded_bindings=uploaded_bindings,
+                seed=seed,
+                output_prefix=output_prefix,
+            )
+
+            submission_workflow = self._param_resolver.apply_injections(template, injections)
+            continuity_snapshot = None
 
         # ---------------------------------------------------------------
         # PHASE 2: Request creation + execution (failures persist request)
@@ -228,6 +333,7 @@ class GenerationService:
                 for b in uploaded_bindings
             ],
             seed=seed,
+            continuity_snapshot=continuity_snapshot,
             status="pending",
         )
 

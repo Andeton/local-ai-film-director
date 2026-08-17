@@ -935,13 +935,14 @@ class TakeRepository:
         sql = """
             INSERT INTO takes
                 (id, shot_id, generation_request_id, seed, video_path,
-                 audio_path, last_frame_path, status, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?)
+                 audio_path, last_frame_path, status, is_favorite, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
         """
         params = (
             take.id, take.shot_id, take.generation_request_id,
             take.seed, take.video_path, take.audio_path,
-            take.last_frame_path, take.status, take.created_at,
+            take.last_frame_path, take.status, int(take.is_favorite),
+            take.created_at,
         )
         try:
             with _use_conn(self._db, conn) as c:
@@ -977,6 +978,7 @@ class TakeRepository:
             audio_path=row["audio_path"],
             last_frame_path=row["last_frame_path"],
             status=row["status"],
+            is_favorite=bool(row["is_favorite"]),
             created_at=row["created_at"],
         )
 

@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS takes (
     audio_path TEXT,
     last_frame_path TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
+    is_favorite INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     FOREIGN KEY (shot_id) REFERENCES shots(id),
     FOREIGN KEY (generation_request_id) REFERENCES generation_requests(id)
@@ -259,6 +260,32 @@ CREATE TABLE IF NOT EXISTS reference_generation_executions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ref_gen_exec_request ON reference_generation_executions(request_id);
+
+-- M6: Persistent generation queue
+CREATE TABLE IF NOT EXISTS generation_queue (
+    id TEXT PRIMARY KEY,
+    shot_id TEXT NOT NULL,
+    take_number INTEGER NOT NULL,
+    project_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    generation_request_id TEXT,
+    take_id TEXT,
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    claimed_at TEXT,
+    completed_at TEXT,
+    FOREIGN KEY (shot_id) REFERENCES shots(id),
+    FOREIGN KEY (project_id) REFERENCES production_projects(id),
+    UNIQUE(shot_id, take_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_queue_status ON generation_queue(status);
+CREATE INDEX IF NOT EXISTS idx_queue_shot ON generation_queue(shot_id);
+CREATE INDEX IF NOT EXISTS idx_queue_project ON generation_queue(project_id);
 """
 
 
@@ -290,6 +317,16 @@ class Database:
                 "ALTER TABLE production_projects ADD COLUMN director_context TEXT NOT NULL DEFAULT '{}'"
             )
             logger.debug("Migration: added director_context to production_projects")
+
+        # M6.A: Add is_favorite column to takes
+        takes_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(takes)").fetchall()
+        }
+        if "is_favorite" not in takes_cols:
+            conn.execute(
+                "ALTER TABLE takes ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
+            )
+            logger.debug("Migration: added is_favorite to takes")
 
     @contextmanager
     def connection(self):

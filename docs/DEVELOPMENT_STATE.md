@@ -122,11 +122,13 @@ Branch: `m6-take-management`
 Worktree: `D:\Ai\Local AI Film Director\.worktrees\m6-take-management`
 Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
 
-**M6 Subtasks:** M6.A (lifecycle+queue model) → M6.B (queue service) → M6.C (queue worker) → M6.D (take review) → M6.E (API) → M6.F (live acceptance)
+**M6 Progress:**
+- M6.A: COMPLETE — Take status evolution (approved/rejected), is_favorite boolean field, derive_take_seed (SHA-256, masked to signed-63-bit [0, 2^63-1]), QueueJob model, generation_queue table + indexes + UNIQUE(shot_id, take_number), is_favorite migration for existing takes, 40 tests
+- M6.B–M6.F: NOT STARTED
 
-**Baseline:** 1148 deterministic + 9 live deselected, 0 failed
+**Baseline:** 1188 deterministic + 9 live deselected, 0 failed
 
-Next: M6.A — Take lifecycle, seed derivation, and queue data model.
+Next: M6.B — QueueJobRepository + QueueService (enqueue, cancel).
 
 ---
 

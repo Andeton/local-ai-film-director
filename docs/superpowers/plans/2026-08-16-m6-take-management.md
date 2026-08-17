@@ -67,17 +67,23 @@ GenerationRequest remains INSERT-ONLY. Take.generation_request_id links 1:1.
 Deterministic, collision-safe derivation:
 
 ```python
-def derive_take_seed(base_seed: int | None, take_index: int) -> int:
+# Safe seed domain: 0 to 2^63-1 (intersection of SQLite signed int64 + non-negative)
+_SAFE_SEED_MAX = (1 << 63) - 1
+
+def derive_take_seed(base_seed: int, take_index: int) -> int:
     """Derive deterministic seed for take N.
     
     take_index is 0-based (take_number - 1).
-    If base_seed is None (random policy), generate a fresh random seed.
-    If base_seed is provided (fixed/vary_per_take), derive:
-        sha256(f"{base_seed}:{take_index}") → first 8 bytes → uint64
+    Algorithm: SHA-256 of f"{base_seed}:{take_index}" (UTF-8),
+    first 8 bytes as big-endian uint, masked to [0, 2^63-1].
     
+    Deterministic with negligible collision probability (~1/2^63).
+    Raises ValueError if base_seed outside safe domain or take_index < 0.
     The actual submitted seed is always preserved in GenerationRequest.seed.
     """
 ```
+
+**uint64 correction (M6.A):** The original plan specified unrestricted uint64 output. SQLite INTEGER is signed 64-bit (max 2^63-1). The seed derivation now masks to `& ((1 << 63) - 1)` to guarantee all derived seeds survive SQLite roundtrip. ComfyUI H3 accepts the full uint64 range, but SQLite is the binding constraint.
 
 - `seed_policy=fixed`: all takes use the same base_seed (unusual but valid)
 - `seed_policy=random`: each take gets a unique random seed

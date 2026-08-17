@@ -44,7 +44,7 @@
 | Main merged HEAD | `47d30c4` (M5 merge + docs checkpoint) |
 | Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m6-take-management` |
 | Active branch | `m6-take-management` |
-| Deterministic tests | 1148 passed, 9 live deselected, 0 failed |
+| Deterministic tests | 1188 passed, 9 live deselected, 0 failed |
 | Current milestone | M6 — Take Management (PLANNING COMPLETE, IMPLEMENTATION NOT STARTED) |
 
 **M5 Progress:**
@@ -61,7 +61,9 @@
 
 **M6 Plan:** `docs/superpowers/plans/2026-08-16-m6-take-management.md` — reviewed and accepted.
 
-**Next action:** M6.A — Take lifecycle, seed derivation, and queue data model. Implementation NOT STARTED.
+**M6.A:** COMPLETE — Take status (approved/rejected), is_favorite:bool, derive_take_seed (signed-63-bit safe), QueueJob model, generation_queue schema.
+
+**Next action:** M6.B — QueueJobRepository + QueueService.
 
 ---
 

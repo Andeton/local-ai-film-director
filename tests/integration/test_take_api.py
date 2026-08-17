@@ -226,7 +226,7 @@ class TestShotEnqueueAPI:
             json={},
             headers={"Idempotency-Key": "key-miss"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 404
 
     def test_invalid_takes_count(self, env):
         resp = env["client"].post(
@@ -257,7 +257,7 @@ class TestSceneEnqueueAPI:
             json={},
             headers={"Idempotency-Key": "skey-miss"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

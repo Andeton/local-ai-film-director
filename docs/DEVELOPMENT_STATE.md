@@ -165,10 +165,16 @@ Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
   - HTTP 202 for new batches, 409 for conflicts, 422 for validation
   - Error mappings: QueueJobNotFoundError→404, QueueValidationError→422, QueueConflictError→409, QueueTransitionError→409, TakeNotFoundError→404, TakeLifecycleError→409, TakeConflictError→409
   - Service wiring: QueueService, TakeService, QueueJobRepository, QueueBatchRepository in main.py
-  - 25 API integration tests (routes, enqueue, idempotency, conflict, listing, cancel, takes, lifecycle, M3 compat)
+  - Standalone queue worker: `python -m film_director.queue_runner` (separate process)
+  - Worker factory: build_worker(settings) constructs production QueueWorker from shared config
+  - Single-instance lock: OS file lock under data dir, auto-releases on crash
+  - Recovery before first claim, controlled polling, CTRL+C shutdown
+  - Settings: queue_worker_concurrency (1-4), queue_worker_poll_interval_seconds (1-300), queue_worker_enabled
+  - API 404 correction: missing shot/scene → 404 (not 422)
+  - 37 API+runner integration tests
 - M6.F: NOT STARTED
 
-**Baseline:** 1308 deterministic + 9 live deselected, 0 failed
+**Baseline:** 1320 deterministic + 9 live deselected, 0 failed
 
 Next: M6.F — Live acceptance: 3 takes + queue proof + human approval.
 

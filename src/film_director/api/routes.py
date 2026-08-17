@@ -667,6 +667,8 @@ def create_router(
     @router.post("/shots/{shot_id}/takes/enqueue", status_code=202)
     def enqueue_shot_takes(shot_id: str, body: EnqueueShotRequest, request: Request) -> dict:
         _m6_guard()
+        if shot_repo is not None and shot_repo.get_shot(shot_id) is None:
+            raise HTTPException(status_code=404, detail="Shot not found")
         key = _validate_idempotency_key(request)
         try:
             jobs = queue_service.enqueue_shot(
@@ -690,6 +692,8 @@ def create_router(
     @router.post("/scenes/{scene_id}/takes/enqueue", status_code=202)
     def enqueue_scene_takes(scene_id: str, body: EnqueueSceneRequest, request: Request) -> dict:
         _m6_guard()
+        if scene_repo is not None and scene_repo.get_scene(scene_id) is None:
+            raise HTTPException(status_code=404, detail="Scene not found")
         key = _validate_idempotency_key(request)
         try:
             jobs = queue_service.enqueue_scene(

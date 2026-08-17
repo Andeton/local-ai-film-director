@@ -44,7 +44,7 @@
 | Main merged HEAD | `47d30c4` (M5 merge + docs checkpoint) |
 | Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m6-take-management` |
 | Active branch | `m6-take-management` |
-| Deterministic tests | 1308 passed, 9 live deselected, 0 failed |
+| Deterministic tests | 1320 passed, 9 live deselected, 0 failed |
 | Current milestone | M6 — Take Management (PLANNING COMPLETE, IMPLEMENTATION NOT STARTED) |
 
 **M5 Progress:**
@@ -68,7 +68,7 @@
 
 **M6.D:** COMPLETE — TakeService (approve/reject/favorite/unfavorite, single-approved CAS, media validation, partial index), 31 tests.
 
-**M6.E:** COMPLETE — 11 API routes (enqueue shot/scene, queue CRUD, take listing/review, Idempotency-Key header), service wiring, error mappings, 25 tests.
+**M6.E:** COMPLETE — 11 API routes, Idempotency-Key header, standalone worker (`python -m film_director.queue_runner`), singleton lock, API 404 correction, 37 tests.
 
 **Next action:** M6.F — Live acceptance: 3 takes + queue proof + human approval.
 

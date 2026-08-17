@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     # M6 queue worker
     queue_worker_concurrency: int = 1
+    queue_worker_poll_interval_seconds: int = 5
+    queue_worker_enabled: bool = True
 
     windcomic_base_url: str = "http://127.0.0.1:3000"
     windcomic_email: str = ""

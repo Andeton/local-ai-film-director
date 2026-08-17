@@ -41,10 +41,11 @@
 
 | Item | Value |
 |---|---|
-| Main HEAD | `d4e0fbe` (Merge M5: reference management) |
+| Main merged HEAD | `47d30c4` (M5 merge + docs checkpoint) |
+| Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m6-take-management` |
+| Active branch | `m6-take-management` |
 | Deterministic tests | 1148 passed, 9 live deselected, 0 failed |
-| M5 live evidence tests | 2 passed (@pytest.mark.live) |
-| Current milestone | M5 — Reference Management (COMPLETE / CLOSED / MERGED) |
+| Current milestone | M6 — Take Management (PLANNING COMPLETE, IMPLEMENTATION NOT STARTED) |
 
 **M5 Progress:**
 - M5.A: COMPLETE (ReferenceAsset + ReferenceGenerationRequest + ReferenceGenerationExecution)
@@ -58,7 +59,9 @@
 
 **M5 Status:** COMPLETE / CLOSED / MERGED — 26/26 exit criteria PASS. Main contains accepted M5.
 
-**Next action:** Prepare M6 implementation plan and create a separate M6 worktree/branch after user approval. M6 — Take Management. NOT STARTED.
+**M6 Plan:** `docs/superpowers/plans/2026-08-16-m6-take-management.md` — reviewed and accepted.
+
+**Next action:** M6.A — Take lifecycle, seed derivation, and queue data model. Implementation NOT STARTED.
 
 ---
 

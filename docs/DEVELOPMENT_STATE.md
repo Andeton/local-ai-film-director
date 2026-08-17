@@ -116,9 +116,17 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 **M6 — Take Management**
 
-M5 is COMPLETE / CLOSED / MERGED (main HEAD `d4e0fbe`).
+**Status:** PLANNING COMPLETE, IMPLEMENTATION NOT STARTED
 
-Next: Prepare M6 implementation plan and create a separate M6 worktree/branch after user approval. M6 — Take Management. NOT STARTED.
+Branch: `m6-take-management`
+Worktree: `D:\Ai\Local AI Film Director\.worktrees\m6-take-management`
+Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
+
+**M6 Subtasks:** M6.A (lifecycle+queue model) → M6.B (queue service) → M6.C (queue worker) → M6.D (take review) → M6.E (API) → M6.F (live acceptance)
+
+**Baseline:** 1148 deterministic + 9 live deselected, 0 failed
+
+Next: M6.A — Take lifecycle, seed derivation, and queue data model.
 
 ---
 

@@ -1,4 +1,8 @@
-"""GenerationRequest and Take Pydantic models for M3 generation pipeline."""
+"""GenerationRequest and Take Pydantic models for generation pipeline.
+
+M3: initial single-take pipeline.
+M6: extended Take status (approved/rejected) + is_favorite preference flag.
+"""
 from typing import Literal
 import re
 
@@ -51,6 +55,14 @@ class GenerationRequest(BaseModel):
 
 
 class Take(BaseModel):
+    """Generated video take.
+
+    M6 status evolution:
+      Execution: pending → generating → succeeded | failed
+      Review:    succeeded → approved | rejected
+    is_favorite is orthogonal to status (an approved take can also be favorite).
+    """
+
     id: str
     shot_id: str
     generation_request_id: str
@@ -58,7 +70,11 @@ class Take(BaseModel):
     video_path: str
     audio_path: str | None = None
     last_frame_path: str | None = None
-    status: Literal["pending", "generating", "succeeded", "failed"] = "pending"
+    status: Literal[
+        "pending", "generating", "succeeded", "failed",
+        "approved", "rejected",
+    ] = "pending"
+    is_favorite: bool = False
     created_at: str = ""
 
     @field_validator("id", "shot_id", "generation_request_id", "video_path")

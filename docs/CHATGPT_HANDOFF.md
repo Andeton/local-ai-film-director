@@ -41,10 +41,11 @@
 
 | Item | Value |
 |---|---|
-| Main HEAD | `d4e0fbe` (Merge M5: reference management) |
-| Deterministic tests | 1148 passed, 9 live deselected, 0 failed |
-| M5 live evidence tests | 2 passed (@pytest.mark.live) |
-| Current milestone | M5 — Reference Management (COMPLETE / CLOSED / MERGED) |
+| Main merged HEAD | `47d30c4` (M5 merge + docs checkpoint) |
+| Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m6-take-management` |
+| Active branch | `m6-take-management` |
+| Deterministic tests | 1320 passed, 12 live deselected, 0 failed |
+| Current milestone | M6 — Take Management (COMPLETE / CLOSED) |
 
 **M5 Progress:**
 - M5.A: COMPLETE (ReferenceAsset + ReferenceGenerationRequest + ReferenceGenerationExecution)
@@ -58,7 +59,22 @@
 
 **M5 Status:** COMPLETE / CLOSED / MERGED — 26/26 exit criteria PASS. Main contains accepted M5.
 
-**Next action:** Prepare M6 implementation plan and create a separate M6 worktree/branch after user approval. M6 — Take Management. NOT STARTED.
+**M6 Plan:** `docs/superpowers/plans/2026-08-16-m6-take-management.md` — reviewed and accepted.
+
+**M6.A:** COMPLETE — Take status (approved/rejected), is_favorite:bool, derive_take_seed (signed-63-bit safe), QueueJob model, generation_queue schema.
+**M6.B:** COMPLETE — Persistent batch idempotency (QueueBatch + fingerprint), QueueJobRepository, QueueBatchRepository, QueueService (idempotent enqueue shot/scene, cancel), 32 tests.
+
+**M6.C:** COMPLETE — QueueWorker (atomic claim+finalization, 12-state recovery, prompt-ID auto-finalization, false-success prevention, run_available with concurrency 1–4), 32 tests.
+
+**M6.D:** COMPLETE — TakeService (approve/reject/favorite/unfavorite, single-approved CAS, media validation, partial index), 31 tests.
+
+**M6.E:** COMPLETE — 11 API routes, Idempotency-Key header, standalone worker (`python -m film_director.queue_runner`), singleton lock, API 404 correction, 37 tests.
+
+**M6.F:** COMPLETE — 3 real queued Takes (visual PASS), Take 2 approved, restart recovery proven, 20-shot/60-job queue proof, Chinese-audio deferred to M10.
+
+**M6 Status:** COMPLETE / CLOSED. Branch ready for merge.
+
+**Next action:** Merge M6 to main, then M7 — Continuity. NOT STARTED.
 
 ---
 

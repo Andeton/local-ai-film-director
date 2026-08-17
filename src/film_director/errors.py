@@ -106,3 +106,31 @@ class ReferenceGenerationError(FilmDirectorError):
 
 class ReferenceIngestError(FilmDirectorError):
     """Reference file validation, download, or storage failure."""
+
+
+class QueueJobNotFoundError(FilmDirectorError):
+    """Queue job not found."""
+
+
+class QueueValidationError(FilmDirectorError):
+    """Invalid queue request (missing prerequisites, invalid parameters)."""
+
+
+class QueueConflictError(FilmDirectorError):
+    """Queue idempotency conflict (same shot already fully enqueued)."""
+
+
+class QueueTransitionError(FilmDirectorError):
+    """Illegal queue job status transition."""
+
+
+class TakeNotFoundError(FilmDirectorError):
+    """Take not found."""
+
+
+class TakeLifecycleError(FilmDirectorError):
+    """Illegal Take lifecycle transition."""
+
+
+class TakeConflictError(FilmDirectorError):
+    """Another Take already approved for this shot."""

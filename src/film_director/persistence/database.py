@@ -193,10 +193,15 @@ CREATE TABLE IF NOT EXISTS takes (
     audio_path TEXT,
     last_frame_path TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
+    is_favorite INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     FOREIGN KEY (shot_id) REFERENCES shots(id),
     FOREIGN KEY (generation_request_id) REFERENCES generation_requests(id)
 );
+
+-- M6.D: at most one approved Take per shot
+CREATE UNIQUE INDEX IF NOT EXISTS idx_takes_one_approved_per_shot
+    ON takes(shot_id) WHERE status = 'approved';
 
 CREATE TABLE IF NOT EXISTS reference_assets (
     id TEXT PRIMARY KEY,
@@ -259,6 +264,53 @@ CREATE TABLE IF NOT EXISTS reference_generation_executions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ref_gen_exec_request ON reference_generation_executions(request_id);
+
+-- M6: Persistent batch idempotency
+CREATE TABLE IF NOT EXISTS queue_batches (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    scope_type TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    takes_count INTEGER NOT NULL,
+    base_seed INTEGER NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES production_projects(id),
+    UNIQUE(project_id, idempotency_key)
+);
+
+-- M6: Persistent generation queue
+CREATE TABLE IF NOT EXISTS generation_queue (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    shot_id TEXT NOT NULL,
+    take_number INTEGER NOT NULL,
+    project_id TEXT NOT NULL,
+    base_seed INTEGER NOT NULL,
+    seed INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    generation_request_id TEXT,
+    take_id TEXT,
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    claimed_at TEXT,
+    completed_at TEXT,
+    FOREIGN KEY (batch_id) REFERENCES queue_batches(id),
+    FOREIGN KEY (shot_id) REFERENCES shots(id),
+    FOREIGN KEY (project_id) REFERENCES production_projects(id),
+    UNIQUE(shot_id, take_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_queue_status ON generation_queue(status);
+CREATE INDEX IF NOT EXISTS idx_queue_shot ON generation_queue(shot_id);
+CREATE INDEX IF NOT EXISTS idx_queue_project ON generation_queue(project_id);
+CREATE INDEX IF NOT EXISTS idx_queue_batch ON generation_queue(batch_id);
 """
 
 
@@ -290,6 +342,83 @@ class Database:
                 "ALTER TABLE production_projects ADD COLUMN director_context TEXT NOT NULL DEFAULT '{}'"
             )
             logger.debug("Migration: added director_context to production_projects")
+
+        # M6.A: Add is_favorite column to takes
+        takes_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(takes)").fetchall()
+        }
+        if "is_favorite" not in takes_cols:
+            conn.execute(
+                "ALTER TABLE takes ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
+            )
+            logger.debug("Migration: added is_favorite to takes")
+
+        # M6.D: partial unique index for single-approved-per-shot
+        takes_indexes = {
+            row[1] for row in conn.execute("PRAGMA index_list(takes)").fetchall()
+        }
+        if "idx_takes_one_approved_per_shot" not in takes_indexes:
+            # Verify no duplicate approved Takes exist before creating index
+            dups = conn.execute(
+                "SELECT shot_id, COUNT(*) as cnt FROM takes "
+                "WHERE status = 'approved' GROUP BY shot_id HAVING cnt > 1"
+            ).fetchall()
+            if dups:
+                dup_info = ", ".join(f"{r['shot_id']}({r['cnt']})" for r in dups)
+                raise RuntimeError(
+                    f"Cannot create single-approved index: duplicate approved Takes: {dup_info}"
+                )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_takes_one_approved_per_shot "
+                "ON takes(shot_id) WHERE status = 'approved'"
+            )
+            logger.debug("Migration: added single-approved partial unique index")
+
+        # M6.B: Add base_seed/seed and batch_id to generation_queue
+        queue_tables = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "generation_queue" in queue_tables:
+            queue_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(generation_queue)").fetchall()
+            }
+            if "base_seed" not in queue_cols:
+                conn.execute(
+                    "ALTER TABLE generation_queue ADD COLUMN base_seed INTEGER NOT NULL DEFAULT 0"
+                )
+                conn.execute(
+                    "ALTER TABLE generation_queue ADD COLUMN seed INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.debug("Migration: added base_seed/seed to generation_queue")
+            if "batch_id" not in queue_cols:
+                # Add batch_id with default for existing rows
+                conn.execute(
+                    "ALTER TABLE generation_queue ADD COLUMN batch_id TEXT NOT NULL DEFAULT 'legacy'"
+                )
+                # Backfill: create legacy batch records for existing jobs
+                legacy_projects = {
+                    row[0] for row in conn.execute(
+                        "SELECT DISTINCT project_id FROM generation_queue WHERE batch_id = 'legacy'"
+                    ).fetchall()
+                }
+                import uuid as _uuid
+                for proj_id in legacy_projects:
+                    batch_id = f"qb_legacy_{_uuid.uuid4().hex[:8]}"
+                    conn.execute(
+                        "INSERT OR IGNORE INTO queue_batches "
+                        "(id, project_id, scope_type, scope_id, idempotency_key, "
+                        "request_fingerprint, takes_count, base_seed, created_at) "
+                        "VALUES (?, ?, 'shot', 'legacy', ?, 'legacy', 0, 0, datetime('now'))",
+                        (batch_id, proj_id, f"legacy_{proj_id}"),
+                    )
+                    conn.execute(
+                        "UPDATE generation_queue SET batch_id = ? "
+                        "WHERE project_id = ? AND batch_id = 'legacy'",
+                        (batch_id, proj_id),
+                    )
+                logger.debug("Migration: added batch_id to generation_queue")
 
     @contextmanager
     def connection(self):

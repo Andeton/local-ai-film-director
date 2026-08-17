@@ -6,16 +6,23 @@ import tempfile
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, model_validator
 
 from film_director.adapters.wind_comic import WindComicAdapter
 from film_director.errors import (
+    QueueConflictError,
+    QueueJobNotFoundError,
+    QueueTransitionError,
+    QueueValidationError,
     ReferenceGenerationError,
     ReferenceIngestError,
     ReferenceLifecycleError,
     ReferenceNotFoundError,
     ReferenceResolutionError,
+    TakeConflictError,
+    TakeLifecycleError,
+    TakeNotFoundError,
 )
 from film_director.generation.comfyui_adapter import ComfyUIAdapter
 from film_director.generation.generation_service import GenerationService
@@ -107,6 +114,41 @@ class GenerateReferenceRequest(BaseModel):
         return self
 
 
+_SAFE_SEED_MAX = (1 << 63) - 1
+
+
+class EnqueueShotRequest(BaseModel):
+    takes_count: int = 3
+    base_seed: int | None = None
+    priority: int = 0
+
+    @model_validator(mode="after")
+    def _validate(self):
+        if self.takes_count < 1 or self.takes_count > 10:
+            raise ValueError("takes_count must be 1–10")
+        if self.base_seed is not None and (self.base_seed < 0 or self.base_seed > _SAFE_SEED_MAX):
+            raise ValueError(f"base_seed must be in [0, {_SAFE_SEED_MAX}]")
+        if self.priority < 0 or self.priority > 100:
+            raise ValueError("priority must be 0–100")
+        return self
+
+
+class EnqueueSceneRequest(BaseModel):
+    takes_per_shot: int = 3
+    base_seed: int | None = None
+    priority: int = 0
+
+    @model_validator(mode="after")
+    def _validate(self):
+        if self.takes_per_shot < 1 or self.takes_per_shot > 10:
+            raise ValueError("takes_per_shot must be 1–10")
+        if self.base_seed is not None and (self.base_seed < 0 or self.base_seed > _SAFE_SEED_MAX):
+            raise ValueError(f"base_seed must be in [0, {_SAFE_SEED_MAX}]")
+        if self.priority < 0 or self.priority > 100:
+            raise ValueError("priority must be 0–100")
+        return self
+
+
 def create_router(
     adapter: WindComicAdapter,
     import_service: ImportService,
@@ -128,6 +170,10 @@ def create_router(
     preproduction_service=None,  # PreproductionService | None
     # M5 services
     ref_asset_repo: ReferenceAssetRepository | None = None,
+    # M6 services
+    queue_service=None,  # QueueService | None
+    take_service=None,  # TakeService | None
+    take_repo=None,  # TakeRepository | None (for listing)
     ref_ingest_service=None,  # ReferenceIngestService | None
     ref_generation_service=None,  # ReferenceGenerationService | None
     ref_lifecycle_service=None,  # ReferenceLifecycleService | None
@@ -601,5 +647,159 @@ def create_router(
             raise HTTPException(status_code=409, detail=e.message)
 
         return [a.model_dump() for a in selected]
+
+    # ------------------------------------------------------------------
+    # M6 — Take Management & Queue
+    # ------------------------------------------------------------------
+
+    def _m6_guard():
+        if queue_service is None:
+            raise HTTPException(status_code=501, detail="M6 take management not available")
+
+    def _validate_idempotency_key(request) -> str:
+        key = request.headers.get("Idempotency-Key", "").strip()
+        if not key:
+            raise HTTPException(status_code=422, detail="Idempotency-Key header required")
+        if len(key) > 128:
+            raise HTTPException(status_code=422, detail="Idempotency-Key too long (max 128)")
+        return key
+
+    @router.post("/shots/{shot_id}/takes/enqueue", status_code=202)
+    def enqueue_shot_takes(shot_id: str, body: EnqueueShotRequest, request: Request) -> dict:
+        _m6_guard()
+        if shot_repo is not None and shot_repo.get_shot(shot_id) is None:
+            raise HTTPException(status_code=404, detail="Shot not found")
+        key = _validate_idempotency_key(request)
+        try:
+            jobs = queue_service.enqueue_shot(
+                shot_id=shot_id,
+                idempotency_key=key,
+                takes_count=body.takes_count,
+                base_seed=body.base_seed,
+                priority=body.priority,
+            )
+        except QueueValidationError as e:
+            raise HTTPException(status_code=422, detail=e.message)
+        except QueueConflictError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        return {
+            "batch_id": jobs[0].batch_id if jobs else None,
+            "shot_id": shot_id,
+            "takes_count": len(jobs),
+            "jobs": [j.model_dump() for j in jobs],
+        }
+
+    @router.post("/scenes/{scene_id}/takes/enqueue", status_code=202)
+    def enqueue_scene_takes(scene_id: str, body: EnqueueSceneRequest, request: Request) -> dict:
+        _m6_guard()
+        if scene_repo is not None and scene_repo.get_scene(scene_id) is None:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        key = _validate_idempotency_key(request)
+        try:
+            jobs = queue_service.enqueue_scene(
+                scene_id=scene_id,
+                idempotency_key=key,
+                takes_per_shot=body.takes_per_shot,
+                base_seed=body.base_seed,
+                priority=body.priority,
+            )
+        except QueueValidationError as e:
+            raise HTTPException(status_code=422, detail=e.message)
+        except QueueConflictError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        return {
+            "batch_id": jobs[0].batch_id if jobs else None,
+            "scene_id": scene_id,
+            "total_jobs": len(jobs),
+            "jobs": [j.model_dump() for j in jobs],
+        }
+
+    @router.get("/queue/jobs")
+    def list_queue_jobs(
+        status: str | None = Query(default=None),
+        shot_id: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> list[dict]:
+        _m6_guard()
+        from film_director.persistence.repositories import QueueJobRepository
+        # Use the queue_service's internal repo for listing
+        if shot_id:
+            jobs = queue_service._queue_repo.list_by_shot(shot_id)
+        elif status:
+            valid = {"pending", "claimed", "succeeded", "failed", "cancelled"}
+            if status not in valid:
+                raise HTTPException(status_code=422, detail=f"Invalid status: {status}")
+            jobs = queue_service._queue_repo.list_by_status(status, limit=limit)
+        else:
+            jobs = queue_service._queue_repo.list_by_status("pending", limit=limit)
+        return [j.model_dump() for j in jobs[:limit]]
+
+    @router.get("/queue/jobs/{job_id}")
+    def get_queue_job(job_id: str) -> dict:
+        _m6_guard()
+        job = queue_service._queue_repo.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Queue job not found")
+        return job.model_dump()
+
+    @router.post("/queue/jobs/{job_id}/cancel")
+    def cancel_queue_job(job_id: str) -> dict:
+        _m6_guard()
+        try:
+            job = queue_service.cancel_job(job_id)
+        except QueueJobNotFoundError:
+            raise HTTPException(status_code=404, detail="Queue job not found")
+        except QueueTransitionError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        return job.model_dump()
+
+    @router.get("/shots/{shot_id}/takes")
+    def list_takes(shot_id: str) -> list[dict]:
+        if take_repo is None:
+            raise HTTPException(status_code=501, detail="M6 take management not available")
+        if shot_repo is not None:
+            shot = shot_repo.get_shot(shot_id)
+            if shot is None:
+                raise HTTPException(status_code=404, detail="Shot not found")
+        takes = take_repo.get_takes_by_shot(shot_id)
+        return [t.model_dump() for t in takes]
+
+    @router.get("/shots/{shot_id}/approved-take")
+    def get_approved_take(shot_id: str) -> dict:
+        if take_service is None:
+            raise HTTPException(status_code=501, detail="M6 take management not available")
+        take = take_service.get_approved_for_shot(shot_id)
+        if take is None:
+            raise HTTPException(status_code=404, detail="No approved take for this shot")
+        return take.model_dump()
+
+    def _take_lifecycle(take_id: str, action: str) -> dict:
+        if take_service is None:
+            raise HTTPException(status_code=501, detail="M6 take management not available")
+        try:
+            take = getattr(take_service, action)(take_id)
+        except TakeNotFoundError:
+            raise HTTPException(status_code=404, detail="Take not found")
+        except TakeConflictError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        except TakeLifecycleError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        return take.model_dump()
+
+    @router.post("/takes/{take_id}/approve")
+    def approve_take(take_id: str) -> dict:
+        return _take_lifecycle(take_id, "approve")
+
+    @router.post("/takes/{take_id}/reject")
+    def reject_take(take_id: str) -> dict:
+        return _take_lifecycle(take_id, "reject")
+
+    @router.post("/takes/{take_id}/favorite")
+    def favorite_take(take_id: str) -> dict:
+        return _take_lifecycle(take_id, "favorite")
+
+    @router.post("/takes/{take_id}/unfavorite")
+    def unfavorite_take(take_id: str) -> dict:
+        return _take_lifecycle(take_id, "unfavorite")
 
     return router

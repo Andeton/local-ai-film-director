@@ -258,6 +258,64 @@ class ComfyUIAdapter:
             ) from e
 
     # -----------------------------------------------------------------
+    # Check prompt status (recovery)
+    # -----------------------------------------------------------------
+
+    def check_prompt_status(self, prompt_id: str) -> str:
+        """Check ComfyUI prompt status without blocking.
+
+        Returns one of: "succeeded", "failed", "running", "queued", "unknown".
+        Raises ComfyUIUnavailableError if ComfyUI is unreachable.
+        """
+        client = self._get_client()
+        try:
+            resp = client.get(f"/history/{prompt_id}")
+        except (httpx.HTTPError, httpx.TransportError) as e:
+            raise ComfyUIUnavailableError(
+                f"Cannot reach ComfyUI: {e}",
+                detail=f"prompt_id={prompt_id}",
+            ) from e
+        finally:
+            if self._owns_client():
+                client.close()
+
+        if resp.status_code != 200:
+            return "unknown"
+
+        try:
+            history = resp.json()
+        except Exception:
+            return "unknown"
+
+        entry = history.get(prompt_id)
+        if entry is None:
+            # Check queue
+            try:
+                q_resp = client.get("/queue")
+                if q_resp.status_code == 200:
+                    qdata = q_resp.json()
+                    for item in qdata.get("queue_running", []):
+                        if len(item) >= 2 and item[1] == prompt_id:
+                            return "running"
+                    for item in qdata.get("queue_pending", []):
+                        if len(item) >= 2 and item[1] == prompt_id:
+                            return "queued"
+            except Exception:
+                pass
+            return "unknown"
+
+        status_info = entry.get("status", {})
+        status_str = status_info.get("status_str", "")
+        completed = status_info.get("completed", False)
+
+        if status_str == "success" or completed:
+            return "succeeded"
+        elif status_str == "error":
+            return "failed"
+        else:
+            return "running"
+
+    # -----------------------------------------------------------------
     # Get result (history)
     # -----------------------------------------------------------------
 

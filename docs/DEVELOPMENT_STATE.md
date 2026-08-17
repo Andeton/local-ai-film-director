@@ -116,9 +116,78 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 **M6 — Take Management**
 
-M5 is COMPLETE / CLOSED / MERGED (main HEAD `d4e0fbe`).
+**Status:** COMPLETE / CLOSED
 
-Next: Prepare M6 implementation plan and create a separate M6 worktree/branch after user approval. M6 — Take Management. NOT STARTED.
+Branch: `m6-take-management`
+Worktree: `D:\Ai\Local AI Film Director\.worktrees\m6-take-management`
+Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
+
+**M6 Progress:**
+- M6.A: COMPLETE — Take status evolution (approved/rejected), is_favorite boolean field, derive_take_seed (SHA-256, masked to signed-63-bit [0, 2^63-1]), QueueJob model, generation_queue table + indexes + UNIQUE(shot_id, take_number), is_favorite migration for existing takes, 40 tests
+- M6.B: COMPLETE — Persistent queue batch idempotency + enqueue + cancel
+  - QueueBatch: persistent idempotency record with UNIQUE(project_id, idempotency_key) + request_fingerprint (SHA-256 of canonical JSON)
+  - QueueJob.batch_id: links every job to its batch for status-independent retry
+  - Same key + same payload → returns original jobs (regardless of job status)
+  - Same key + different payload → QueueConflictError
+  - New key → creates new batch with new take numbers
+  - Seed persistence: base_seed + derived seed immutable at enqueue time
+  - QueueJobRepository + QueueBatchRepository
+  - QueueService.enqueue_shot/scene: atomic batch creation, deterministic seeds
+  - cancel_job: pending→cancelled (idempotent), claimed/succeeded/failed rejected
+  - Scene retry returns original jobs (not empty list)
+  - Error classes: QueueJobNotFoundError, QueueValidationError, QueueConflictError, QueueTransitionError
+  - 32 integration tests (idempotency, conflict, scene retry, cancellation, repository)
+- M6.C: COMPLETE — QueueWorker + atomic finalization + 12-state recovery + concurrency
+  - Atomic claim: UPDATE with subquery, WAL-serialized, attempt_count incremented once
+  - GenerationService.generate_take + _finalize_callback for atomic QueueJob update
+  - Atomic finalization: Take + request succeeded + QueueJob succeeded in single transaction
+  - False-success prevention: request succeeded + no Take/missing media → invariant failure
+  - Prompt-ID recovery: never calls submit() during recovery
+  - Recovery matrix: 12 states covering all (claimed, request_status, Take_exists, media_exists) combinations
+  - Prompt-ID resume: check_prompt_status → queued/running=leave claimed, succeeded=finalize_from_result, failed/unknown=mark failed
+  - GenerationService.finalize_from_result: shared download→validate→stage→finalize path for recovery (no submit)
+  - ComfyUIAdapter.check_prompt_status: non-blocking prompt state resolution
+  - Status-check exceptions leave job claimed (never false-fail a completed prompt)
+  - run_available(): bounded ThreadPoolExecutor, recovery before first claim, stop() prevents new claims
+  - Concurrency: 1–4 (validated), default 1
+  - max_attempts=1: no retry in M6
+  - 32 integration tests (claim, execution, failure, recovery false-success, prompt-ID resume, concurrency, stop)
+- M6.D: COMPLETE — TakeService approve/reject/favorite/unfavorite
+  - Transition matrix: succeeded→approved/rejected (terminal), is_favorite orthogonal
+  - Single-approved invariant: partial unique index + service-level CAS check
+  - TakeRepository: update_review_status (CAS), update_favorite, get_approved_for_shot, count_approved_for_shot
+  - Media validation: video file existence + path confinement before approval
+  - TakeNotFoundError, TakeLifecycleError, TakeConflictError
+  - 31 unit tests (transitions, single-approved, favorites, media, immutability, migration)
+- M6.E: COMPLETE — Take management and queue API endpoints
+  - 11 routes: shot/scene enqueue, queue listing/get/cancel, take listing/approved, approve/reject/favorite/unfavorite
+  - Idempotency-Key HTTP header required for enqueue (validated 1-128 chars)
+  - HTTP 202 for new batches, 409 for conflicts, 422 for validation
+  - Error mappings: QueueJobNotFoundError→404, QueueValidationError→422, QueueConflictError→409, QueueTransitionError→409, TakeNotFoundError→404, TakeLifecycleError→409, TakeConflictError→409
+  - Service wiring: QueueService, TakeService, QueueJobRepository, QueueBatchRepository in main.py
+  - Standalone queue worker: `python -m film_director.queue_runner` (separate process)
+  - Worker factory: build_worker(settings) constructs production QueueWorker from shared config
+  - Single-instance lock: OS file lock under data dir, auto-releases on crash
+  - Recovery before first claim, controlled polling, CTRL+C shutdown
+  - Settings: queue_worker_concurrency (1-4), queue_worker_poll_interval_seconds (1-300), queue_worker_enabled
+  - API 404 correction: missing shot/scene → 404 (not 422)
+  - 37 API+runner integration tests
+- M6.F: COMPLETE — Live acceptance with 3 real queued Takes + queue proof + human approval
+  - Three Takes (tn=2,3,4) with distinct seeds via persistent queue
+  - Worker restart recovery: Take 4 recovered from WS timeout via prompt-ID finalization (no duplicate submit)
+  - Human visual verdict: PASS on all three
+  - Take 2 approved (deterministic first-acceptable)
+  - 20-shot / 60-job persistent queue proof (zero ComfyUI submissions)
+  - Idempotent replay after completion and DB reopen verified
+  - Chinese audio observation: H3 inferred Chinese from WC source text (deferred to M10)
+  - M5 source integrity verified unchanged
+  - 3 @pytest.mark.live evidence tests
+
+**M6 Status:** COMPLETE / CLOSED
+
+**Baseline:** 1320 deterministic + 12 live deselected (9 M1-M5 + 3 M6), 0 failed
+
+Next: M7 — Continuity. NOT STARTED.
 
 ---
 

@@ -81,9 +81,25 @@ class GenerationService:
         self._param_resolver = ParameterResolver()
 
         self._timeout = generation_timeout
+        self._finalize_callback = None  # M6: set by QueueWorker for atomic finalization
 
     def generate_shot(self, shot_id: str) -> Take:
-        """Execute full M3 generation pipeline for one shot.
+        """Synchronous single-take generation (M3 backward compat).
+
+        Delegates to generate_take with take_number=1 and plan-derived seed.
+        """
+        return self.generate_take(shot_id, take_number=1)
+
+    def generate_take(
+        self,
+        shot_id: str,
+        take_number: int = 1,
+        seed_override: int | None = None,
+    ) -> Take:
+        """Execute generation pipeline for one take of a shot.
+
+        When seed_override is provided (from QueueJob), it replaces the
+        plan-derived seed. take_number is persisted in GenerationRequest.
 
         Returns the persisted Take on success.
         Raises on any failure — pre-request failures leave NO GenerationRequest.
@@ -151,7 +167,10 @@ class GenerationService:
         uploaded_bindings = self._upload_references(resolved_bindings)
 
         # Step 10-11: Resolve seed, duration, aspect
-        seed = self._param_resolver.resolve_seed(plan, take_number=1)
+        if seed_override is not None:
+            seed = seed_override
+        else:
+            seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
 
         # Step 12: Build output prefix
         output_prefix = f"m3/{shot_id}/{uuid.uuid4().hex[:8]}"
@@ -188,7 +207,7 @@ class GenerationService:
             workflow_definition_id=workflow_def.id,
             workflow_definition_version=workflow_def.version,
             workflow_template_fingerprint=workflow_def.template_fingerprint,
-            take_number=1,
+            take_number=take_number,
             parameters_snapshot=[
                 {"name": i.name, "node_id": i.node_id, "field": i.field, "value": i.value}
                 for i in injections
@@ -251,7 +270,7 @@ class GenerationService:
             extract_last_frame(staged_video, last_frame_path)
 
             # Step 21: Move staging → final
-            final_dir = make_final_dir(self._storage_root, project_id, shot_id, 1)
+            final_dir = make_final_dir(self._storage_root, project_id, shot_id, take_number)
             move_to_final(staging_dir, final_dir)
 
             final_video = os.path.join(final_dir, safe_name)
@@ -278,6 +297,9 @@ class GenerationService:
                         completed_at=datetime.now(timezone.utc).isoformat(),
                         conn=conn,
                     )
+                    # M6: atomic QueueJob finalization callback
+                    if self._finalize_callback is not None:
+                        self._finalize_callback(take, conn)
             except Exception as db_err:
                 # DB finalization failed — clean up final directory
                 logger.error("DB finalization failed: %s", db_err)
@@ -317,6 +339,92 @@ class GenerationService:
                 cleanup_dir(final_dir)
             raise GenerationError(
                 f"Generation failed: {e}",
+                detail=f"request_id={request_id}",
+            ) from e
+
+    def finalize_from_result(
+        self,
+        request_id: str,
+        shot_id: str,
+        take_number: int,
+        seed: int,
+        prompt_id: str,
+        output_node_id: str = "92",
+    ) -> Take:
+        """Download, validate, and finalize a completed ComfyUI result.
+
+        Used by QueueWorker recovery to finalize a prompt that completed
+        externally. Never calls submit(). Uses the exact persisted request.
+
+        Returns the persisted Take on success.
+        """
+        project_id = self._find_project_id(shot_id)
+        result = self._comfyui.get_result(prompt_id, output_node_id)
+
+        staging_dir = create_staging_dir(self._storage_root, request_id)
+        final_dir = None
+        try:
+            output_ref = result.outputs[0]
+            safe_name = sanitize_filename(output_ref.filename)
+            staged_video = os.path.join(staging_dir, safe_name)
+            self._comfyui.download_output(output_ref, staged_video)
+
+            verify_media(staged_video)
+
+            last_frame_path = os.path.join(staging_dir, "last_frame.png")
+            extract_last_frame(staged_video, last_frame_path)
+
+            final_path = os.path.join(
+                self._storage_root, "takes", project_id, shot_id, f"take_{take_number}",
+            )
+            if os.path.isdir(final_path):
+                # Final dir exists — check if valid Take already there
+                existing_takes = self._take_repo.get_takes_by_shot(shot_id)
+                for t in existing_takes:
+                    if t.generation_request_id == request_id:
+                        cleanup_dir(staging_dir)
+                        return t  # Already finalized
+                raise GenerationError(
+                    f"Final directory exists but no matching Take: {final_path}",
+                )
+
+            final_dir = make_final_dir(self._storage_root, project_id, shot_id, take_number)
+            move_to_final(staging_dir, final_dir)
+
+            final_video = os.path.join(final_dir, safe_name)
+            final_last_frame = os.path.join(final_dir, "last_frame.png")
+
+            take = Take(
+                id=f"take{uuid.uuid4().hex[:12]}",
+                shot_id=shot_id,
+                generation_request_id=request_id,
+                seed=seed,
+                video_path=final_video,
+                last_frame_path=final_last_frame,
+                status="succeeded",
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            with self._db.connection() as conn:
+                self._take_repo.save_take(take, conn=conn)
+                self._request_repo.update_status(
+                    request_id, "succeeded",
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                    conn=conn,
+                )
+                if self._finalize_callback is not None:
+                    self._finalize_callback(take, conn)
+
+            cleanup_dir(staging_dir)
+            return take
+
+        except Exception as e:
+            if staging_dir:
+                cleanup_dir(staging_dir)
+            if final_dir and os.path.isdir(final_dir):
+                cleanup_dir(final_dir)
+            raise GenerationError(
+                f"Recovery finalization failed: {e}",
                 detail=f"request_id={request_id}",
             ) from e
 

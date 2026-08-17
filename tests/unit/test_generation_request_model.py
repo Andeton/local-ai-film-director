@@ -212,17 +212,17 @@ def test_db_take_unique_generation_request_id_constraint():
                  None, "pending", "", "", None),
             )
             conn.execute(
-                "INSERT INTO takes VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO takes VALUES (?,?,?,?,?,?,?,?,?,?)",
                 ("take-1", "shot-1", "req-1", 42, "/out/take-1.mp4", None, None,
-                 "pending", "2024-01-01"),
+                 "pending", 0, "2024-01-01"),
             )
 
         with pytest.raises(Exception):
             with db.connection() as conn:
                 conn.execute(
-                    "INSERT INTO takes VALUES (?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO takes VALUES (?,?,?,?,?,?,?,?,?,?)",
                     ("take-2", "shot-1", "req-1", 42, "/out/take-2.mp4", None, None,
-                     "pending", "2024-01-01"),
+                     "pending", 0, "2024-01-01"),
                 )
     finally:
         os.unlink(tmp)

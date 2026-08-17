@@ -27,11 +27,18 @@ from film_director.errors import (
     NormalizationError,
     ParameterResolutionError,
     PersistenceError,
+    QueueConflictError,
+    QueueJobNotFoundError,
+    QueueTransitionError,
+    QueueValidationError,
     ReferenceGenerationError,
     ReferenceIngestError,
     ReferenceLifecycleError,
     ReferenceNotFoundError,
     ReferenceResolutionError,
+    TakeConflictError,
+    TakeLifecycleError,
+    TakeNotFoundError,
     UnsupportedStrategyError,
     WindComicArtifactMalformedError,
     WindComicNotFoundError,
@@ -86,6 +93,13 @@ _ERROR_STATUS: dict[type, int] = {
     ReferenceGenerationError: 502,
     ReferenceNotFoundError: 404,
     ReferenceLifecycleError: 409,
+    QueueJobNotFoundError: 404,
+    QueueValidationError: 422,
+    QueueConflictError: 409,
+    QueueTransitionError: 409,
+    TakeNotFoundError: 404,
+    TakeLifecycleError: 409,
+    TakeConflictError: 409,
     ParameterResolutionError: 422,
     WorkflowTemplateError: 500,
     GenerationError: 500,
@@ -220,6 +234,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ref_lifecycle_service = ReferenceLifecycleService(ref_asset_repo)
     ref_selector = ReferenceSelector()
 
+    # M6 services
+    from film_director.persistence.repositories import QueueJobRepository, QueueBatchRepository
+    from film_director.generation.queue_service import QueueService
+    from film_director.services.take_service import TakeService
+
+    queue_job_repo = QueueJobRepository(db)
+    queue_batch_repo = QueueBatchRepository(db)
+    take_repo = TakeRepository(db)
+
+    queue_service = QueueService(
+        db=db, queue_repo=queue_job_repo, batch_repo=queue_batch_repo,
+        shot_repo=shot_repo, plan_repo=plan_repo, scene_repo=scene_repo,
+        seq_repo=seq_repo, beat_repo=beat_repo,
+    )
+    take_service = TakeService(take_repo, db, storage_root=settings.storage_root)
+
     # M4 services
     wc_preproduction_client = WindComicPreproductionClient(
         base_url=settings.windcomic_base_url,
@@ -254,6 +284,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ref_generation_service=ref_generation_service,
         ref_lifecycle_service=ref_lifecycle_service,
         ref_selector=ref_selector,
+        queue_service=queue_service,
+        take_service=take_service,
+        take_repo=take_repo,
     )
     app.include_router(router)
 

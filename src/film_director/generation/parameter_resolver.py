@@ -2,10 +2,13 @@
 
 Builds ONE authoritative list[WorkflowInjection] that drives BOTH
 workflow JSON mutation AND future GenerationRequest.parameters_snapshot.
+
+M6: adds derive_take_seed for deterministic multi-take seed derivation.
 """
 from __future__ import annotations
 
 import copy
+import hashlib
 import secrets
 from typing import TYPE_CHECKING
 
@@ -39,7 +42,39 @@ _TRAINED_MAX_FRAMES = 362
 # M3.A verified: RandomNoise.noise_seed uint64
 _SEED_MAX = 0xFFFFFFFFFFFFFFFF
 
+# M6: safe seed domain = intersection of SQLite signed int64 + non-negative.
+# SQLite INTEGER is signed 64-bit: max = 2^63 - 1.
+# ComfyUI H3 accepts uint64 but SQLite cannot round-trip values > 2^63-1.
+_SAFE_SEED_MAX = (1 << 63) - 1
+
 _DEFAULT_ASPECT = "16:9"
+
+
+def derive_take_seed(base_seed: int, take_index: int) -> int:
+    """Derive a deterministic seed for a specific take.
+
+    take_index is 0-based (take_number - 1).
+
+    Algorithm: SHA-256 of "{base_seed}:{take_index}" encoded as UTF-8,
+    first 8 bytes interpreted as big-endian unsigned integer, masked to
+    the safe signed-63-bit domain [0, 2^63 - 1].
+
+    Deterministic: identical (base_seed, take_index) always produce the
+    same result. Different take indices produce different seeds with
+    negligible collision probability (~1/2^63).
+
+    Raises ValueError if base_seed is negative or exceeds the safe domain,
+    or if take_index is negative.
+    """
+    if base_seed < 0 or base_seed > _SAFE_SEED_MAX:
+        raise ValueError(
+            f"base_seed must be in [0, {_SAFE_SEED_MAX}], got {base_seed}"
+        )
+    if take_index < 0:
+        raise ValueError(f"take_index must be >= 0, got {take_index}")
+
+    raw = hashlib.sha256(f"{base_seed}:{take_index}".encode("utf-8")).digest()
+    return int.from_bytes(raw[:8], "big") & _SAFE_SEED_MAX
 
 
 def _seconds_to_grid_frames(seconds: float) -> int:

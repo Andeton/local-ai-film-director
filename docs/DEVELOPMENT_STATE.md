@@ -70,7 +70,19 @@ Base: main at `18c6405`
 
 **Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F
 
-Next action: M7.F live acceptance only.
+**M7.F Initial Live Verdict: FAIL/PARTIAL**
+- Exact frame/pose chaining: PASS
+- Recognizable face continuity: FAIL from Shot 2 onward
+- Ethnicity continuity: FAIL at Shot 4 (European → East Asian) and replacement Shot 2
+- Environment/prop continuity: FAIL at Shot 5 (different table)
+- Root cause: triple failure — (A) FLF prompt used only Chinese name "陆砚" with no appearance, (B) back-facing predecessor frame had no face, (D) Chinese name biased H3 toward East Asian identity
+- Identity-context correction applied: IdentityResolver traces approved ReferenceAsset → generation prompt → English identity text into every FLF prompt. Environment retention instructions added.
+- Identity fix review: 10/10 PASS, 0 WARN, 0 FAIL
+- Targeted live rerun required (minimum: 2 shots) before M7 can close
+
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (identity fix applied, rerun pending)
+
+Next action: M7.F targeted live rerun only.
 
 ---
 

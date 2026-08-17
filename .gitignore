@@ -55,3 +55,6 @@ htmlcov/
 # Temporary
 *.tmp
 *.log
+
+# M7 live acceptance data
+storage_m7_live/

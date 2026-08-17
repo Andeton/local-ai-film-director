@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from film_director.continuity.continuity_resolver import ContinuityResolver
 from film_director.continuity.continuity_service import ContinuityService
+from film_director.continuity.identity_resolver import IdentityResolver
 from film_director.errors import (
     ContinuityError,
     GenerationError,
@@ -86,8 +87,9 @@ class GenerationService:
         self._workflow_resolver = WorkflowResolver(project_root=project_root)
         self._param_resolver = ParameterResolver()
 
-        # M7: continuity service
+        # M7: continuity service + identity resolver
         self._continuity_service = ContinuityService(db, storage_root)
+        self._identity_resolver = IdentityResolver(db)
 
         self._timeout = generation_timeout
         self._finalize_callback = None  # M6: set by QueueWorker for atomic finalization
@@ -154,12 +156,19 @@ class GenerationService:
                 has_continuity_frame=True, reference_count=0,
             )
 
-            # Build continuity prompt (no <Picture N> tags)
+            # Resolve identity contexts from approved reference provenance
+            identity_contexts = self._identity_resolver.resolve_for_subjects(
+                shot.subjects or [], project_id,
+            )
+
+            # Build identity-locked continuity prompt (no <Picture N> tags)
             prompt = self._prompt_repo.get_current_prompt(
                 shot.id, shot.version, plan.id, plan.version,
             )
             if prompt is None:
-                prompt = self._prompt_builder.build_continuity_prompt(shot, plan)
+                prompt = self._prompt_builder.build_continuity_prompt(
+                    shot, plan, identity_contexts=identity_contexts,
+                )
                 self._prompt_repo.save_prompt(prompt)
 
             # Load and verify FLF workflow template
@@ -221,6 +230,21 @@ class GenerationService:
                 "workflow_template_fingerprint": workflow_def.template_fingerprint,
                 "first_frame_node_id": workflow_def.parameter_mappings["first_frame"]["node_id"],
                 "first_frame_field": workflow_def.parameter_mappings["first_frame"]["field"],
+                "identity_context": [
+                    {
+                        "character_id": ic.character_id,
+                        "character_name": ic.character_name,
+                        "identity_text_source": ic.identity_text_source,
+                        "reference_asset_id": ic.reference_asset_id,
+                        "reference_kind": ic.reference_kind,
+                        "reference_source": ic.reference_source,
+                        "reference_content_sha256": ic.reference_content_sha256,
+                        "reference_generation_request_id": ic.reference_generation_request_id,
+                        "identity_text": ic.identity_text,
+                        "negative_identity_text": ic.negative_identity_text,
+                    }
+                    for ic in identity_contexts
+                ],
             }
 
             # No character reference bindings for FLF

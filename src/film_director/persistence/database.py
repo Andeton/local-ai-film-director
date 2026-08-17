@@ -339,6 +339,35 @@ CREATE TABLE IF NOT EXISTS continuity_states (
 CREATE INDEX IF NOT EXISTS idx_continuity_shot ON continuity_states(shot_id);
 CREATE INDEX IF NOT EXISTS idx_continuity_scene ON continuity_states(scene_id);
 CREATE INDEX IF NOT EXISTS idx_continuity_predecessor ON continuity_states(predecessor_shot_id);
+
+-- M7.G.A: Visual asset packs and role bindings
+CREATE TABLE IF NOT EXISTS visual_asset_packs (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    version     INTEGER NOT NULL DEFAULT 1,
+    fingerprint TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES production_projects(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_visual_asset_packs_project ON visual_asset_packs(project_id);
+
+CREATE TABLE IF NOT EXISTS asset_role_bindings (
+    id                  TEXT PRIMARY KEY,
+    pack_id             TEXT NOT NULL,
+    reference_asset_id  TEXT NOT NULL,
+    role                TEXT NOT NULL,
+    order_index         INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    FOREIGN KEY (pack_id) REFERENCES visual_asset_packs(id),
+    FOREIGN KEY (reference_asset_id) REFERENCES reference_assets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_role_bindings_pack ON asset_role_bindings(pack_id);
+CREATE INDEX IF NOT EXISTS idx_asset_role_bindings_asset ON asset_role_bindings(reference_asset_id);
 """
 
 

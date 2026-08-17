@@ -20,6 +20,8 @@ from film_director.continuity.continuity_models import ContinuityState
 from film_director.errors import PersistenceError
 from film_director.generation.generation_request import GenerationRequest, Take
 from film_director.models.reference import (
+    AssetRole,
+    AssetRoleBinding,
     ReferenceAsset,
     ReferenceGenerationExecution,
     ReferenceGenerationRequest,
@@ -27,6 +29,8 @@ from film_director.models.reference import (
     ReferenceSource,
     ReferenceSourceState,
     ReferenceStatus,
+    VisualAssetPack,
+    compute_pack_fingerprint,
 )
 from film_director.generation.h3_prompt import H3PromptV1
 from film_director.models.canonical import (
@@ -1879,4 +1883,238 @@ class ContinuityStateRepository:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             invalidated_at=row["invalidated_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# VisualAssetPackRepository (M7.G.A)
+# ---------------------------------------------------------------------------
+
+class VisualAssetPackRepository:
+    """UPSERT-based persistence for VisualAssetPack and AssetRoleBindings."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    # -- Pack CRUD --
+
+    def save(self, pack: VisualAssetPack, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO visual_asset_packs
+                (id, project_id, name, description, version, fingerprint,
+                 created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                project_id  = excluded.project_id,
+                name        = excluded.name,
+                description = excluded.description,
+                version     = excluded.version,
+                fingerprint = excluded.fingerprint,
+                created_at  = excluded.created_at,
+                updated_at  = excluded.updated_at
+        """
+        params = (
+            pack.id, pack.project_id, pack.name, pack.description,
+            pack.version, pack.fingerprint, pack.created_at, pack.updated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save visual asset pack", str(exc)) from exc
+
+    def get(self, pack_id: str, conn: sqlite3.Connection | None = None) -> VisualAssetPack | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM visual_asset_packs WHERE id = ?", (pack_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_pack(row)
+
+    def list_by_project(
+        self, project_id: str, conn: sqlite3.Connection | None = None,
+    ) -> list[VisualAssetPack]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM visual_asset_packs WHERE project_id = ? "
+                "ORDER BY created_at, id",
+                (project_id,),
+            ).fetchall()
+        return [self._row_to_pack(r) for r in rows]
+
+    # -- Binding CRUD --
+
+    def add_binding(
+        self, binding: AssetRoleBinding, conn: sqlite3.Connection | None = None,
+    ) -> None:
+        sql = """
+            INSERT INTO asset_role_bindings
+                (id, pack_id, reference_asset_id, role, order_index, created_at)
+            VALUES (?,?,?,?,?,?)
+        """
+        params = (
+            binding.id, binding.pack_id, binding.reference_asset_id,
+            binding.role.value, binding.order_index, binding.created_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to add asset role binding", str(exc)) from exc
+
+    def remove_binding(
+        self, binding_id: str, conn: sqlite3.Connection | None = None,
+    ) -> None:
+        """Remove a binding. Does NOT delete the underlying ReferenceAsset."""
+        with _use_conn(self._db, conn) as c:
+            c.execute("DELETE FROM asset_role_bindings WHERE id = ?", (binding_id,))
+
+    def update_binding(
+        self,
+        binding_id: str,
+        role: AssetRole | None = None,
+        order_index: int | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        sets: list[str] = []
+        params: list = []
+        if role is not None:
+            sets.append("role = ?")
+            params.append(role.value)
+        if order_index is not None:
+            sets.append("order_index = ?")
+            params.append(order_index)
+        if not sets:
+            return
+        params.append(binding_id)
+        sql = f"UPDATE asset_role_bindings SET {', '.join(sets)} WHERE id = ?"
+        with _use_conn(self._db, conn) as c:
+            c.execute(sql, params)
+
+    def list_bindings(
+        self, pack_id: str, conn: sqlite3.Connection | None = None,
+    ) -> list[AssetRoleBinding]:
+        """Return bindings for a pack in deterministic order (role, order_index, id)."""
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM asset_role_bindings WHERE pack_id = ? "
+                "ORDER BY role ASC, order_index ASC, id ASC",
+                (pack_id,),
+            ).fetchall()
+        return [self._row_to_binding(r) for r in rows]
+
+    # -- Eligible asset resolution --
+
+    def resolve_eligible_assets(
+        self,
+        pack_id: str,
+        role: AssetRole | None = None,
+        character_id: str | None = None,
+        shot_id: str | None = None,
+        project_id: str | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> list[ReferenceAsset]:
+        """Resolve production-eligible assets for a pack.
+
+        Eligible = APPROVED status + CURRENT source_state.
+        Pinning does NOT override eligibility.
+
+        Deterministic order: role ASC, order_index ASC, reference_asset_id ASC.
+        """
+        sql = """
+            SELECT ra.* FROM reference_assets ra
+            JOIN asset_role_bindings arb ON arb.reference_asset_id = ra.id
+            WHERE arb.pack_id = ?
+              AND ra.status = 'approved'
+              AND ra.source_state = 'current'
+        """
+        params: list = [pack_id]
+        if role is not None:
+            sql += " AND arb.role = ?"
+            params.append(role.value)
+        if character_id is not None:
+            sql += " AND ra.character_id = ?"
+            params.append(character_id)
+        if shot_id is not None:
+            sql += " AND ra.shot_id = ?"
+            params.append(shot_id)
+        if project_id is not None:
+            sql += " AND ra.project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY arb.role ASC, arb.order_index ASC, ra.id ASC"
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(sql, params).fetchall()
+        return [ReferenceAssetRepository._row_to_asset(r) for r in rows]
+
+    # -- Fingerprint/version --
+
+    def recompute_fingerprint(
+        self, pack_id: str, conn: sqlite3.Connection | None = None,
+    ) -> None:
+        """Recompute pack fingerprint from current bindings.
+
+        Increments version only if the fingerprint actually changed.
+        """
+        with _use_conn(self._db, conn) as c:
+            # Get current pack
+            pack_row = c.execute(
+                "SELECT * FROM visual_asset_packs WHERE id = ?", (pack_id,),
+            ).fetchone()
+            if pack_row is None:
+                return
+
+            # Fetch bindings with content_sha256
+            rows = c.execute(
+                "SELECT arb.reference_asset_id, arb.role, ra.content_sha256, arb.order_index "
+                "FROM asset_role_bindings arb "
+                "JOIN reference_assets ra ON arb.reference_asset_id = ra.id "
+                "WHERE arb.pack_id = ?",
+                (pack_id,),
+            ).fetchall()
+
+            bindings_data = [
+                (r["reference_asset_id"], r["role"], r["content_sha256"], r["order_index"])
+                for r in rows
+            ]
+            new_fp = compute_pack_fingerprint(pack_id, bindings_data)
+
+            old_fp = pack_row["fingerprint"]
+            if new_fp == old_fp:
+                return  # No effective change
+
+            new_version = pack_row["version"] + 1
+            c.execute(
+                "UPDATE visual_asset_packs "
+                "SET fingerprint = ?, version = ?, updated_at = datetime('now') "
+                "WHERE id = ?",
+                (new_fp, new_version, pack_id),
+            )
+
+    # -- Row mappers --
+
+    @staticmethod
+    def _row_to_pack(row: sqlite3.Row) -> VisualAssetPack:
+        return VisualAssetPack(
+            id=row["id"],
+            project_id=row["project_id"],
+            name=row["name"],
+            description=row["description"],
+            version=row["version"],
+            fingerprint=row["fingerprint"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_binding(row: sqlite3.Row) -> AssetRoleBinding:
+        return AssetRoleBinding(
+            id=row["id"],
+            pack_id=row["pack_id"],
+            reference_asset_id=row["reference_asset_id"],
+            role=AssetRole(row["role"]),
+            order_index=row["order_index"],
+            created_at=row["created_at"],
         )

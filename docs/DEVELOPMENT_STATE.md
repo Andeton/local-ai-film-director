@@ -89,9 +89,21 @@ Base: main at `18c6405`
 - Implementation plan: `docs/superpowers/plans/2026-08-17-multimodel-conditioning.md`
 - Baseline: 1513 passed, 12 deselected, 0 failed
 
-**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (conditional) → M7.G (not started)
+**M7.G.A — Canonical VisualAssetPack and Asset-Role Definitions: COMPLETE**
+- AssetRole enum: 18 provider-neutral semantic conditioning roles
+- VisualAssetPack model: project-scoped, versioned, fingerprinted asset collection
+- AssetRoleBinding model: normalized pack↔asset↔role binding with deterministic ordering
+- compute_pack_fingerprint: SHA-256 over (pack_id, sorted bindings with role/order/asset_id/content_sha256)
+- VisualAssetPackRepository: CRUD, binding management, eligible asset resolution, fingerprint recomputation
+- Eligibility: APPROVED + CURRENT only; pinning does not override lifecycle
+- Backward compatible: old unbound ReferenceAssets remain valid, M5 enums unchanged
+- Database migration: CREATE TABLE IF NOT EXISTS, no ALTER on existing tables
+- M7.G.A review: 13 PASS, 0 WARN, 0 FAIL
+- Baseline: 1580 passed, 12 deselected, 0 failed (1513 + 67 new)
 
-Next action: M7.G.A implementation (VisualAssetPack and asset-role definitions).
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (conditional) → M7.G.A ✓ → M7.G.B (not started)
+
+Next action: M7.G.B — ConditioningRecipe and CapabilityRegistry.
 
 ---
 

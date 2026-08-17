@@ -65,8 +65,8 @@ Base: main at `18c6405`
 - In-flight race guard: persist_state refuses to reactivate OUTDATED state (prevents stale generation from clobbering invalidation)
 - Queue dependency: OUTDATED blocks resolve_for_generation, repaired state allows it
 - GET routes are read-only, POST routes map ContinuityError→409, TakeNotFound→404
-- M7.E review: 9 PASS, 2 WARN (SQLite txn atomicity, concurrent safety), 1 FAIL (in-flight race — fixed)
-- Baseline: 1484 passed, 12 deselected, 0 failed (1457 + 27 new)
+- M7.E review: 9 PASS, 2 WARN, 1 FAIL — all fixed. Atomicity fix: CAS rebuild + persist_state race guard. Post-fix review: 8 PASS, 0 atomicity WARN, 0 FAIL
+- Baseline: 1493 passed, 12 deselected, 0 failed (1457 + 27 + 9 atomicity)
 
 **Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F
 

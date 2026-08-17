@@ -1777,6 +1777,90 @@ class ContinuityStateRepository:
             ))
             return cursor.rowcount
 
+    def cas_rebuild_to_current(
+        self,
+        shot_id: str,
+        expected_revision: int,
+        upstream_take_id: str,
+        upstream_take_number: int,
+        upstream_last_frame_path: str,
+        upstream_last_frame_sha256: str,
+        predecessor_shot_id: str,
+        scene_id: str,
+        updated_at: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """CAS: OUTDATED at expected_revision → CURRENT at revision+1.
+
+        Returns rows affected (0 or 1). 0 means the state was not OUTDATED
+        or revision has changed (concurrent rebuild or intervening invalidation).
+        """
+        sql = """
+            UPDATE continuity_states
+            SET state = 'current',
+                upstream_take_id = ?,
+                upstream_take_number = ?,
+                upstream_last_frame_path = ?,
+                upstream_last_frame_sha256 = ?,
+                predecessor_shot_id = ?,
+                continuity_revision = ? + 1,
+                invalidation_reason = NULL,
+                invalidation_source_shot_id = NULL,
+                invalidated_at = NULL,
+                updated_at = ?
+            WHERE shot_id = ?
+              AND state = 'outdated'
+              AND continuity_revision = ?
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (
+                upstream_take_id, upstream_take_number,
+                upstream_last_frame_path, upstream_last_frame_sha256,
+                predecessor_shot_id,
+                expected_revision, updated_at,
+                shot_id, expected_revision,
+            ))
+            return cursor.rowcount
+
+    def cas_persist_if_not_outdated(
+        self,
+        state: ContinuityState,
+        conn: sqlite3.Connection | None = None,
+    ) -> bool:
+        """Atomically persist a CURRENT state only if the existing state is NOT outdated.
+
+        Uses INSERT ... ON CONFLICT for new states, or a guarded UPDATE
+        for existing states. Returns True if the write succeeded, False if
+        an OUTDATED state was found (in-flight race).
+        """
+        with _use_conn(self._db, conn) as c:
+            # Check if row exists
+            existing = c.execute(
+                "SELECT state, upstream_take_id, upstream_last_frame_sha256 "
+                "FROM continuity_states WHERE shot_id = ?",
+                (state.shot_id,),
+            ).fetchone()
+
+            if existing is None:
+                # New state — insert
+                self.save(state, conn=c)
+                return True
+
+            if existing["state"] == "outdated":
+                return False  # Do not reactivate
+
+            if existing["state"] == "current":
+                # Same provenance — idempotent
+                if (
+                    existing["upstream_take_id"] == state.upstream_take_id
+                    and existing["upstream_last_frame_sha256"] == state.upstream_last_frame_sha256
+                ):
+                    return True  # Already current with same provenance
+
+            # New or different UNRESOLVED/CURRENT state — upsert
+            self.save(state, conn=c)
+            return True
+
     @staticmethod
     def _row_to_state(row: sqlite3.Row) -> ContinuityState:
         return ContinuityState(

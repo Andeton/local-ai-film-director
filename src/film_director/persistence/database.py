@@ -261,9 +261,26 @@ CREATE TABLE IF NOT EXISTS reference_generation_executions (
 
 CREATE INDEX IF NOT EXISTS idx_ref_gen_exec_request ON reference_generation_executions(request_id);
 
+-- M6: Persistent batch idempotency
+CREATE TABLE IF NOT EXISTS queue_batches (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    scope_type TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    takes_count INTEGER NOT NULL,
+    base_seed INTEGER NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES production_projects(id),
+    UNIQUE(project_id, idempotency_key)
+);
+
 -- M6: Persistent generation queue
 CREATE TABLE IF NOT EXISTS generation_queue (
     id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
     shot_id TEXT NOT NULL,
     take_number INTEGER NOT NULL,
     project_id TEXT NOT NULL,
@@ -280,6 +297,7 @@ CREATE TABLE IF NOT EXISTS generation_queue (
     updated_at TEXT NOT NULL,
     claimed_at TEXT,
     completed_at TEXT,
+    FOREIGN KEY (batch_id) REFERENCES queue_batches(id),
     FOREIGN KEY (shot_id) REFERENCES shots(id),
     FOREIGN KEY (project_id) REFERENCES production_projects(id),
     UNIQUE(shot_id, take_number)
@@ -288,6 +306,7 @@ CREATE TABLE IF NOT EXISTS generation_queue (
 CREATE INDEX IF NOT EXISTS idx_queue_status ON generation_queue(status);
 CREATE INDEX IF NOT EXISTS idx_queue_shot ON generation_queue(shot_id);
 CREATE INDEX IF NOT EXISTS idx_queue_project ON generation_queue(project_id);
+CREATE INDEX IF NOT EXISTS idx_queue_batch ON generation_queue(batch_id);
 """
 
 
@@ -330,7 +349,7 @@ class Database:
             )
             logger.debug("Migration: added is_favorite to takes")
 
-        # M6.B: Add base_seed and seed columns to generation_queue
+        # M6.B: Add base_seed/seed and batch_id to generation_queue
         queue_tables = {
             row[0] for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -348,6 +367,33 @@ class Database:
                     "ALTER TABLE generation_queue ADD COLUMN seed INTEGER NOT NULL DEFAULT 0"
                 )
                 logger.debug("Migration: added base_seed/seed to generation_queue")
+            if "batch_id" not in queue_cols:
+                # Add batch_id with default for existing rows
+                conn.execute(
+                    "ALTER TABLE generation_queue ADD COLUMN batch_id TEXT NOT NULL DEFAULT 'legacy'"
+                )
+                # Backfill: create legacy batch records for existing jobs
+                legacy_projects = {
+                    row[0] for row in conn.execute(
+                        "SELECT DISTINCT project_id FROM generation_queue WHERE batch_id = 'legacy'"
+                    ).fetchall()
+                }
+                import uuid as _uuid
+                for proj_id in legacy_projects:
+                    batch_id = f"qb_legacy_{_uuid.uuid4().hex[:8]}"
+                    conn.execute(
+                        "INSERT OR IGNORE INTO queue_batches "
+                        "(id, project_id, scope_type, scope_id, idempotency_key, "
+                        "request_fingerprint, takes_count, base_seed, created_at) "
+                        "VALUES (?, ?, 'shot', 'legacy', ?, 'legacy', 0, 0, datetime('now'))",
+                        (batch_id, proj_id, f"legacy_{proj_id}"),
+                    )
+                    conn.execute(
+                        "UPDATE generation_queue SET batch_id = ? "
+                        "WHERE project_id = ? AND batch_id = 'legacy'",
+                        (batch_id, proj_id),
+                    )
+                logger.debug("Migration: added batch_id to generation_queue")
 
     @contextmanager
     def connection(self):

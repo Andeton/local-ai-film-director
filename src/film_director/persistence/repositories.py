@@ -1328,7 +1328,7 @@ class ReferenceGenerationExecutionRepository:
 # QueueJobRepository (M6)
 # ---------------------------------------------------------------------------
 
-from film_director.generation.queue_models import QueueJob  # noqa: E402
+from film_director.generation.queue_models import QueueBatch, QueueJob  # noqa: E402
 
 
 class QueueJobRepository:
@@ -1340,14 +1340,14 @@ class QueueJobRepository:
     def insert(self, job: QueueJob, conn: sqlite3.Connection | None = None) -> None:
         sql = """
             INSERT INTO generation_queue
-                (id, shot_id, take_number, project_id, base_seed, seed,
+                (id, batch_id, shot_id, take_number, project_id, base_seed, seed,
                  status, generation_request_id, take_id, priority,
                  attempt_count, max_attempts, error,
                  created_at, updated_at, claimed_at, completed_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         params = (
-            job.id, job.shot_id, job.take_number, job.project_id,
+            job.id, job.batch_id, job.shot_id, job.take_number, job.project_id,
             job.base_seed, job.seed, job.status,
             job.generation_request_id, job.take_id, job.priority,
             job.attempt_count, job.max_attempts, job.error,
@@ -1456,10 +1456,20 @@ class QueueJobRepository:
         with _use_conn(self._db, conn) as c:
             c.execute(sql, params)
 
+    def list_by_batch(self, batch_id: str, conn: sqlite3.Connection | None = None) -> list[QueueJob]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM generation_queue WHERE batch_id = ? "
+                "ORDER BY shot_id ASC, take_number ASC, id ASC",
+                (batch_id,),
+            ).fetchall()
+        return [self._row_to_job(r) for r in rows]
+
     @staticmethod
     def _row_to_job(row: sqlite3.Row) -> QueueJob:
         return QueueJob(
             id=row["id"],
+            batch_id=row["batch_id"],
             shot_id=row["shot_id"],
             take_number=row["take_number"],
             project_id=row["project_id"],
@@ -1476,4 +1486,72 @@ class QueueJobRepository:
             updated_at=row["updated_at"],
             claimed_at=row["claimed_at"],
             completed_at=row["completed_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# QueueBatchRepository (M6)
+# ---------------------------------------------------------------------------
+
+class QueueBatchRepository:
+    """Persistent batch idempotency records."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def insert(self, batch: QueueBatch, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO queue_batches
+                (id, project_id, scope_type, scope_id, idempotency_key,
+                 request_fingerprint, takes_count, base_seed, priority, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        """
+        params = (
+            batch.id, batch.project_id, batch.scope_type, batch.scope_id,
+            batch.idempotency_key, batch.request_fingerprint,
+            batch.takes_count, batch.base_seed, batch.priority, batch.created_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to insert queue batch", str(exc)) from exc
+
+    def get_by_key(
+        self, project_id: str, idempotency_key: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> QueueBatch | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM queue_batches WHERE project_id = ? AND idempotency_key = ?",
+                (project_id, idempotency_key),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_batch(row)
+
+    def get(self, batch_id: str, conn: sqlite3.Connection | None = None) -> QueueBatch | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM queue_batches WHERE id = ?", (batch_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_batch(row)
+
+    @staticmethod
+    def _row_to_batch(row: sqlite3.Row) -> QueueBatch:
+        return QueueBatch(
+            id=row["id"],
+            project_id=row["project_id"],
+            scope_type=row["scope_type"],
+            scope_id=row["scope_id"],
+            idempotency_key=row["idempotency_key"],
+            request_fingerprint=row["request_fingerprint"],
+            takes_count=row["takes_count"],
+            base_seed=row["base_seed"],
+            priority=row["priority"],
+            created_at=row["created_at"],
         )

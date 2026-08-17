@@ -124,18 +124,22 @@ Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
 
 **M6 Progress:**
 - M6.A: COMPLETE — Take status evolution (approved/rejected), is_favorite boolean field, derive_take_seed (SHA-256, masked to signed-63-bit [0, 2^63-1]), QueueJob model, generation_queue table + indexes + UNIQUE(shot_id, take_number), is_favorite migration for existing takes, 40 tests
-- M6.B: COMPLETE — QueueJobRepository + QueueService (enqueue shot/scene, cancel pending)
-  - Seed persistence correction: base_seed + derived seed persisted at enqueue time (immutable)
-  - QueueJobRepository: insert, get, list_by_shot/project/status, count_by_status, max_take_number_for_shot, update_status
-  - QueueService.enqueue_shot: atomic batch, idempotent (returns existing active jobs), deterministic seed derivation, takes_count 1-10
-  - QueueService.enqueue_scene: atomic multi-shot enqueue, eligible R2V shots only, idempotent
+- M6.B: COMPLETE — Persistent queue batch idempotency + enqueue + cancel
+  - QueueBatch: persistent idempotency record with UNIQUE(project_id, idempotency_key) + request_fingerprint (SHA-256 of canonical JSON)
+  - QueueJob.batch_id: links every job to its batch for status-independent retry
+  - Same key + same payload → returns original jobs (regardless of job status)
+  - Same key + different payload → QueueConflictError
+  - New key → creates new batch with new take numbers
+  - Seed persistence: base_seed + derived seed immutable at enqueue time
+  - QueueJobRepository + QueueBatchRepository
+  - QueueService.enqueue_shot/scene: atomic batch creation, deterministic seeds
   - cancel_job: pending→cancelled (idempotent), claimed/succeeded/failed rejected
-  - Take-number allocation: never reuses historical numbers (accounts for queue + takes history)
+  - Scene retry returns original jobs (not empty list)
   - Error classes: QueueJobNotFoundError, QueueValidationError, QueueConflictError, QueueTransitionError
-  - 30 integration tests (enqueue, idempotency, cancellation, repository)
+  - 32 integration tests (idempotency, conflict, scene retry, cancellation, repository)
 - M6.C–M6.F: NOT STARTED
 
-**Baseline:** 1218 deterministic + 9 live deselected, 0 failed
+**Baseline:** 1220 deterministic + 9 live deselected, 0 failed
 
 Next: M6.C — QueueWorker + GenerationService execution evolution.
 

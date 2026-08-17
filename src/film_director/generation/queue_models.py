@@ -1,11 +1,12 @@
-"""QueueJob model for persistent generation queue (M6).
+"""Queue models for persistent generation queue (M6).
 
-Tracks the lifecycle of a single take-generation job from enqueue
-through execution to completion. The QueueJob owns the pre-execution
-state; a Take is only created after successful generation.
+QueueBatch — persistent idempotency record for an enqueue request.
+QueueJob — individual take-generation job within a batch.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Literal
 
 from pydantic import BaseModel, field_validator
@@ -14,8 +15,67 @@ from pydantic import BaseModel, field_validator
 _SAFE_SEED_MAX = (1 << 63) - 1
 
 
+def compute_request_fingerprint(
+    scope_type: str,
+    scope_id: str,
+    takes_count: int,
+    base_seed: int,
+    priority: int = 0,
+) -> str:
+    """SHA-256 fingerprint of canonical enqueue request inputs.
+
+    Deterministic: same inputs always produce the same fingerprint.
+    Used to detect payload conflicts on idempotency-key reuse.
+    """
+    payload = json.dumps(
+        {
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "takes_count": takes_count,
+            "base_seed": base_seed,
+            "priority": priority,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+class QueueBatch(BaseModel):
+    """Persistent idempotency record for an enqueue request.
+
+    UNIQUE(project_id, idempotency_key) ensures one batch per key per project.
+    Request fingerprint detects payload conflicts on key reuse.
+    """
+
+    id: str
+    project_id: str
+    scope_type: Literal["shot", "scene"]
+    scope_id: str
+    idempotency_key: str
+    request_fingerprint: str
+    takes_count: int
+    base_seed: int
+    priority: int = 0
+    created_at: str = ""
+
+    @field_validator("id", "project_id", "scope_id", "idempotency_key", "request_fingerprint")
+    @classmethod
+    def non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("base_seed")
+    @classmethod
+    def valid_seed(cls, v: int) -> int:
+        if v < 0 or v > _SAFE_SEED_MAX:
+            raise ValueError(f"base_seed must be in [0, {_SAFE_SEED_MAX}]")
+        return v
+
+
 class QueueJob(BaseModel):
-    """Persistent generation queue entry.
+    """Persistent generation queue entry within a batch.
 
     Status state machine:
         pending → claimed → succeeded
@@ -26,6 +86,7 @@ class QueueJob(BaseModel):
     """
 
     id: str
+    batch_id: str
     shot_id: str
     take_number: int                    # 1-based
     project_id: str
@@ -45,7 +106,7 @@ class QueueJob(BaseModel):
     claimed_at: str | None = None
     completed_at: str | None = None
 
-    @field_validator("id", "shot_id", "project_id")
+    @field_validator("id", "batch_id", "shot_id", "project_id")
     @classmethod
     def non_empty(cls, v: str) -> str:
         if not v or not v.strip():

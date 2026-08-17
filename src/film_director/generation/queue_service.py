@@ -1,12 +1,15 @@
-"""QueueService — enqueue take-generation jobs for shots and scenes (M6.B).
+"""QueueService — persistent idempotent enqueue and cancellation (M6.B).
 
-Handles atomic enqueue, idempotency (returns existing jobs for already-enqueued
-shots), deterministic seed derivation at enqueue time, and pending-job cancellation.
+Every enqueue request requires a client-supplied idempotency_key.
+Same key + same payload → returns original batch and jobs.
+Same key + different payload → QueueConflictError.
+New key → creates new batch with new take numbers.
 
 No worker execution. No ComfyUI calls. No claiming. Those belong to M6.C.
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -17,11 +20,12 @@ from film_director.errors import (
     QueueValidationError,
 )
 from film_director.generation.parameter_resolver import _SAFE_SEED_MAX, derive_take_seed
-from film_director.generation.queue_models import QueueJob
+from film_director.generation.queue_models import QueueBatch, QueueJob, compute_request_fingerprint
 from film_director.persistence.database import Database
 from film_director.persistence.repositories import (
     BeatRepository,
     GenerationPlanRepository,
+    QueueBatchRepository,
     QueueJobRepository,
     SceneRepository,
     SequenceRepository,
@@ -41,12 +45,13 @@ def _now_iso() -> str:
 
 
 class QueueService:
-    """Enqueue take-generation jobs and cancel pending jobs."""
+    """Idempotent enqueue and pending-job cancellation."""
 
     def __init__(
         self,
         db: Database,
         queue_repo: QueueJobRepository,
+        batch_repo: QueueBatchRepository,
         shot_repo: ShotRepository,
         plan_repo: GenerationPlanRepository,
         scene_repo: SceneRepository,
@@ -55,6 +60,7 @@ class QueueService:
     ) -> None:
         self._db = db
         self._queue_repo = queue_repo
+        self._batch_repo = batch_repo
         self._shot_repo = shot_repo
         self._plan_repo = plan_repo
         self._scene_repo = scene_repo
@@ -68,51 +74,34 @@ class QueueService:
     def enqueue_shot(
         self,
         shot_id: str,
+        idempotency_key: str,
         takes_count: int = 3,
         base_seed: int | None = None,
+        priority: int = 0,
     ) -> list[QueueJob]:
         """Enqueue takes_count generation jobs for one shot.
 
-        Idempotency: If the shot already has non-cancelled pending/claimed
-        jobs, returns those existing jobs instead of creating duplicates.
-        New jobs are only created for take_numbers that don't exist yet.
-
-        Seeds are derived deterministically at enqueue time and persisted.
+        Idempotency: same (project_id, idempotency_key) + same fingerprint
+        returns the original jobs. Different fingerprint raises QueueConflictError.
         """
+        if not idempotency_key or not idempotency_key.strip():
+            raise QueueValidationError("idempotency_key must not be empty")
         if takes_count < _MIN_TAKES or takes_count > _MAX_TAKES:
             raise QueueValidationError(
                 f"takes_count must be {_MIN_TAKES}–{_MAX_TAKES}",
                 detail=f"takes_count={takes_count}",
             )
 
-        if base_seed is None:
-            import secrets
-            base_seed = secrets.randbelow(_SAFE_SEED_MAX + 1)
-
-        if base_seed < 0 or base_seed > _SAFE_SEED_MAX:
-            raise QueueValidationError(
-                f"base_seed must be in [0, {_SAFE_SEED_MAX}]",
-                detail=f"base_seed={base_seed}",
-            )
-
         with self._db.connection() as conn:
-            # Validate shot exists
+            # Validate shot + plan
             shot = self._shot_repo.get_shot(shot_id, conn=conn)
             if shot is None:
-                raise QueueValidationError(
-                    f"Shot not found: {shot_id}",
-                    detail=f"shot_id={shot_id}",
-                )
-
-            # Validate current generation plan exists
+                raise QueueValidationError(f"Shot not found: {shot_id}")
             plan = self._plan_repo.get_current_plan_by_shot(shot_id, conn=conn)
             if plan is None:
-                raise QueueValidationError(
-                    f"No current GenerationPlan for shot {shot_id}",
-                    detail=f"shot_id={shot_id}",
-                )
+                raise QueueValidationError(f"No current GenerationPlan for shot {shot_id}")
 
-            # Derive project_id from shot
+            # Derive project_id
             row = conn.execute(
                 """SELECT seq.project_id FROM shots s
                    JOIN beats b ON s.beat_id = b.id
@@ -122,48 +111,91 @@ class QueueService:
                 (shot_id,),
             ).fetchone()
             if row is None:
-                raise QueueValidationError(
-                    f"Cannot find project for shot {shot_id}",
-                )
+                raise QueueValidationError(f"Cannot find project for shot {shot_id}")
             project_id = row["project_id"]
 
-            # Check existing non-cancelled jobs for idempotency
-            existing = self._queue_repo.list_by_shot(shot_id, conn=conn)
-            active = [j for j in existing if j.status not in ("cancelled",)]
-            if len(active) >= takes_count:
-                return active[:takes_count]
-
-            # Find the highest historical take_number
-            max_tn = self._queue_repo.max_take_number_for_shot(shot_id, conn=conn)
-
-            now = _now_iso()
-            # Determine which take_numbers to create
-            existing_tns = {j.take_number for j in existing}
-            jobs: list[QueueJob] = []
-            next_tn = max_tn + 1
-
-            for _ in range(takes_count - len(active)):
-                while next_tn in existing_tns:
-                    next_tn += 1
-                take_index = next_tn - 1  # 0-based
-                seed = derive_take_seed(base_seed, take_index)
-
-                job = QueueJob(
-                    id=_gen_id("qj_"),
-                    shot_id=shot_id,
-                    take_number=next_tn,
-                    project_id=project_id,
-                    base_seed=base_seed,
-                    seed=seed,
-                    status="pending",
-                    created_at=now,
-                    updated_at=now,
+            # Resolve base_seed before fingerprint
+            if base_seed is None:
+                # Check if this key already has a batch (use its seed)
+                existing_batch = self._batch_repo.get_by_key(
+                    project_id, idempotency_key, conn=conn,
                 )
-                self._queue_repo.insert(job, conn=conn)
-                jobs.append(job)
-                next_tn += 1
+                if existing_batch is not None:
+                    base_seed = existing_batch.base_seed
+                else:
+                    base_seed = secrets.randbelow(_SAFE_SEED_MAX + 1)
 
-            return list(active) + jobs
+            if base_seed < 0 or base_seed > _SAFE_SEED_MAX:
+                raise QueueValidationError(f"base_seed must be in [0, {_SAFE_SEED_MAX}]")
+
+            fingerprint = compute_request_fingerprint(
+                "shot", shot_id, takes_count, base_seed, priority,
+            )
+
+            # Idempotency check
+            existing_batch = self._batch_repo.get_by_key(
+                project_id, idempotency_key, conn=conn,
+            )
+            if existing_batch is not None:
+                if existing_batch.request_fingerprint != fingerprint:
+                    raise QueueConflictError(
+                        f"Idempotency key {idempotency_key!r} already used with different parameters",
+                        detail=f"batch_id={existing_batch.id}",
+                    )
+                return self._queue_repo.list_by_batch(existing_batch.id, conn=conn)
+
+            # Create new batch + jobs
+            return self._create_shot_batch(
+                conn, project_id, shot_id, idempotency_key, fingerprint,
+                takes_count, base_seed, priority,
+            )
+
+    def _create_shot_batch(
+        self, conn, project_id, shot_id, idempotency_key, fingerprint,
+        takes_count, base_seed, priority,
+    ) -> list[QueueJob]:
+        now = _now_iso()
+        batch_id = _gen_id("qb_")
+
+        batch = QueueBatch(
+            id=batch_id,
+            project_id=project_id,
+            scope_type="shot",
+            scope_id=shot_id,
+            idempotency_key=idempotency_key,
+            request_fingerprint=fingerprint,
+            takes_count=takes_count,
+            base_seed=base_seed,
+            priority=priority,
+            created_at=now,
+        )
+        self._batch_repo.insert(batch, conn=conn)
+
+        max_tn = self._queue_repo.max_take_number_for_shot(shot_id, conn=conn)
+        jobs: list[QueueJob] = []
+
+        for i in range(takes_count):
+            tn = max_tn + 1 + i
+            take_index = tn - 1
+            seed = derive_take_seed(base_seed, take_index)
+
+            job = QueueJob(
+                id=_gen_id("qj_"),
+                batch_id=batch_id,
+                shot_id=shot_id,
+                take_number=tn,
+                project_id=project_id,
+                base_seed=base_seed,
+                seed=seed,
+                status="pending",
+                priority=priority,
+                created_at=now,
+                updated_at=now,
+            )
+            self._queue_repo.insert(job, conn=conn)
+            jobs.append(job)
+
+        return jobs
 
     # ------------------------------------------------------------------
     # Scene enqueue
@@ -172,48 +204,72 @@ class QueueService:
     def enqueue_scene(
         self,
         scene_id: str,
+        idempotency_key: str,
         takes_per_shot: int = 3,
         base_seed: int | None = None,
-    ) -> dict:
+        priority: int = 0,
+    ) -> list[QueueJob]:
         """Enqueue takes for all eligible shots in a scene atomically.
 
-        An eligible shot has a current non-outdated GenerationPlan with
-        strategy REFERENCE_TO_VIDEO.
-
-        Returns { total_jobs: int, shots_enqueued: int }.
+        Returns the complete list of jobs (original on retry).
         """
+        if not idempotency_key or not idempotency_key.strip():
+            raise QueueValidationError("idempotency_key must not be empty")
         if takes_per_shot < _MIN_TAKES or takes_per_shot > _MAX_TAKES:
             raise QueueValidationError(
                 f"takes_per_shot must be {_MIN_TAKES}–{_MAX_TAKES}",
-                detail=f"takes_per_shot={takes_per_shot}",
-            )
-
-        if base_seed is None:
-            import secrets
-            base_seed = secrets.randbelow(_SAFE_SEED_MAX + 1)
-
-        if base_seed < 0 or base_seed > _SAFE_SEED_MAX:
-            raise QueueValidationError(
-                f"base_seed must be in [0, {_SAFE_SEED_MAX}]",
             )
 
         with self._db.connection() as conn:
             scene = self._scene_repo.get_scene(scene_id, conn=conn)
             if scene is None:
-                raise QueueValidationError(
-                    f"Scene not found: {scene_id}",
-                    detail=f"scene_id={scene_id}",
-                )
+                raise QueueValidationError(f"Scene not found: {scene_id}")
 
-            # Load all shots for this scene's beats
+            # Derive project_id
+            row = conn.execute(
+                """SELECT seq.project_id FROM scenes sc
+                   JOIN sequences seq ON sc.sequence_id = seq.id
+                   WHERE sc.id = ?""",
+                (scene_id,),
+            ).fetchone()
+            if row is None:
+                raise QueueValidationError(f"Cannot find project for scene {scene_id}")
+            project_id = row["project_id"]
+
+            # Resolve base_seed before fingerprint
+            if base_seed is None:
+                existing_batch = self._batch_repo.get_by_key(
+                    project_id, idempotency_key, conn=conn,
+                )
+                if existing_batch is not None:
+                    base_seed = existing_batch.base_seed
+                else:
+                    base_seed = secrets.randbelow(_SAFE_SEED_MAX + 1)
+
+            if base_seed < 0 or base_seed > _SAFE_SEED_MAX:
+                raise QueueValidationError(f"base_seed must be in [0, {_SAFE_SEED_MAX}]")
+
+            fingerprint = compute_request_fingerprint(
+                "scene", scene_id, takes_per_shot, base_seed, priority,
+            )
+
+            # Idempotency check
+            existing_batch = self._batch_repo.get_by_key(
+                project_id, idempotency_key, conn=conn,
+            )
+            if existing_batch is not None:
+                if existing_batch.request_fingerprint != fingerprint:
+                    raise QueueConflictError(
+                        f"Idempotency key {idempotency_key!r} already used with different parameters",
+                    )
+                return self._queue_repo.list_by_batch(existing_batch.id, conn=conn)
+
+            # Resolve eligible shots
             beats = self._beat_repo.get_beats_by_scene(scene_id, conn=conn)
             all_shots = []
             for beat in beats:
-                all_shots.extend(
-                    self._shot_repo.get_shots_by_beat(beat.id, conn=conn)
-                )
+                all_shots.extend(self._shot_repo.get_shots_by_beat(beat.id, conn=conn))
 
-            # Filter eligible: has current R2V plan
             eligible = []
             for shot in all_shots:
                 plan = self._plan_repo.get_current_plan_by_shot(shot.id, conn=conn)
@@ -221,65 +277,50 @@ class QueueService:
                     eligible.append(shot)
 
             if not eligible:
-                raise QueueValidationError(
-                    f"No eligible shots in scene {scene_id}",
-                    detail=f"scene_id={scene_id}",
-                )
+                raise QueueValidationError(f"No eligible shots in scene {scene_id}")
 
-            # Derive project_id from scene
-            row = conn.execute(
-                """SELECT seq.project_id FROM scenes sc
-                   JOIN sequences seq ON sc.sequence_id = seq.id
-                   WHERE sc.id = ?""",
-                (scene_id,),
-            ).fetchone()
-            project_id = row["project_id"] if row else None
-            if project_id is None:
-                raise QueueValidationError(
-                    f"Cannot find project for scene {scene_id}",
-                )
-
-            total_jobs = 0
-            shots_enqueued = 0
+            # Create batch
             now = _now_iso()
+            batch_id = _gen_id("qb_")
+            batch = QueueBatch(
+                id=batch_id,
+                project_id=project_id,
+                scope_type="scene",
+                scope_id=scene_id,
+                idempotency_key=idempotency_key,
+                request_fingerprint=fingerprint,
+                takes_count=takes_per_shot,
+                base_seed=base_seed,
+                priority=priority,
+                created_at=now,
+            )
+            self._batch_repo.insert(batch, conn=conn)
 
+            all_jobs: list[QueueJob] = []
             for shot in eligible:
-                existing = self._queue_repo.list_by_shot(shot.id, conn=conn)
-                active = [j for j in existing if j.status != "cancelled"]
-                if len(active) >= takes_per_shot:
-                    continue  # already fully enqueued
-
                 max_tn = self._queue_repo.max_take_number_for_shot(shot.id, conn=conn)
-                existing_tns = {j.take_number for j in existing}
-                next_tn = max_tn + 1
-                created = 0
-
-                for _ in range(takes_per_shot - len(active)):
-                    while next_tn in existing_tns:
-                        next_tn += 1
-                    take_index = next_tn - 1
+                for i in range(takes_per_shot):
+                    tn = max_tn + 1 + i
+                    take_index = tn - 1
                     seed = derive_take_seed(base_seed, take_index)
 
                     job = QueueJob(
                         id=_gen_id("qj_"),
+                        batch_id=batch_id,
                         shot_id=shot.id,
-                        take_number=next_tn,
+                        take_number=tn,
                         project_id=project_id,
                         base_seed=base_seed,
                         seed=seed,
                         status="pending",
+                        priority=priority,
                         created_at=now,
                         updated_at=now,
                     )
                     self._queue_repo.insert(job, conn=conn)
-                    created += 1
-                    next_tn += 1
+                    all_jobs.append(job)
 
-                if created > 0:
-                    shots_enqueued += 1
-                    total_jobs += created
-
-        return {"total_jobs": total_jobs, "shots_enqueued": shots_enqueued}
+            return all_jobs
 
     # ------------------------------------------------------------------
     # Cancellation
@@ -290,12 +331,10 @@ class QueueService:
         with self._db.connection() as conn:
             job = self._queue_repo.get(job_id, conn=conn)
             if job is None:
-                raise QueueJobNotFoundError(
-                    f"Queue job not found: {job_id}",
-                )
+                raise QueueJobNotFoundError(f"Queue job not found: {job_id}")
 
             if job.status == "cancelled":
-                return job  # idempotent
+                return job
 
             if job.status != "pending":
                 raise QueueTransitionError(
@@ -303,10 +342,9 @@ class QueueService:
                     detail=f"job_id={job_id}, status={job.status}",
                 )
 
-            now = _now_iso()
             self._queue_repo.update_status(
                 job_id, "cancelled",
-                completed_at=now,
+                completed_at=_now_iso(),
                 conn=conn,
             )
 

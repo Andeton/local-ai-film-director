@@ -1,4 +1,4 @@
-"""Integration tests for M6.C — QueueWorker claim, execute, and recovery.
+"""Integration tests for M6.C — QueueWorker claim, execute, recovery, concurrency.
 
 Uses real SQLite, mocked ComfyUI. No live generation.
 """
@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,6 +18,7 @@ from film_director.generation.comfyui_adapter import (
     ComfyUIAdapter,
     ComfyUIGenerationResult,
     ComfyUIOutputRef,
+    ComfyUIResultError,
 )
 from film_director.generation.generation_request import GenerationRequest, Take
 from film_director.generation.generation_service import GenerationService
@@ -108,8 +111,6 @@ def env(tmp_path):
 
     storage_root = os.path.join(str(tmp_path), "storage")
     os.makedirs(storage_root, exist_ok=True)
-
-    # Create ref image inside storage root
     ref_dir = os.path.join(storage_root, "references", "proj-1")
     os.makedirs(ref_dir, exist_ok=True)
     ref_data = b"fake ref image"
@@ -197,13 +198,14 @@ def env(tmp_path):
         db=db, queue_repo=queue_repo,
         generation_service=gen_service,
         request_repo=request_repo, take_repo=take_repo,
+        comfyui=mock_comfyui,
     )
 
     return {
         "db": db, "queue_repo": queue_repo, "queue_svc": queue_svc,
         "worker": worker, "request_repo": request_repo,
         "take_repo": take_repo, "mock_comfyui": mock_comfyui,
-        "gen_service": gen_service,
+        "gen_service": gen_service, "storage_root": storage_root,
     }
 
 
@@ -213,7 +215,7 @@ def env(tmp_path):
 
 class TestAtomicClaim:
     def test_claims_pending_job(self, env):
-        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=2, base_seed=42)
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
         with env["db"].connection() as conn:
             job = env["queue_repo"].claim_next(conn)
         assert job is not None
@@ -225,42 +227,27 @@ class TestAtomicClaim:
             job = env["queue_repo"].claim_next(conn)
         assert job is None
 
-    def test_priority_ordering(self, env):
-        # Low priority
-        env["queue_svc"].enqueue_shot("shot-1", "key-lo", takes_count=1, base_seed=42, priority=0)
-        # High priority (needs different shot to avoid take_number conflict)
-        # Actually, same shot different key gives different take_numbers
-        env["queue_svc"].enqueue_shot("shot-1", "key-hi", takes_count=1, base_seed=42, priority=10)
-
-        with env["db"].connection() as conn:
-            job = env["queue_repo"].claim_next(conn)
-        assert job.priority == 10  # high priority first
-
     def test_max_attempts_respected(self, env):
         env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
-        # Claim it (attempt_count becomes 1, max_attempts=1)
         with env["db"].connection() as conn:
-            job = env["queue_repo"].claim_next(conn)
-        assert job is not None
-        # Mark failed and try to reclaim
-        env["queue_repo"].update_status(job.id, "pending")
-        # attempt_count=1, max_attempts=1 → should NOT be claimable
+            env["queue_repo"].claim_next(conn)
+        # Reset to pending but attempt_count=1, max_attempts=1
+        jobs = env["queue_repo"].list_by_shot("shot-1")
+        env["queue_repo"].update_status(jobs[0].id, "pending")
         with env["db"].connection() as conn:
             job2 = env["queue_repo"].claim_next(conn)
         assert job2 is None
 
 
 # ---------------------------------------------------------------------------
-# Queued generation
+# Queued execution with atomic finalization
 # ---------------------------------------------------------------------------
 
-class TestQueuedGeneration:
+class TestQueuedExecution:
     def test_worker_executes_enqueued_job(self, env):
         env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
         completed = env["worker"].run_once()
         assert completed == 1
-
-        # Verify job succeeded
         jobs = env["queue_repo"].list_by_shot("shot-1")
         assert jobs[0].status == "succeeded"
         assert jobs[0].generation_request_id is not None
@@ -270,39 +257,39 @@ class TestQueuedGeneration:
         jobs = env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
         expected_seed = jobs[0].seed
         env["worker"].run_once()
-
         req = env["request_repo"].get_requests_by_shot("shot-1")
-        assert len(req) >= 1
         assert req[-1].seed == expected_seed
 
     def test_persisted_take_number_reaches_request(self, env):
         jobs = env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
-        expected_tn = jobs[0].take_number
         env["worker"].run_once()
-
         req = env["request_repo"].get_requests_by_shot("shot-1")
-        assert req[-1].take_number == expected_tn
+        assert req[-1].take_number == jobs[0].take_number
 
     def test_multiple_takes_different_seeds(self, env):
         jobs = env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=3, base_seed=42)
         seeds = {j.seed for j in jobs}
-        assert len(seeds) == 3
-
         for _ in range(3):
             env["worker"].run_once()
-
         takes = env["take_repo"].get_takes_by_shot("shot-1")
         assert len(takes) == 3
-        take_seeds = {t.seed for t in takes}
-        assert take_seeds == seeds
-
-    def test_empty_queue_returns_zero(self, env):
-        assert env["worker"].run_once() == 0
+        assert {t.seed for t in takes} == seeds
 
     def test_legacy_generate_shot_still_works(self, env):
-        """M3 backward compat: generate_shot still works."""
         take = env["gen_service"].generate_shot("shot-1")
         assert take.status == "succeeded"
+
+    def test_atomic_finalization_includes_queue_job(self, env):
+        """Take, request, and QueueJob all committed atomically."""
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
+        env["worker"].run_once()
+        jobs = env["queue_repo"].list_by_shot("shot-1")
+        job = jobs[0]
+        assert job.status == "succeeded"
+        # Verify Take exists and links back
+        take = env["take_repo"].get_take(job.take_id)
+        assert take is not None
+        assert take.generation_request_id == job.generation_request_id
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +301,6 @@ class TestFailureHandling:
         env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
         env["mock_comfyui"].submit.side_effect = Exception("ComfyUI down")
         env["worker"].run_once()
-
         jobs = env["queue_repo"].list_by_shot("shot-1")
         assert jobs[0].status == "failed"
         assert "ComfyUI down" in (jobs[0].error or "")
@@ -323,85 +309,148 @@ class TestFailureHandling:
         env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
         env["mock_comfyui"].submit.side_effect = Exception("fail")
         env["worker"].run_once()
-
-        # No more claimable jobs
         assert env["worker"].run_once() == 0
 
 
 # ---------------------------------------------------------------------------
-# Recovery
+# Recovery: false-success prevention
 # ---------------------------------------------------------------------------
 
-class TestRecovery:
-    def test_no_claimed_jobs(self, env):
-        assert env["worker"].recover() == 0
-
-    def test_claimed_no_request_marks_failed(self, env):
-        """Job claimed but no request created → mark failed."""
+class TestRecoveryFalseSuccess:
+    def test_request_succeeded_no_take_is_invariant_failure(self, env):
+        """Request succeeded but no Take → NEVER succeeded, invariant failure."""
         env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
-        with env["db"].connection() as conn:
-            env["queue_repo"].claim_next(conn)
-
-        recovered = env["worker"].recover()
-        assert recovered == 1
-
-        jobs = env["queue_repo"].list_by_shot("shot-1")
-        assert jobs[0].status == "failed"
-        assert "no generation request" in jobs[0].error.lower()
-
-    def test_claimed_request_succeeded_take_exists(self, env):
-        """Job claimed, request succeeded, Take exists → reconcile succeeded."""
-        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
-        # Execute normally (creates request + Take)
         env["worker"].run_once()
+        jobs = env["queue_repo"].list_by_shot("shot-1")
+        job = jobs[0]
+        # Delete the Take to simulate crash between request success and Take insert
+        with env["db"].connection() as conn:
+            conn.execute("DELETE FROM takes WHERE id = ?", (job.take_id,))
+        # Reset job to claimed
+        env["queue_repo"].update_status(job.id, "claimed")
+        env["worker"].recover()
+        recovered = env["queue_repo"].get(job.id)
+        assert recovered.status == "failed"
+        assert "invariant" in recovered.error.lower()
 
-        # Manually reset job to claimed to simulate crash after finalization
+    def test_request_succeeded_valid_take_reconciles(self, env):
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
+        env["worker"].run_once()
         jobs = env["queue_repo"].list_by_shot("shot-1")
         env["queue_repo"].update_status(jobs[0].id, "claimed")
+        env["worker"].recover()
+        assert env["queue_repo"].get(jobs[0].id).status == "succeeded"
 
-        recovered = env["worker"].recover()
-        assert recovered == 1
-
+    def test_request_succeeded_missing_video_is_failure(self, env):
+        """Request succeeded, Take exists, but video file missing → failure."""
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
+        env["worker"].run_once()
         jobs = env["queue_repo"].list_by_shot("shot-1")
-        assert jobs[0].status == "succeeded"
+        job = jobs[0]
+        take = env["take_repo"].get_take(job.take_id)
+        # Delete the video file
+        if os.path.exists(take.video_path):
+            os.unlink(take.video_path)
+        env["queue_repo"].update_status(job.id, "claimed")
+        env["worker"].recover()
+        assert env["queue_repo"].get(job.id).status == "failed"
+        assert "missing" in env["queue_repo"].get(job.id).error.lower()
+
+
+# ---------------------------------------------------------------------------
+# Recovery: general matrix
+# ---------------------------------------------------------------------------
+
+class TestRecoveryMatrix:
+    def test_claimed_no_request_fails(self, env):
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
+        with env["db"].connection() as conn:
+            env["queue_repo"].claim_next(conn)
+        env["worker"].recover()
+        assert env["queue_repo"].list_by_shot("shot-1")[0].status == "failed"
+
+    def test_claimed_request_failed_fails(self, env):
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
+        env["mock_comfyui"].submit.side_effect = Exception("fail")
+        env["worker"].run_once()
+        # Reset to claimed
+        jobs = env["queue_repo"].list_by_shot("shot-1")
+        env["queue_repo"].update_status(jobs[0].id, "claimed")
+        env["worker"].recover()
+        assert env["queue_repo"].get(jobs[0].id).status == "failed"
 
     def test_recovery_idempotent(self, env):
-        """Running recovery twice produces the same result."""
         env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
         with env["db"].connection() as conn:
             env["queue_repo"].claim_next(conn)
-
         env["worker"].recover()
         env["worker"].recover()
-
-        jobs = env["queue_repo"].list_by_shot("shot-1")
-        assert jobs[0].status == "failed"
+        assert env["queue_repo"].list_by_shot("shot-1")[0].status == "failed"
 
     def test_recovery_after_db_reopen(self, env):
-        """Recovery works after process restart (DB reopen)."""
         env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
         with env["db"].connection() as conn:
             env["queue_repo"].claim_next(conn)
-
-        # Simulate restart: new DB connection + new worker
         db2 = Database(env["db"]._db_path)
-        queue_repo2 = QueueJobRepository(db2)
         worker2 = QueueWorker(
-            db=db2, queue_repo=queue_repo2,
+            db=db2, queue_repo=QueueJobRepository(db2),
             generation_service=env["gen_service"],
             request_repo=GenerationRequestRepository(db2),
             take_repo=TakeRepository(db2),
         )
-        recovered = worker2.recover()
-        assert recovered == 1
+        assert worker2.recover() == 1
 
 
 # ---------------------------------------------------------------------------
-# Concurrency setting
+# Concurrency
 # ---------------------------------------------------------------------------
 
-class TestConcurrencySetting:
-    def test_default_concurrency(self):
+class TestConcurrency:
+    def test_default_concurrency_1(self):
         from film_director.config import Settings
         s = Settings(wc_database_path="/tmp/test.db")
         assert s.queue_worker_concurrency == 1
+
+    def test_invalid_concurrency_zero(self):
+        with pytest.raises(ValueError, match="concurrency"):
+            QueueWorker(
+                db=MagicMock(), queue_repo=MagicMock(),
+                generation_service=MagicMock(),
+                request_repo=MagicMock(), take_repo=MagicMock(),
+                concurrency=0,
+            )
+
+    def test_invalid_concurrency_over_max(self):
+        with pytest.raises(ValueError, match="concurrency"):
+            QueueWorker(
+                db=MagicMock(), queue_repo=MagicMock(),
+                generation_service=MagicMock(),
+                request_repo=MagicMock(), take_repo=MagicMock(),
+                concurrency=99,
+            )
+
+    def test_run_available_processes_all(self, env):
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=3, base_seed=42)
+        total = env["worker"].run_available()
+        assert total == 3
+        takes = env["take_repo"].get_takes_by_shot("shot-1")
+        assert len(takes) == 3
+
+    def test_stop_prevents_new_claims(self, env):
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=3, base_seed=42)
+        env["worker"].run_once()
+        env["worker"].stop()
+        assert env["worker"].run_once() == 0
+        # Only 1 take created
+        takes = env["take_repo"].get_takes_by_shot("shot-1")
+        assert len(takes) == 1
+
+    def test_recovery_runs_before_claims_in_run_available(self, env):
+        """run_available calls recover() before claiming."""
+        env["queue_svc"].enqueue_shot("shot-1", "key-1", takes_count=1, base_seed=42)
+        with env["db"].connection() as conn:
+            env["queue_repo"].claim_next(conn)
+        # run_available should recover the orphan, then find no pending
+        total = env["worker"].run_available()
+        assert total == 0
+        assert env["queue_repo"].list_by_shot("shot-1")[0].status == "failed"

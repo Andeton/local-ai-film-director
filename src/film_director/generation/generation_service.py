@@ -81,6 +81,7 @@ class GenerationService:
         self._param_resolver = ParameterResolver()
 
         self._timeout = generation_timeout
+        self._finalize_callback = None  # M6: set by QueueWorker for atomic finalization
 
     def generate_shot(self, shot_id: str) -> Take:
         """Synchronous single-take generation (M3 backward compat).
@@ -296,6 +297,9 @@ class GenerationService:
                         completed_at=datetime.now(timezone.utc).isoformat(),
                         conn=conn,
                     )
+                    # M6: atomic QueueJob finalization callback
+                    if self._finalize_callback is not None:
+                        self._finalize_callback(take, conn)
             except Exception as db_err:
                 # DB finalization failed — clean up final directory
                 logger.error("DB finalization failed: %s", db_err)

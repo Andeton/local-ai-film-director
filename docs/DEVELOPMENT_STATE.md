@@ -137,19 +137,20 @@ Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
   - Scene retry returns original jobs (not empty list)
   - Error classes: QueueJobNotFoundError, QueueValidationError, QueueConflictError, QueueTransitionError
   - 32 integration tests (idempotency, conflict, scene retry, cancellation, repository)
-- M6.C: COMPLETE — QueueWorker + GenerationService queued execution + restart recovery
+- M6.C: COMPLETE — QueueWorker + atomic finalization + 12-state recovery + concurrency
   - Atomic claim: UPDATE with subquery, WAL-serialized, attempt_count incremented once
-  - GenerationService.generate_take(shot_id, take_number, seed_override): backward-compat evolution
-  - generate_shot delegates to generate_take(take_number=1) for M3 compat
-  - QueueWorker: claim_next → execute_job → finalize (success/failure)
-  - Recovery matrix: 5 states (no request → failed, request succeeded → reconcile, request failed → failed, ambiguous → failed)
-  - max_attempts=1: no retry in M6, attempt_count tracks exactly one attempt
-  - Concurrency setting: queue_worker_concurrency (default 1) in Settings
-  - make_final_dir uses take_number (not hardcoded 1)
-  - 18 integration tests (claim, execution, failure, recovery, concurrency)
+  - GenerationService.generate_take + _finalize_callback for atomic QueueJob update
+  - Atomic finalization: Take + request succeeded + QueueJob succeeded in single transaction
+  - False-success prevention: request succeeded + no Take/missing media → invariant failure
+  - Prompt-ID recovery: never calls submit() during recovery
+  - Recovery matrix: 12 states covering all (claimed, request_status, Take_exists, media_exists) combinations
+  - run_available(): bounded ThreadPoolExecutor, recovery before first claim, stop() prevents new claims
+  - Concurrency: 1–4 (validated), default 1
+  - max_attempts=1: no retry in M6
+  - 24 integration tests (claim, execution, failure, recovery false-success, concurrency, stop)
 - M6.D–M6.F: NOT STARTED
 
-**Baseline:** 1238 deterministic + 9 live deselected, 0 failed
+**Baseline:** 1244 deterministic + 9 live deselected, 0 failed
 
 Next: M6.D — TakeService (approve/reject/favorite/unfavorite).
 

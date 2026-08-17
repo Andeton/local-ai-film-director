@@ -8,7 +8,7 @@
 
 **M7 — Continuity**
 
-**Status:** M7.E COMPLETE / M7.F NOT STARTED
+**Status:** M7 OPEN — M7.A-E complete, M7.F conditional acceptance, M7.G not started
 
 Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
 Branch: `m7-continuity`
@@ -78,16 +78,20 @@ Base: main at `18c6405`
 - Root cause: triple failure — (A) FLF prompt used only Chinese name "陆砚" with no appearance, (B) back-facing predecessor frame had no face, (D) Chinese name biased H3 toward East Asian identity
 - Identity-context correction applied: IdentityResolver traces approved ReferenceAsset → generation prompt → English identity text into every FLF prompt. Environment retention instructions added.
 - Identity fix review: 10/10 PASS, 0 WARN, 0 FAIL
-- Text-only prompting is NOT claimed as the final identity solution.
-- Next: A/B controlled live preflight comparing:
-  - (A) FLF + strengthened identity text (current correction)
-  - (B) R2V continuity hybrid (ref_video + ref_image + character ref, new experimental workflow)
-- If neither A nor B suffices, evaluate LTX reference-to-video as third candidate.
-- M7 cannot close until live A/B preflight proves acceptable identity+continuity.
+- Text-only prompting is NOT a universal identity solution.
+- A/B preflight completed:
+  - (A) FLF + identity text: A-Shot2 (434s) and A-Shot4 (240s) complete
+  - (B) R2V full-video hybrid (ref_video + ref_image + audio): B-Shot2 >120min, interrupted — **impractical**
+  - Human verdict: CONDITIONAL ACCEPTANCE ("условно ок, двигаемся дальше")
+- H3 R2V remains an active strategy. Only full-video hybrid is classified as impractical.
+- The A/B experiment unnecessarily attached predecessor audio (ref_video_audios). Audio is NOT required for identity comparison.
+- Multi-model conditioning architecture: `docs/MULTIMODEL_CONDITIONING_ARCHITECTURE.md`
+- Implementation plan: `docs/superpowers/plans/2026-08-17-multimodel-conditioning.md`
+- Baseline: 1513 passed, 12 deselected, 0 failed
 
-**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (identity fix applied, A/B preflight pending)
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (conditional) → M7.G (not started)
 
-Next action: M7.F A/B controlled live preflight.
+Next action: M7.G.A implementation (VisualAssetPack and asset-role definitions).
 
 ---
 

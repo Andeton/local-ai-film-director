@@ -45,7 +45,7 @@
 | M6 feature commit | `3a2fac7` (branch `m6-take-management`) |
 | M6 merge commit | `6b6e6e2` |
 | Deterministic tests | 1513 passed, 12 live deselected, 0 failed |
-| Current milestone | M7 — Continuity (M7.F A/B preflight pending) |
+| Current milestone | M7 — Continuity (OPEN, M7.G not started) |
 | M7 planning branch | `m7-continuity` |
 | M7 worktree | `D:\Ai\Local AI Film Director\.worktrees\m7-continuity` |
 
@@ -57,16 +57,18 @@
 - Live acceptance: 3 real queued Takes (visual PASS), restart recovery proven, 20-shot/60-job queue proof.
 - Chinese-audio observation: H3 inferred Chinese from WC source text (deferred to M10).
 
-**M7 Status:** M7.E COMPLETE / M7.F NOT STARTED.
-- Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
-- **FLF limitation:** MiniMaxH3ImageToVideo has NO ref_images. Character identity from predecessor frame.
-- M7.A: ContinuityState model, table, repository, resolver, continuity_snapshot. 60 tests.
-- M7.B: Preflight HUMAN PASS. `h3_flf_v1` v1.0.0 (`47d6706c...c43d6`). ContinuityBinding. 33 tests.
-- M7.C: ContinuityService, continuity-aware GenerationService, FLF prompt. 18 tests.
-- M7.D: `superseded` terminal status. Atomic replace_approved + downstream invalidation. 26 tests.
-- M7.E: 6 API routes + rebuild + in-flight race guard + CAS atomicity. 27+9 tests.
-- M7.F: Initial live verdict FAIL/PARTIAL (frame chaining PASS, identity FAIL from Shot 2, ethnicity FAIL at Shot 4). Root cause: Chinese name as sole FLF identity marker + back-facing frame + no ref_images. Identity-context fix applied (IdentityResolver + environment retention). Text-only NOT claimed as final solution. Next: A/B controlled preflight — (A) FLF+text vs (B) R2V hybrid (ref_video+ref_image+char ref). If neither suffices, evaluate LTX.
-- Subtasks: M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (A/B preflight pending).
+**M7 Status:** OPEN — M7.A-E complete, M7.F conditional, M7.G not started.
+- Continuity plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
+- Multi-model plan: `docs/superpowers/plans/2026-08-17-multimodel-conditioning.md`
+- Architecture: `docs/MULTIMODEL_CONDITIONING_ARCHITECTURE.md`
+- **FLF limitation:** MiniMaxH3ImageToVideo has NO ref_images. Identity relies on predecessor frame + text.
+- **H3 R2V remains active.** Only full-video hybrid (124-frame ref_video + audio) is impractical (>120min on RTX 5090).
+- M7.A-E: ContinuityState, FLF workflow, ContinuityService, replace-approved+invalidation, API+rebuild+CAS. 193 deterministic tests.
+- M7.F: Initial FAIL/PARTIAL → identity fix (IdentityResolver) → A/B preflight → **CONDITIONAL ACCEPTANCE**.
+- Human verdict: "условно ок, двигаемся дальше" — text identity helps but is not a universal solution.
+- Next H3 recipe: image-only R2V (char ref + env view + predecessor frame, no video, no audio).
+- Subtasks: M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (conditional) → M7.G (not started).
+- Next action: M7.G.A (VisualAssetPack and asset-role definitions).
 
 **Non-blocking hardening observations (deferred to M10):**
 1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.

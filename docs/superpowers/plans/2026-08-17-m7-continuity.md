@@ -923,11 +923,19 @@ git commit -m "M7.F: five-shot live continuity acceptance and invalidation proof
 
 **Forward dependencies: ZERO.**
 
+## M7.G — Multi-Model Conditioning Extension
+
+M7.F live acceptance revealed that FLF text-only identity is conditionally acceptable but not a universal solution. The full-video R2V hybrid (ref_video + audio) proved impractical (>120min).
+
+**Continuation plan:** `docs/superpowers/plans/2026-08-17-multimodel-conditioning.md`
+**Architecture:** `docs/MULTIMODEL_CONDITIONING_ARCHITECTURE.md`
+
+Next: M7.G.A (VisualAssetPack and asset-role definitions).
+
 ## Backlog (NOT M7 scope)
 
 - AI visual quality reviewer — M8
 - Smart retry/regeneration suggestions — M8
-- Combined character-ref + continuity workflow (R2V with continuity frame) — post-M7
 - Cross-scene continuity links — post-M7
 - Automatic re-generation of outdated downstream shots — M8
 - Production UI — M9

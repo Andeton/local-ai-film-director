@@ -101,9 +101,25 @@ Base: main at `18c6405`
 - M7.G.A review: 13 PASS, 0 WARN, 0 FAIL
 - Baseline: 1580 passed, 12 deselected, 0 failed (1513 + 67 new)
 
-**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (conditional) → M7.G.A ✓ → M7.G.B (not started)
+**M7.G.B — ConditioningRecipe and CapabilityRegistry: COMPLETE**
+- ConditioningRecipe: frozen dataclass, versioned provider-layer recipe mapping canonical AssetRoles to workflow inputs
+- RecipeRoleRequirement: role, required/optional, slot_index, modality, cardinality
+- compute_recipe_fingerprint: SHA-256 over semantic fields (excludes advisory vram/runtime)
+- RecipeRegistry: in-memory append-only, idempotent re-register, rejects fingerprint conflicts
+- CapabilityProfile: frozen static declaration (provider, model family, strategies, modalities, nodes, models)
+- CapabilityState lifecycle: DISCOVERED→AVAILABLE→INSTALLED→VERIFIED→APPROVED→DEPRECATED
+- CapabilityRegistry: in-memory lifecycle management, explicit transitions, no auto-approval
+- ProbeResult: transient runtime observation (reachable, nodes, vram) separate from static profile
+- probe_runtime: uses ComfyUIAdapter.health() + get_object_info(), no generation
+- validate_recipe_capability: provider/model/strategy/modality/limit compatibility check
+- Source of truth: code-based registries (following WorkflowDefinition pattern), no new DB tables
+- ComfyUIAdapter.get_object_info() added for node class discovery
+- M7.G.B review: 18 PASS, 0 WARN, 0 FAIL
+- Baseline: 1653 passed, 12 deselected, 0 failed (1580 + 73 new)
 
-Next action: M7.G.B — ConditioningRecipe and CapabilityRegistry.
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (conditional) → M7.G.A ✓ → M7.G.B ✓ → M7.G.C (not started)
+
+Next action: M7.G.C — H3 Image-Only Multi-Reference Recipe (h3_r2v_image_pack_v1).
 
 ---
 

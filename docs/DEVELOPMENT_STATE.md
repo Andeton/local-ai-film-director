@@ -78,11 +78,16 @@ Base: main at `18c6405`
 - Root cause: triple failure — (A) FLF prompt used only Chinese name "陆砚" with no appearance, (B) back-facing predecessor frame had no face, (D) Chinese name biased H3 toward East Asian identity
 - Identity-context correction applied: IdentityResolver traces approved ReferenceAsset → generation prompt → English identity text into every FLF prompt. Environment retention instructions added.
 - Identity fix review: 10/10 PASS, 0 WARN, 0 FAIL
-- Targeted live rerun required (minimum: 2 shots) before M7 can close
+- Text-only prompting is NOT claimed as the final identity solution.
+- Next: A/B controlled live preflight comparing:
+  - (A) FLF + strengthened identity text (current correction)
+  - (B) R2V continuity hybrid (ref_video + ref_image + character ref, new experimental workflow)
+- If neither A nor B suffices, evaluate LTX reference-to-video as third candidate.
+- M7 cannot close until live A/B preflight proves acceptable identity+continuity.
 
-**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (identity fix applied, rerun pending)
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (identity fix applied, A/B preflight pending)
 
-Next action: M7.F targeted live rerun only.
+Next action: M7.F A/B controlled live preflight.
 
 ---
 

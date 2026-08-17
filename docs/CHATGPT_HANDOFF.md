@@ -45,7 +45,7 @@
 | M6 feature commit | `3a2fac7` (branch `m6-take-management`) |
 | M6 merge commit | `6b6e6e2` |
 | Deterministic tests | 1513 passed, 12 live deselected, 0 failed |
-| Current milestone | M7 — Continuity (M7.F identity fix, rerun pending) |
+| Current milestone | M7 — Continuity (M7.F A/B preflight pending) |
 | M7 planning branch | `m7-continuity` |
 | M7 worktree | `D:\Ai\Local AI Film Director\.worktrees\m7-continuity` |
 
@@ -65,8 +65,8 @@
 - M7.C: ContinuityService, continuity-aware GenerationService, FLF prompt. 18 tests.
 - M7.D: `superseded` terminal status. Atomic replace_approved + downstream invalidation. 26 tests.
 - M7.E: 6 API routes + rebuild + in-flight race guard + CAS atomicity. 27+9 tests.
-- M7.F: Initial live verdict FAIL/PARTIAL (frame chaining PASS, identity FAIL from Shot 2, ethnicity FAIL at Shot 4). Root cause: Chinese name "陆砚" as sole FLF identity marker + back-facing frame + no ref_images. Identity-context fix: IdentityResolver traces approved ref generation prompt → English identity text → FLF prompt. Environment retention added. 20 tests. Fix review: 10/10 PASS.
-- Subtasks: M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (fix applied, rerun pending).
+- M7.F: Initial live verdict FAIL/PARTIAL (frame chaining PASS, identity FAIL from Shot 2, ethnicity FAIL at Shot 4). Root cause: Chinese name as sole FLF identity marker + back-facing frame + no ref_images. Identity-context fix applied (IdentityResolver + environment retention). Text-only NOT claimed as final solution. Next: A/B controlled preflight — (A) FLF+text vs (B) R2V hybrid (ref_video+ref_image+char ref). If neither suffices, evaluate LTX.
+- Subtasks: M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (A/B preflight pending).
 
 **Non-blocking hardening observations (deferred to M10):**
 1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.

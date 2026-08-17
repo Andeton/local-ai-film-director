@@ -1,6 +1,6 @@
 # ChatGPT Cold-Start Handoff — Local AI Film Director
 
-**Last Updated:** 2026-08-16
+**Last Updated:** 2026-08-17
 **Purpose:** Primary cold-start context for new ChatGPT sessions directing this project.
 
 ---
@@ -41,40 +41,25 @@
 
 | Item | Value |
 |---|---|
-| Main merged HEAD | `47d30c4` (M5 merge + docs checkpoint) |
-| Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m6-take-management` |
-| Active branch | `m6-take-management` |
+| Main HEAD | M6 docs checkpoint (see below) |
+| M6 feature commit | `3a2fac7` (branch `m6-take-management`) |
+| M6 merge commit | `6b6e6e2` |
 | Deterministic tests | 1320 passed, 12 live deselected, 0 failed |
-| Current milestone | M6 — Take Management (COMPLETE / CLOSED) |
+| Current milestone | M7 — Continuity (NOT STARTED) |
 
-**M5 Progress:**
-- M5.A: COMPLETE (ReferenceAsset + ReferenceGenerationRequest + ReferenceGenerationExecution)
-- M5.B: COMPLETE (managed file ingest, user + WC HTTP, PIL validation, SHA-256, dedup)
-- M5.C: COMPLETE (versioned/selectable generator profiles, atomic finalization, dedup, model snapshot)
-- M5.D: COMPLETE (ReferenceLifecycleService + deterministic ReferenceSelector)
-- M5.E: COMPLETE (H3ReferenceResolver.resolve_from_assets + GenerationService ReferenceSelector wiring + count-based v1/v2 workflow + asset-provenance reference_snapshot + production integration tests)
-- M5.F: COMPLETE (shared compute_appearance_fingerprint, atomic stale propagation in import_project, GENERATED-only policy, no reactivation)
-- M5.G: COMPLETE (10 API routes, multipart upload, lifecycle, selection, 34 tests)
-- M5.H: COMPLETE (live reference generation, human reject+approve cycle, real H3 generation, human influence PASS)
+**M5 Status:** COMPLETE / CLOSED / MERGED at `d4e0fbe`.
 
-**M5 Status:** COMPLETE / CLOSED / MERGED — 26/26 exit criteria PASS. Main contains accepted M5.
+**M6 Status:** COMPLETE / CLOSED / MERGED at `6b6e6e2`.
+- Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
+- Take status (approved/rejected/favorite), persistent queue (QueueBatch idempotency + QueueJob), QueueWorker (atomic claim+finalization, 12-state recovery), TakeService (single-approved CAS), 11 API routes, standalone queue runner.
+- Live acceptance: 3 real queued Takes (visual PASS), restart recovery proven, 20-shot/60-job queue proof.
+- Chinese-audio observation: H3 inferred Chinese from WC source text (deferred to M10).
 
-**M6 Plan:** `docs/superpowers/plans/2026-08-16-m6-take-management.md` — reviewed and accepted.
+**Non-blocking hardening observations (deferred to M10):**
+1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.
+2. claim_next() retrieves the claimed row using claimed_at timestamp matching; consider SQLite UPDATE ... RETURNING for stronger identification.
 
-**M6.A:** COMPLETE — Take status (approved/rejected), is_favorite:bool, derive_take_seed (signed-63-bit safe), QueueJob model, generation_queue schema.
-**M6.B:** COMPLETE — Persistent batch idempotency (QueueBatch + fingerprint), QueueJobRepository, QueueBatchRepository, QueueService (idempotent enqueue shot/scene, cancel), 32 tests.
-
-**M6.C:** COMPLETE — QueueWorker (atomic claim+finalization, 12-state recovery, prompt-ID auto-finalization, false-success prevention, run_available with concurrency 1–4), 32 tests.
-
-**M6.D:** COMPLETE — TakeService (approve/reject/favorite/unfavorite, single-approved CAS, media validation, partial index), 31 tests.
-
-**M6.E:** COMPLETE — 11 API routes, Idempotency-Key header, standalone worker (`python -m film_director.queue_runner`), singleton lock, API 404 correction, 37 tests.
-
-**M6.F:** COMPLETE — 3 real queued Takes (visual PASS), Take 2 approved, restart recovery proven, 20-shot/60-job queue proof, Chinese-audio deferred to M10.
-
-**M6 Status:** COMPLETE / CLOSED. Branch ready for merge.
-
-**Next action:** Merge M6 to main, then M7 — Continuity. NOT STARTED.
+**Next action:** M7 planning only. No M7 implementation or plan exists yet.
 
 ---
 
@@ -87,6 +72,8 @@
 | M2 | Production Specification: Beat/Shot/Plan enrichment, human editing API, stale propagation. 418 tests. |
 | M3 | H3 Bridge: Shot → H3 R2V → ComfyUI → Take. Real R2V execution proved (1376x768, 5.167s). 673 tests. |
 | M4 | WC Production Handoff: idea → WC SSE → import → source-fact precedence → enrichment. Real live acceptance. 884 tests. |
+| M5 | Reference Management: ingest, versioned generator profiles, lifecycle, H3 multi-ref binding, staleness. Merged at `d4e0fbe`. 1148 tests. |
+| M6 | Take Management: persistent queue, QueueWorker, TakeService, 11 API routes, standalone runner. Merged at `6b6e6e2`. 1320 tests. |
 
 **M3 live evidence:** Real H3 R2V generation, human visual acceptance PASS.
 
@@ -231,6 +218,5 @@ Both models executed successfully. No ReferenceAsset or ReferenceGenerationReque
 
 1. `docs/CHATGPT_HANDOFF.md` (this file — primary context)
 2. `docs/DEVELOPMENT_STATE.md` (detailed milestone state)
-3. `docs/superpowers/plans/2026-08-16-m5-reference-management.md` (current plan)
-4. `docs/ROADMAP_V2.md` (strategic roadmap)
-5. `docs/ARCHITECTURE_V1.md` (frozen architecture)
+3. `docs/ROADMAP_V2.md` (strategic roadmap)
+4. `docs/ARCHITECTURE_V1.md` (frozen architecture)

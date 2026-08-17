@@ -1,60 +1,16 @@
 # Development State — Local AI Film Director
 
-**Last Updated:** 2026-08-16
+**Last Updated:** 2026-08-17
 
 ---
 
 ## Current Milestone
 
-**M5 — Reference Management**
+**M7 — Continuity**
 
-**Status:** COMPLETE / CLOSED / MERGED
+**Status:** NOT STARTED
 
-Branch: `m5-reference-management` (merged to main at `d4e0fbe`)
-Plan: `docs/superpowers/plans/2026-08-16-m5-reference-management.md`
-
-**M5 Progress:**
-- M5.A: COMPLETE — ReferenceAsset (kind/source/ownership/lifecycle), ReferenceGenerationRequest (immutable), ReferenceGenerationExecution (mutable), 3 DB tables + indexes, 3 repositories
-- M5.B: COMPLETE — ReferenceIngestService (user upload + WC media HTTP/local), PIL image validation (PNG/JPEG/WEBP), SHA-256 content identity, managed storage with pathlib confinement, dedicated SQL dedup query, structured IngestOutcome, 50MB download limit
-- M5.C: COMPLETE — ReferenceGenerationService with versioned/selectable generator profiles (Z-Image Turbo v1 + Krea 2 Turbo v1), immutable ReferenceGenerationRequest snapshot, mutable execution lifecycle, ComfyUI submit/monitor/get_result/download, managed storage + SHA + dimensions on output CANDIDATE asset
-- M5.D: COMPLETE — ReferenceLifecycleService (approve/reject/archive/pin/unpin with invariant enforcement), ReferenceSelector (deterministic provider-neutral selection: pinned+approved+current > approved+current, created_at DESC, id ASC tie-break)
-- M5.E: COMPLETE — H3 multi-reference binding evolution + r2v_v2 workflow + production integration
-  - H3ReferenceBinding evolution (nullable subject_index, reference_asset_id/kind)
-  - r2v_v2 workflow (fingerprint-verified, 2 materialized LoadImage slots)
-  - WorkflowResolver.resolve_for_reference_count (v1 for 1 ref, v2 for 2)
-  - H3ReferenceResolver.resolve_from_assets() — builds bindings from ReferenceSelector output with managed-path confinement + SHA re-verification
-  - GenerationService wired: ReferenceSelector → resolve_from_assets → count-based workflow → asset-provenance reference_snapshot
-  - GenerationRequest.reference_snapshot includes reference_asset_id + reference_kind
-  - PromptBuilder validation, M5.E.1 preflight (human visual PASS)
-  - Unit tests (resolve_from_assets: order, SHA mismatch, missing file, character mismatch, count mismatch, path escape rejection, confinement acceptance)
-  - Integration tests (two-asset: v2 workflow selected, node 200/201 image injection, asset provenance in snapshot, both subjects in prompt, rejected/stale ref errors)
-- M5.F: COMPLETE — Reference staleness on character appearance changes
-  - Shared compute_appearance_fingerprint helper (models/reference.py, used by both generation and stale propagation)
-  - ReferenceAssetRepository.mark_generated_stale_for_character (scoped SQL: project+character+GENERATED+CURRENT, NULL fingerprint → STALE)
-  - Atomic integration in import_project: character UPSERT + stale transition in same DB transaction
-  - Rollback on failure: stale propagation error rolls back character appearance update
-  - GENERATED-only: USER_UPLOAD and WIND_COMIC untouched
-  - No reactivation: already-STALE remains STALE, revert appearance does not re-CURRENT
-  - Status, pinned, SHA, path, provenance, dimensions, created_at preserved
-  - 16 unit tests + 8 integration tests
-- M5.G: COMPLETE — Reference management API endpoints
-  - 10 routes: project/character listing, multipart upload/register, synchronous generate, approve/reject/archive/pin/unpin, shot selected-references
-  - Multipart upload: 50MB byte-bounded streaming, temp file cleanup on success+failure, client filename never controls path
-  - ReferenceNotFoundError(404) vs ReferenceLifecycleError(409) typed distinction
-  - ReferenceIngestError→422, ReferenceGenerationError→502, oversized→413
-  - Selected references: ReferenceSelector with default CHARACTER_BODY, missing eligible→409
-  - Service wiring: ReferenceIngestService, ReferenceGenerationService, ReferenceLifecycleService, ReferenceSelector
-  - 34 API tests (listing, upload, dedup, generation, lifecycle, selection, routing, error mapping)
-- M5.H: COMPLETE — Live acceptance with human checkpoints
-  - H1: First candidate REJECTED (East Asian features), prompt-override correction (commit 88b4a9a), replacement candidate APPROVED + PINNED
-  - H2: Real H3 R2V generation using approved reference, human reference-influence PASS
-  - Path confinement fix for relative managed_path (commit 958d826)
-  - Quality limitations documented (1024x1024 facial detail, 1376x768 video resolution)
-  - 2 @pytest.mark.live tests (evidence verification, no re-generation)
-
-**Baseline:** 1148 deterministic + 9 live deselected (7 M1-M4 + 2 M5), 0 failed
-
-Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
+Next action: M7 planning only. No M7 implementation or plan exists yet.
 
 ---
 
@@ -72,6 +28,8 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 | M2 | 2026-08-16 | Production Specification: Beat/ShotSpecificationV1/GenerationPlan canonical models (model-agnostic, zero provider fields), BeatEnricher + CoveragePlanner (LLM object-wrapper contract, domain repair), deterministic ShotSpecBuilder (non-lossy character refs), deterministic StrategySelector (explicit context, 5-priority precedence), history-preserving re-enrichment (OUTDATED + new IDs, never delete), human editing API with stale propagation + force protection (409), atomic M1+M2 source-change cascade, 23 API endpoints total. 418 tests (413 deterministic + 5 live Ollama). Exit criteria 12/12 PASS. Backlog: _find_project_id_for_scene O(N) scan (MINOR). |
 | M3 | 2026-08-16 | H3 Bridge Vertical Slice: Shot → H3 R2V → ComfyUI → Take. H3ReferenceResolver (content SHA-256, first-ref-only), H3PromptBuilder (deterministic, binding-authority), WorkflowRegistry (fingerprint-verified r2v_v1.json), ParameterResolver (seconds injection, trained 124-362 frame range, explicit aspect mapping), ComfyUIAdapter (sync REST+WS, prompt_id filtering), INSERT-only GenerationRequest + UNIQUE Take repositories with atomic finalization, GenerationService (22-step pipeline with pre/post-request failure boundary), media staging (ffprobe + true last-frame extraction), API (POST generate, GET request, GET comfyui health). Real H3 R2V execution: 1376x768 h264+aac 5.167s in 3:51 on RTX 5090. Human visual acceptance PASS. 673 deterministic + 1 live ComfyUI + 5 live Ollama tests. Exit criteria 15/15 PASS. |
 | M4 | 2026-08-16 | Wind Comic Production Handoff: idea → WC SSE → canonical import → source-aware enrichment. WindComicPreproductionClient (JWT+SSE), ShotSourceFacts (frozen transport DTO), StoryboardParser (conservative regex), DialogueIntent (speaker resolution), deterministic source-fact precedence in ShotSpecBuilder (sentinel handling, partial camera merge), PreproductionService (synchronous orchestrator), reimport stale propagation (director+storyboard in hash), POST /projects/from-idea API. Real live acceptance: WC 12.320.0 + qwen3:14b, project 2NNXzW98y4CXQSVM5D8iY → proj_b8b1b8ab40b5 (1 scene, 2 chars, 18 shots, 18 plans). 884 deterministic + 7 live deselected. Exit criteria 13/13 PASS. Known limitation: WC Writer dialogue/action quality with qwen3:14b not production-ready. |
+| M5 | 2026-08-16 | Reference Management: ReferenceAsset lifecycle, ingest (user upload + WC HTTP), versioned generator profiles (Z-Image Turbo + Krea 2 Turbo), lifecycle service, H3 multi-reference binding + r2v_v2 workflow, staleness propagation, 10 API routes. Live acceptance: human reject+approve cycle, real H3 generation with reference influence PASS. 1148 deterministic + 9 live deselected. Merged to main at `d4e0fbe`. |
+| M6 | 2026-08-17 | Take Management: Take status (approved/rejected/favorite), persistent queue (QueueBatch idempotency + QueueJob), QueueWorker (atomic claim+finalization, 12-state recovery, prompt-ID resume), TakeService (single-approved CAS), 11 API routes, standalone queue runner. Live acceptance: 3 real queued Takes (visual PASS), restart recovery proven, 20-shot/60-job queue proof. Feature `3a2fac7`, merged to main at `6b6e6e2`. 1320 deterministic + 12 live deselected. |
 
 ---
 
@@ -112,82 +70,23 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 ---
 
-## Next Approved Action
+## Last Closed Milestone
 
 **M6 — Take Management**
 
-**Status:** COMPLETE / CLOSED
+**Status:** COMPLETE / CLOSED / MERGED
 
-Branch: `m6-take-management`
-Worktree: `D:\Ai\Local AI Film Director\.worktrees\m6-take-management`
+Feature branch: `m6-take-management` (final commit `3a2fac7`)
+Merge commit: `6b6e6e2` (merged to main 2026-08-17)
 Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
-
-**M6 Progress:**
-- M6.A: COMPLETE — Take status evolution (approved/rejected), is_favorite boolean field, derive_take_seed (SHA-256, masked to signed-63-bit [0, 2^63-1]), QueueJob model, generation_queue table + indexes + UNIQUE(shot_id, take_number), is_favorite migration for existing takes, 40 tests
-- M6.B: COMPLETE — Persistent queue batch idempotency + enqueue + cancel
-  - QueueBatch: persistent idempotency record with UNIQUE(project_id, idempotency_key) + request_fingerprint (SHA-256 of canonical JSON)
-  - QueueJob.batch_id: links every job to its batch for status-independent retry
-  - Same key + same payload → returns original jobs (regardless of job status)
-  - Same key + different payload → QueueConflictError
-  - New key → creates new batch with new take numbers
-  - Seed persistence: base_seed + derived seed immutable at enqueue time
-  - QueueJobRepository + QueueBatchRepository
-  - QueueService.enqueue_shot/scene: atomic batch creation, deterministic seeds
-  - cancel_job: pending→cancelled (idempotent), claimed/succeeded/failed rejected
-  - Scene retry returns original jobs (not empty list)
-  - Error classes: QueueJobNotFoundError, QueueValidationError, QueueConflictError, QueueTransitionError
-  - 32 integration tests (idempotency, conflict, scene retry, cancellation, repository)
-- M6.C: COMPLETE — QueueWorker + atomic finalization + 12-state recovery + concurrency
-  - Atomic claim: UPDATE with subquery, WAL-serialized, attempt_count incremented once
-  - GenerationService.generate_take + _finalize_callback for atomic QueueJob update
-  - Atomic finalization: Take + request succeeded + QueueJob succeeded in single transaction
-  - False-success prevention: request succeeded + no Take/missing media → invariant failure
-  - Prompt-ID recovery: never calls submit() during recovery
-  - Recovery matrix: 12 states covering all (claimed, request_status, Take_exists, media_exists) combinations
-  - Prompt-ID resume: check_prompt_status → queued/running=leave claimed, succeeded=finalize_from_result, failed/unknown=mark failed
-  - GenerationService.finalize_from_result: shared download→validate→stage→finalize path for recovery (no submit)
-  - ComfyUIAdapter.check_prompt_status: non-blocking prompt state resolution
-  - Status-check exceptions leave job claimed (never false-fail a completed prompt)
-  - run_available(): bounded ThreadPoolExecutor, recovery before first claim, stop() prevents new claims
-  - Concurrency: 1–4 (validated), default 1
-  - max_attempts=1: no retry in M6
-  - 32 integration tests (claim, execution, failure, recovery false-success, prompt-ID resume, concurrency, stop)
-- M6.D: COMPLETE — TakeService approve/reject/favorite/unfavorite
-  - Transition matrix: succeeded→approved/rejected (terminal), is_favorite orthogonal
-  - Single-approved invariant: partial unique index + service-level CAS check
-  - TakeRepository: update_review_status (CAS), update_favorite, get_approved_for_shot, count_approved_for_shot
-  - Media validation: video file existence + path confinement before approval
-  - TakeNotFoundError, TakeLifecycleError, TakeConflictError
-  - 31 unit tests (transitions, single-approved, favorites, media, immutability, migration)
-- M6.E: COMPLETE — Take management and queue API endpoints
-  - 11 routes: shot/scene enqueue, queue listing/get/cancel, take listing/approved, approve/reject/favorite/unfavorite
-  - Idempotency-Key HTTP header required for enqueue (validated 1-128 chars)
-  - HTTP 202 for new batches, 409 for conflicts, 422 for validation
-  - Error mappings: QueueJobNotFoundError→404, QueueValidationError→422, QueueConflictError→409, QueueTransitionError→409, TakeNotFoundError→404, TakeLifecycleError→409, TakeConflictError→409
-  - Service wiring: QueueService, TakeService, QueueJobRepository, QueueBatchRepository in main.py
-  - Standalone queue worker: `python -m film_director.queue_runner` (separate process)
-  - Worker factory: build_worker(settings) constructs production QueueWorker from shared config
-  - Single-instance lock: OS file lock under data dir, auto-releases on crash
-  - Recovery before first claim, controlled polling, CTRL+C shutdown
-  - Settings: queue_worker_concurrency (1-4), queue_worker_poll_interval_seconds (1-300), queue_worker_enabled
-  - API 404 correction: missing shot/scene → 404 (not 422)
-  - 37 API+runner integration tests
-- M6.F: COMPLETE — Live acceptance with 3 real queued Takes + queue proof + human approval
-  - Three Takes (tn=2,3,4) with distinct seeds via persistent queue
-  - Worker restart recovery: Take 4 recovered from WS timeout via prompt-ID finalization (no duplicate submit)
-  - Human visual verdict: PASS on all three
-  - Take 2 approved (deterministic first-acceptable)
-  - 20-shot / 60-job persistent queue proof (zero ComfyUI submissions)
-  - Idempotent replay after completion and DB reopen verified
-  - Chinese audio observation: H3 inferred Chinese from WC source text (deferred to M10)
-  - M5 source integrity verified unchanged
-  - 3 @pytest.mark.live evidence tests
-
-**M6 Status:** COMPLETE / CLOSED
 
 **Baseline:** 1320 deterministic + 12 live deselected (9 M1-M5 + 3 M6), 0 failed
 
-Next: M7 — Continuity. NOT STARTED.
+Next: M7 — Continuity. NOT STARTED. Next action is M7 planning only.
+
+**Non-blocking hardening observations (deferred to M10):**
+1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.
+2. claim_next() retrieves the claimed row using claimed_at timestamp matching; consider SQLite UPDATE ... RETURNING for stronger identification.
 
 ---
 

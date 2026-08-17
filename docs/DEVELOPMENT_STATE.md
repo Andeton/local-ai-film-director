@@ -8,31 +8,31 @@
 
 **M7 — Continuity**
 
-**Status:** PLANNING COMPLETE / IMPLEMENTATION NOT STARTED
+**Status:** M7.A COMPLETE / M7.B NOT STARTED
 
 Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
 Branch: `m7-continuity`
 Worktree: `D:\Ai\Local AI Film Director\.worktrees\m7-continuity`
 Base: main at `18c6405`
-Baseline: 1320 passed, 12 live deselected, 0 failed
 
-**Architecture decisions (A–L):**
-- Within-scene-only automatic continuity chains (no cross-scene)
-- Deterministic predecessor resolution via canonical scene ordering
-- ContinuityState model (unresolved/current/outdated) per shot, separate from Take.status
-- continuity_snapshot JSON in GenerationRequest (nullable, backward-compatible)
-- Replace-approved with superseded status (atomic, CAS-protected)
-- Cascading downstream invalidation (deterministic, idempotent, non-destructive)
-- Generation eligibility requires predecessor approved Take + current continuity
-- FLF workflow (MiniMaxH3ImageToVideo/fl2va) for continuity shots; R2V (ref2va) for chain heads
-- Strict frame validation (path confinement, SHA-256, PNG format, dimensions)
-- 5 new API endpoints (continuity-state, predecessor, replace-approved, chain, outdated-shots)
+**M7.A — Continuity Models, Persistence, Ordering, and Fingerprinting: COMPLETE**
+- ContinuityState model (unresolved/current/outdated), separate from Take.status
+- `continuity_states` table with UNIQUE(shot_id), FK to shots/scenes/takes
+- Nullable `continuity_snapshot` JSON on GenerationRequest (backward-compatible, immutable after persist)
+- Deterministic scene-scoped predecessor resolver: `(beats.order_index, beats.id, shots.order_index, shots.id)`
+- ContinuityResolver: `get_scene_shot_order`, `resolve_predecessor`, `get_downstream_shots`, `get_scene_id_for_shot`
+- ContinuityStateRepository: `save` (UPSERT), `get_by_shot`, `get_by_scene`, `mark_outdated`, `resolve_current`
+- `compute_continuity_fingerprint`: canonical JSON, sorted keys, compact separators, UTF-8, SHA-256
+- ContinuityError added to error taxonomy
+- Idempotent migration for existing M6 databases
+- M7.A independent review: 7 PASS, 1 WARN (DDL pattern — fixed), 0 FAIL
+- Baseline: 1380 passed, 12 deselected, 0 failed (1320 original + 60 new)
 
-**Independent review:** 8 PASS, 2 WARN (non-blocking: scene_id derivation clarity, audio_vae handling), 0 FAIL.
+**Resolved baseline discrepancy:** The planning report showed 1318/3 skipped/10 deselected because a less precise `-k` filter was used instead of `-m "not live"`. With the canonical `-m "not live"` marker filter, both main and m7-continuity produce identical 1320 passed, 12 deselected.
 
-**Subtasks:** M7.A → M7.B → M7.C → M7.D → M7.E → M7.F
+**Subtasks:** M7.A ✓ → M7.B → M7.C → M7.D → M7.E → M7.F
 
-Next action: M7.A implementation only.
+Next action: M7.B technical preflight only.
 
 ---
 

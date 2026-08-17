@@ -44,8 +44,8 @@
 | Main HEAD | M6 docs checkpoint (see below) |
 | M6 feature commit | `3a2fac7` (branch `m6-take-management`) |
 | M6 merge commit | `6b6e6e2` |
-| Deterministic tests | 1320 passed, 12 live deselected, 0 failed |
-| Current milestone | M7 — Continuity (PLANNING COMPLETE) |
+| Deterministic tests | 1380 passed, 12 live deselected, 0 failed |
+| Current milestone | M7 — Continuity (M7.A COMPLETE) |
 | M7 planning branch | `m7-continuity` |
 | M7 worktree | `D:\Ai\Local AI Film Director\.worktrees\m7-continuity` |
 
@@ -57,12 +57,12 @@
 - Live acceptance: 3 real queued Takes (visual PASS), restart recovery proven, 20-shot/60-job queue proof.
 - Chinese-audio observation: H3 inferred Chinese from WC source text (deferred to M10).
 
-**M7 Status:** PLANNING COMPLETE / IMPLEMENTATION NOT STARTED.
+**M7 Status:** M7.A COMPLETE / M7.B NOT STARTED.
 - Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
-- Architecture decisions A–L resolved: within-scene continuity chains, ContinuityState model, deterministic predecessor resolution, replace-approved with superseded status, cascading downstream invalidation, FLF workflow (MiniMaxH3ImageToVideo/fl2va) for continuity shots, R2V as secondary preflight candidate, continuity_snapshot in GenerationRequest.
-- Independent review: 8 PASS, 2 WARN (non-blocking), 0 FAIL.
-- Key H3 finding: R2V (ref2va) supports character refs but NO first/last frame; FLF (fl2va) supports first/last frame but NO ref_images. These are different UNET models.
-- Subtasks: M7.A (models/persistence) → M7.B (workflow preflight) → M7.C (generation integration) → M7.D (replace-approved/invalidation) → M7.E (API) → M7.F (live acceptance).
+- Architecture decisions A–L resolved.
+- Key H3 finding: R2V (ref2va) supports character refs but NO first/last frame; FLF (fl2va) supports first/last frame but NO ref_images. Different UNET models.
+- M7.A delivered: ContinuityState model, `continuity_states` table, ContinuityStateRepository, ContinuityResolver (scene-scoped predecessor resolution), `continuity_snapshot` on GenerationRequest, `compute_continuity_fingerprint`, ContinuityError, idempotent M6→M7 migration. 60 new tests. M7.A review: 7 PASS, 1 WARN (fixed), 0 FAIL.
+- Subtasks: M7.A ✓ → M7.B (workflow preflight) → M7.C → M7.D → M7.E → M7.F.
 
 **Non-blocking hardening observations (deferred to M10):**
 1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.

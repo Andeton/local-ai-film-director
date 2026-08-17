@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Generator
 
+from film_director.continuity.continuity_models import ContinuityState
 from film_director.errors import PersistenceError
 from film_director.generation.generation_request import GenerationRequest, Take
 from film_director.models.reference import (
@@ -824,9 +825,9 @@ class GenerationRequestRepository:
                  prompt_artifact_version, workflow_definition_id,
                  workflow_definition_version, workflow_template_fingerprint,
                  take_number, parameters_snapshot, reference_snapshot,
-                 seed, comfyui_prompt_id, status, submitted_at,
-                 completed_at, error)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 seed, continuity_snapshot, comfyui_prompt_id, status,
+                 submitted_at, completed_at, error)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         params = (
             request.id, request.shot_id, request.shot_version,
@@ -836,7 +837,9 @@ class GenerationRequestRepository:
             request.workflow_template_fingerprint, request.take_number,
             json.dumps(request.parameters_snapshot),
             json.dumps(request.reference_snapshot),
-            request.seed, request.comfyui_prompt_id,
+            request.seed,
+            json.dumps(request.continuity_snapshot) if request.continuity_snapshot is not None else None,
+            request.comfyui_prompt_id,
             request.status, request.submitted_at, request.completed_at,
             request.error,
         )
@@ -899,6 +902,7 @@ class GenerationRequestRepository:
 
     @staticmethod
     def _row_to_request(row: sqlite3.Row) -> GenerationRequest:
+        raw_cs = row["continuity_snapshot"] if "continuity_snapshot" in row.keys() else None
         return GenerationRequest(
             id=row["id"],
             shot_id=row["shot_id"],
@@ -914,6 +918,7 @@ class GenerationRequestRepository:
             parameters_snapshot=json.loads(row["parameters_snapshot"]),
             reference_snapshot=json.loads(row["reference_snapshot"]),
             seed=row["seed"],
+            continuity_snapshot=json.loads(raw_cs) if raw_cs is not None else None,
             comfyui_prompt_id=row["comfyui_prompt_id"],
             status=row["status"],
             submitted_at=row["submitted_at"],
@@ -1646,4 +1651,148 @@ class QueueBatchRepository:
             base_seed=row["base_seed"],
             priority=row["priority"],
             created_at=row["created_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# ContinuityStateRepository (M7.A)
+# ---------------------------------------------------------------------------
+
+class ContinuityStateRepository:
+    """UPSERT by shot_id. Tracks per-shot continuity chain membership."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save(self, state: ContinuityState, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO continuity_states
+                (id, shot_id, scene_id, predecessor_shot_id,
+                 upstream_take_id, upstream_take_number,
+                 upstream_last_frame_path, upstream_last_frame_sha256,
+                 state, continuity_revision,
+                 invalidation_reason, invalidation_source_shot_id,
+                 created_at, updated_at, invalidated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(shot_id) DO UPDATE SET
+                scene_id                    = excluded.scene_id,
+                predecessor_shot_id         = excluded.predecessor_shot_id,
+                upstream_take_id            = excluded.upstream_take_id,
+                upstream_take_number        = excluded.upstream_take_number,
+                upstream_last_frame_path    = excluded.upstream_last_frame_path,
+                upstream_last_frame_sha256  = excluded.upstream_last_frame_sha256,
+                state                       = excluded.state,
+                continuity_revision         = excluded.continuity_revision,
+                invalidation_reason         = excluded.invalidation_reason,
+                invalidation_source_shot_id = excluded.invalidation_source_shot_id,
+                updated_at                  = excluded.updated_at,
+                invalidated_at              = excluded.invalidated_at
+        """
+        params = (
+            state.id, state.shot_id, state.scene_id,
+            state.predecessor_shot_id,
+            state.upstream_take_id, state.upstream_take_number,
+            state.upstream_last_frame_path, state.upstream_last_frame_sha256,
+            state.state, state.continuity_revision,
+            state.invalidation_reason, state.invalidation_source_shot_id,
+            state.created_at, state.updated_at, state.invalidated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save continuity state", str(exc)) from exc
+
+    def get_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> ContinuityState | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM continuity_states WHERE shot_id = ?",
+                (shot_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_state(row)
+
+    def get_by_scene(self, scene_id: str, conn: sqlite3.Connection | None = None) -> list[ContinuityState]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM continuity_states WHERE scene_id = ? ORDER BY id",
+                (scene_id,),
+            ).fetchall()
+        return [self._row_to_state(r) for r in rows]
+
+    def mark_outdated(
+        self,
+        shot_id: str,
+        reason: str,
+        source_shot_id: str,
+        invalidated_at: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Mark a shot's continuity state as outdated. Returns rows affected."""
+        sql = """
+            UPDATE continuity_states
+            SET state = 'outdated',
+                invalidation_reason = ?,
+                invalidation_source_shot_id = ?,
+                invalidated_at = ?,
+                updated_at = ?
+            WHERE shot_id = ? AND state != 'outdated'
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (reason, source_shot_id, invalidated_at, invalidated_at, shot_id))
+            return cursor.rowcount
+
+    def resolve_current(
+        self,
+        shot_id: str,
+        upstream_take_id: str,
+        upstream_take_number: int,
+        frame_path: str,
+        frame_sha256: str,
+        updated_at: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Transition a shot's continuity state to current, bumping revision. Returns rows affected."""
+        sql = """
+            UPDATE continuity_states
+            SET state = 'current',
+                upstream_take_id = ?,
+                upstream_take_number = ?,
+                upstream_last_frame_path = ?,
+                upstream_last_frame_sha256 = ?,
+                continuity_revision = continuity_revision + 1,
+                invalidation_reason = NULL,
+                invalidation_source_shot_id = NULL,
+                invalidated_at = NULL,
+                updated_at = ?
+            WHERE shot_id = ?
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (
+                upstream_take_id, upstream_take_number,
+                frame_path, frame_sha256, updated_at, shot_id,
+            ))
+            return cursor.rowcount
+
+    @staticmethod
+    def _row_to_state(row: sqlite3.Row) -> ContinuityState:
+        return ContinuityState(
+            id=row["id"],
+            shot_id=row["shot_id"],
+            scene_id=row["scene_id"],
+            predecessor_shot_id=row["predecessor_shot_id"],
+            upstream_take_id=row["upstream_take_id"],
+            upstream_take_number=row["upstream_take_number"],
+            upstream_last_frame_path=row["upstream_last_frame_path"],
+            upstream_last_frame_sha256=row["upstream_last_frame_sha256"],
+            state=row["state"],
+            continuity_revision=row["continuity_revision"],
+            invalidation_reason=row["invalidation_reason"],
+            invalidation_source_shot_id=row["invalidation_source_shot_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            invalidated_at=row["invalidated_at"],
         )

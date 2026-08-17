@@ -29,6 +29,8 @@ class QueueJob(BaseModel):
     shot_id: str
     take_number: int                    # 1-based
     project_id: str
+    base_seed: int                      # enqueue-time base seed (immutable)
+    seed: int                           # derived seed for this take (immutable)
     status: Literal[
         "pending", "claimed", "succeeded", "failed", "cancelled",
     ] = "pending"
@@ -55,6 +57,13 @@ class QueueJob(BaseModel):
     def positive_take_number(cls, v: int) -> int:
         if v < 1:
             raise ValueError("take_number must be >= 1 (1-based)")
+        return v
+
+    @field_validator("base_seed", "seed")
+    @classmethod
+    def valid_seed(cls, v: int) -> int:
+        if v < 0 or v > _SAFE_SEED_MAX:
+            raise ValueError(f"seed must be in [0, {_SAFE_SEED_MAX}]")
         return v
 
     @field_validator("attempt_count", "max_attempts")

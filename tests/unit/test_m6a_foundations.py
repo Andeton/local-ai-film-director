@@ -173,6 +173,7 @@ class TestTakeEvolution:
 def _job(**kw):
     defaults = dict(
         id="qj-1", shot_id="shot-1", take_number=1, project_id="proj-1",
+        base_seed=42, seed=100,
         status="pending", created_at="2026-01-01", updated_at="2026-01-01",
     )
     defaults.update(kw)
@@ -289,7 +290,8 @@ class TestDatabaseSchema:
                 conn.execute("PRAGMA table_info(generation_queue)").fetchall()
             }
         expected = {
-            "id", "shot_id", "take_number", "project_id", "status",
+            "id", "shot_id", "take_number", "project_id",
+            "base_seed", "seed", "status",
             "generation_request_id", "take_id", "priority",
             "attempt_count", "max_attempts", "error",
             "created_at", "updated_at", "claimed_at", "completed_at",
@@ -301,12 +303,14 @@ class TestDatabaseSchema:
             _insert_shot_chain(conn)
             conn.execute(
                 "INSERT INTO generation_queue (id,shot_id,take_number,project_id,"
-                "status,created_at,updated_at) VALUES ('q1','s1',1,'p1','pending','t','t')"
+                "base_seed,seed,status,created_at,updated_at) "
+                "VALUES ('q1','s1',1,'p1',42,100,'pending','t','t')"
             )
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute(
                     "INSERT INTO generation_queue (id,shot_id,take_number,project_id,"
-                    "status,created_at,updated_at) VALUES ('q2','s1',1,'p1','pending','t','t')"
+                    "base_seed,seed,status,created_at,updated_at) "
+                    "VALUES ('q2','s1',1,'p1',42,100,'pending','t','t')"
                 )
 
     def test_queue_indexes_exist(self, db):

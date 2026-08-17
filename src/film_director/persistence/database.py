@@ -267,6 +267,8 @@ CREATE TABLE IF NOT EXISTS generation_queue (
     shot_id TEXT NOT NULL,
     take_number INTEGER NOT NULL,
     project_id TEXT NOT NULL,
+    base_seed INTEGER NOT NULL,
+    seed INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     generation_request_id TEXT,
     take_id TEXT,
@@ -327,6 +329,25 @@ class Database:
                 "ALTER TABLE takes ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
             )
             logger.debug("Migration: added is_favorite to takes")
+
+        # M6.B: Add base_seed and seed columns to generation_queue
+        queue_tables = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "generation_queue" in queue_tables:
+            queue_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(generation_queue)").fetchall()
+            }
+            if "base_seed" not in queue_cols:
+                conn.execute(
+                    "ALTER TABLE generation_queue ADD COLUMN base_seed INTEGER NOT NULL DEFAULT 0"
+                )
+                conn.execute(
+                    "ALTER TABLE generation_queue ADD COLUMN seed INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.debug("Migration: added base_seed/seed to generation_queue")
 
     @contextmanager
     def connection(self):

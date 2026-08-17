@@ -93,12 +93,16 @@ def derive_take_seed(base_seed: int, take_index: int) -> int:
 
 New SQLite table `generation_queue`:
 
+**Seed persistence correction (M6.B):** base_seed and derived seed are persisted at enqueue time so that restart recovery and worker execution never recompute seeds from transient state.
+
 ```sql
 CREATE TABLE IF NOT EXISTS generation_queue (
     id TEXT PRIMARY KEY,
     shot_id TEXT NOT NULL,
     take_number INTEGER NOT NULL,
     project_id TEXT NOT NULL,
+    base_seed INTEGER NOT NULL,
+    seed INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     -- pending → claimed → succeeded | failed | cancelled
     generation_request_id TEXT,

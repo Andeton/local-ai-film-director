@@ -1322,3 +1322,158 @@ class ReferenceGenerationExecutionRepository:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+
+# ---------------------------------------------------------------------------
+# QueueJobRepository (M6)
+# ---------------------------------------------------------------------------
+
+from film_director.generation.queue_models import QueueJob  # noqa: E402
+
+
+class QueueJobRepository:
+    """Persistent generation queue operations."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def insert(self, job: QueueJob, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO generation_queue
+                (id, shot_id, take_number, project_id, base_seed, seed,
+                 status, generation_request_id, take_id, priority,
+                 attempt_count, max_attempts, error,
+                 created_at, updated_at, claimed_at, completed_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """
+        params = (
+            job.id, job.shot_id, job.take_number, job.project_id,
+            job.base_seed, job.seed, job.status,
+            job.generation_request_id, job.take_id, job.priority,
+            job.attempt_count, job.max_attempts, job.error,
+            job.created_at, job.updated_at, job.claimed_at, job.completed_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to insert queue job", str(exc)) from exc
+
+    def get(self, job_id: str, conn: sqlite3.Connection | None = None) -> QueueJob | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM generation_queue WHERE id = ?", (job_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_job(row)
+
+    def list_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> list[QueueJob]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM generation_queue WHERE shot_id = ? "
+                "ORDER BY take_number ASC, id ASC",
+                (shot_id,),
+            ).fetchall()
+        return [self._row_to_job(r) for r in rows]
+
+    def list_by_project(self, project_id: str, conn: sqlite3.Connection | None = None) -> list[QueueJob]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM generation_queue WHERE project_id = ? "
+                "ORDER BY priority DESC, created_at ASC, id ASC",
+                (project_id,),
+            ).fetchall()
+        return [self._row_to_job(r) for r in rows]
+
+    def list_by_status(
+        self, status: str, limit: int = 50, conn: sqlite3.Connection | None = None,
+    ) -> list[QueueJob]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM generation_queue WHERE status = ? "
+                "ORDER BY priority DESC, created_at ASC, id ASC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        return [self._row_to_job(r) for r in rows]
+
+    def count_by_status(self, conn: sqlite3.Connection | None = None) -> dict[str, int]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT status, COUNT(*) as cnt FROM generation_queue GROUP BY status",
+            ).fetchall()
+        return {row["status"]: row["cnt"] for row in rows}
+
+    def max_take_number_for_shot(
+        self, shot_id: str, conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Return the highest take_number across queue + takes for this shot, or 0."""
+        with _use_conn(self._db, conn) as c:
+            q_row = c.execute(
+                "SELECT MAX(take_number) as m FROM generation_queue WHERE shot_id = ?",
+                (shot_id,),
+            ).fetchone()
+            t_row = c.execute(
+                "SELECT MAX(gr.take_number) as m FROM takes t "
+                "JOIN generation_requests gr ON t.generation_request_id = gr.id "
+                "WHERE t.shot_id = ?",
+                (shot_id,),
+            ).fetchone()
+        q_max = q_row["m"] if q_row and q_row["m"] is not None else 0
+        t_max = t_row["m"] if t_row and t_row["m"] is not None else 0
+        return max(q_max, t_max)
+
+    def update_status(
+        self, job_id: str, status: str,
+        error: str | None = None,
+        generation_request_id: str | None = None,
+        take_id: str | None = None,
+        completed_at: str | None = None,
+        claimed_at: str | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        sets = ["status = ?", "updated_at = datetime('now')"]
+        params: list = [status]
+        if error is not None:
+            sets.append("error = ?")
+            params.append(error)
+        if generation_request_id is not None:
+            sets.append("generation_request_id = ?")
+            params.append(generation_request_id)
+        if take_id is not None:
+            sets.append("take_id = ?")
+            params.append(take_id)
+        if completed_at is not None:
+            sets.append("completed_at = ?")
+            params.append(completed_at)
+        if claimed_at is not None:
+            sets.append("claimed_at = ?")
+            params.append(claimed_at)
+        params.append(job_id)
+        sql = f"UPDATE generation_queue SET {', '.join(sets)} WHERE id = ?"
+        with _use_conn(self._db, conn) as c:
+            c.execute(sql, params)
+
+    @staticmethod
+    def _row_to_job(row: sqlite3.Row) -> QueueJob:
+        return QueueJob(
+            id=row["id"],
+            shot_id=row["shot_id"],
+            take_number=row["take_number"],
+            project_id=row["project_id"],
+            base_seed=row["base_seed"],
+            seed=row["seed"],
+            status=row["status"],
+            generation_request_id=row["generation_request_id"],
+            take_id=row["take_id"],
+            priority=row["priority"],
+            attempt_count=row["attempt_count"],
+            max_attempts=row["max_attempts"],
+            error=row["error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            claimed_at=row["claimed_at"],
+            completed_at=row["completed_at"],
+        )

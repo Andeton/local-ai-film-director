@@ -159,11 +159,18 @@ Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
   - Media validation: video file existence + path confinement before approval
   - TakeNotFoundError, TakeLifecycleError, TakeConflictError
   - 31 unit tests (transitions, single-approved, favorites, media, immutability, migration)
-- M6.E–M6.F: NOT STARTED
+- M6.E: COMPLETE — Take management and queue API endpoints
+  - 11 routes: shot/scene enqueue, queue listing/get/cancel, take listing/approved, approve/reject/favorite/unfavorite
+  - Idempotency-Key HTTP header required for enqueue (validated 1-128 chars)
+  - HTTP 202 for new batches, 409 for conflicts, 422 for validation
+  - Error mappings: QueueJobNotFoundError→404, QueueValidationError→422, QueueConflictError→409, QueueTransitionError→409, TakeNotFoundError→404, TakeLifecycleError→409, TakeConflictError→409
+  - Service wiring: QueueService, TakeService, QueueJobRepository, QueueBatchRepository in main.py
+  - 25 API integration tests (routes, enqueue, idempotency, conflict, listing, cancel, takes, lifecycle, M3 compat)
+- M6.F: NOT STARTED
 
-**Baseline:** 1283 deterministic + 9 live deselected, 0 failed
+**Baseline:** 1308 deterministic + 9 live deselected, 0 failed
 
-Next: M6.E — Take management and queue API endpoints.
+Next: M6.F — Live acceptance: 3 takes + queue proof + human approval.
 
 ---
 

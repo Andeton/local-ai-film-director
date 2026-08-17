@@ -44,8 +44,8 @@
 | Main HEAD | M6 docs checkpoint (see below) |
 | M6 feature commit | `3a2fac7` (branch `m6-take-management`) |
 | M6 merge commit | `6b6e6e2` |
-| Deterministic tests | 1380 passed, 12 live deselected, 0 failed |
-| Current milestone | M7 — Continuity (M7.A COMPLETE) |
+| Deterministic tests | 1413 passed, 12 live deselected, 0 failed |
+| Current milestone | M7 — Continuity (M7.B COMPLETE) |
 | M7 planning branch | `m7-continuity` |
 | M7 worktree | `D:\Ai\Local AI Film Director\.worktrees\m7-continuity` |
 
@@ -57,12 +57,13 @@
 - Live acceptance: 3 real queued Takes (visual PASS), restart recovery proven, 20-shot/60-job queue proof.
 - Chinese-audio observation: H3 inferred Chinese from WC source text (deferred to M10).
 
-**M7 Status:** M7.A COMPLETE / M7.B NOT STARTED.
+**M7 Status:** M7.B COMPLETE / M7.C NOT STARTED.
 - Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
 - Architecture decisions A–L resolved.
-- Key H3 finding: R2V (ref2va) supports character refs but NO first/last frame; FLF (fl2va) supports first/last frame but NO ref_images. Different UNET models.
-- M7.A delivered: ContinuityState model, `continuity_states` table, ContinuityStateRepository, ContinuityResolver (scene-scoped predecessor resolution), `continuity_snapshot` on GenerationRequest, `compute_continuity_fingerprint`, ContinuityError, idempotent M6→M7 migration. 60 new tests. M7.A review: 7 PASS, 1 WARN (fixed), 0 FAIL.
-- Subtasks: M7.A ✓ → M7.B (workflow preflight) → M7.C → M7.D → M7.E → M7.F.
+- **FLF limitation:** MiniMaxH3ImageToVideo has NO ref_images input. Character identity in downstream continuity shots relies entirely on the predecessor frame. R2V (ref2va) and FLF (fl2va) are mutually exclusive node paths using different UNET models.
+- M7.A: ContinuityState model, table, repository, resolver, continuity_snapshot, fingerprinting. 60 tests.
+- M7.B: Technical preflight HUMAN PASS. FLF workflow `h3_flf_v1` v1.0.0 (fingerprint `47d6706c...c43d6`). ContinuityBinding frozen dataclass. build_continuity_injections. resolve_for_continuity. Audio finding: fl2va produces audio latents, decoded via separate audio VAE. Preflight evidence: `docs/M7_B_PREFLIGHT.md`. 33 tests. Review: 9/9 PASS.
+- Subtasks: M7.A ✓ → M7.B ✓ → M7.C → M7.D → M7.E → M7.F.
 
 **Non-blocking hardening observations (deferred to M10):**
 1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.

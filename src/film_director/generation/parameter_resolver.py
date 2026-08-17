@@ -16,6 +16,7 @@ from film_director.errors import ParameterResolutionError, WorkflowTemplateError
 from film_director.generation.h3_types import WorkflowInjection
 
 if TYPE_CHECKING:
+    from film_director.continuity.continuity_binding import ContinuityBinding
     from film_director.generation.h3_prompt import H3PromptV1
     from film_director.generation.h3_types import H3ReferenceBinding
     from film_director.generation.workflow_registry import WorkflowDefinition
@@ -216,6 +217,75 @@ class ParameterResolver:
             name="output_prefix",
             node_id=m["node_id"],
             field=m["field"],
+            value=output_prefix,
+        ))
+
+        return injections
+
+    def build_continuity_injections(
+        self,
+        plan: GenerationPlan,
+        prompt_text: str,
+        workflow_def: WorkflowDefinition,
+        continuity_binding: ContinuityBinding,
+        seed: int,
+        output_prefix: str,
+    ) -> list[WorkflowInjection]:
+        """Build injection list for FLF continuity workflow (no ref_images)."""
+        if not output_prefix:
+            raise ParameterResolutionError("output_prefix must not be empty")
+        if not continuity_binding.uploaded_filename:
+            raise ParameterResolutionError(
+                "ContinuityBinding has empty uploaded_filename",
+                detail=f"upstream_shot_id={continuity_binding.upstream_shot_id}",
+            )
+
+        duration = self.resolve_duration(plan.duration_sec, workflow_def)
+        generic_aspect = plan.resolution_intent.get("aspect", _DEFAULT_ASPECT)
+        aspect = self.resolve_aspect(generic_aspect, workflow_def)
+
+        mappings = workflow_def.parameter_mappings
+        injections: list[WorkflowInjection] = []
+
+        # 1. Prompt
+        m = mappings["prompt"]
+        injections.append(WorkflowInjection(
+            name="prompt", node_id=m["node_id"], field=m["field"],
+            value=prompt_text,
+        ))
+
+        # 2. First frame (continuity)
+        m = mappings["first_frame"]
+        injections.append(WorkflowInjection(
+            name="first_frame", node_id=m["node_id"], field=m["field"],
+            value=continuity_binding.uploaded_filename,
+        ))
+
+        # 3. Duration
+        m = mappings["duration"]
+        injections.append(WorkflowInjection(
+            name="duration", node_id=m["node_id"], field=m["field"],
+            value=duration,
+        ))
+
+        # 4. Seed
+        m = mappings["seed"]
+        injections.append(WorkflowInjection(
+            name="seed", node_id=m["node_id"], field=m["field"],
+            value=seed,
+        ))
+
+        # 5. Aspect
+        m = mappings["aspect"]
+        injections.append(WorkflowInjection(
+            name="aspect", node_id=m["node_id"], field=m["field"],
+            value=aspect,
+        ))
+
+        # 6. Output prefix
+        m = mappings["output_prefix"]
+        injections.append(WorkflowInjection(
+            name="output_prefix", node_id=m["node_id"], field=m["field"],
             value=output_prefix,
         ))
 

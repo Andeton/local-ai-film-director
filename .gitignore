@@ -49,6 +49,9 @@ htmlcov/
 # Worktrees
 .worktrees/
 
+# Preflight evidence (live media, not tracked)
+.preflight/
+
 # Temporary
 *.tmp
 *.log

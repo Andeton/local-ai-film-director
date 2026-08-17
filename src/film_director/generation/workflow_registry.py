@@ -130,6 +130,56 @@ def _build_h3_r2v_v2(project_root: str) -> WorkflowDefinition:
 
 
 # ---------------------------------------------------------------------------
+# H3 FLF v1 definition — first-frame continuity (M7.B)
+# ---------------------------------------------------------------------------
+
+_H3_FLF_V1_FINGERPRINT = (
+    "47d6706c93865d43213a8c1bdf46b4d07a1665155cfae6a7721239b5d42c43d6"
+)
+
+_H3_FLF_V1_MAPPINGS: dict[str, dict[str, str]] = {
+    "prompt": {"node_id": "104", "field": "prompt"},
+    "first_frame": {"node_id": "300", "field": "image"},
+    "duration": {"node_id": "111", "field": "value"},
+    "seed": {"node_id": "15", "field": "noise_seed"},
+    "aspect": {"node_id": "115", "field": "aspect_ratio"},
+    "output_prefix": {"node_id": "92", "field": "filename_prefix"},
+}
+
+_H3_FLF_V1_REQUIRED_NODES = ["104", "300", "111", "15", "115", "92", "107"]
+
+_H3_FLF_V1_REQUIRED_MODELS = [
+    "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "minimax_h3_video_vae_fp16.safetensors",
+    "minimax_h3_audio_vae_fp32.safetensors",
+]
+
+
+def _build_h3_flf_v1(project_root: str) -> WorkflowDefinition:
+    return WorkflowDefinition(
+        id="h3_flf_v1",
+        version="1.0.0",
+        strategy="FIRST_LAST_FRAME",
+        template_path=os.path.join(project_root, "workflows", "h3", "flf_v1.json"),
+        template_fingerprint=_H3_FLF_V1_FINGERPRINT,
+        parameter_mappings=dict(_H3_FLF_V1_MAPPINGS),
+        required_models=list(_H3_FLF_V1_REQUIRED_MODELS),
+        required_nodes=list(_H3_FLF_V1_REQUIRED_NODES),
+        capabilities=["first_last_frame", "audio_muxed", "continuity"],
+        constraints={
+            "materialized_reference_slots": 0,
+            "continuity_frame_slots": 1,
+            "min_duration_sec": 0.21,
+            "max_duration_sec": 15.08,
+            "fps": 24,
+            "frame_grid": "17k+5",
+            "seed_max": 0xFFFFFFFFFFFFFFFF,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # WorkflowResolver
 # ---------------------------------------------------------------------------
 
@@ -140,6 +190,7 @@ class WorkflowResolver:
         self._project_root = project_root
         self._v1 = _build_h3_r2v_v1(project_root)
         self._v2 = _build_h3_r2v_v2(project_root)
+        self._flf_v1 = _build_h3_flf_v1(project_root)
         self._definitions: dict[str, WorkflowDefinition] = {
             "REFERENCE_TO_VIDEO": self._v1,  # default: 1-ref
         }
@@ -170,6 +221,18 @@ class WorkflowResolver:
                 f"Reference count {reference_count} exceeds maximum materialized slots (2)",
                 detail=f"reference_count={reference_count}, max_slots=2",
             )
+
+    def resolve_for_continuity(
+        self, has_continuity_frame: bool, reference_count: int,
+    ) -> WorkflowDefinition:
+        """Select workflow based on continuity frame presence.
+
+        - has_continuity_frame=True → h3_flf_v1 (first-frame continuity, no ref_images)
+        - has_continuity_frame=False → r2v_v1 or r2v_v2 based on reference_count
+        """
+        if has_continuity_frame:
+            return self._flf_v1
+        return self.resolve_for_reference_count(reference_count)
 
     def load_template(self, definition: WorkflowDefinition) -> dict:
         path = definition.template_path

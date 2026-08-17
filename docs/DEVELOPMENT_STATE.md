@@ -8,7 +8,7 @@
 
 **M7 — Continuity**
 
-**Status:** M7.A COMPLETE / M7.B NOT STARTED
+**Status:** M7.B COMPLETE / M7.C NOT STARTED
 
 Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
 Branch: `m7-continuity`
@@ -16,23 +16,27 @@ Worktree: `D:\Ai\Local AI Film Director\.worktrees\m7-continuity`
 Base: main at `18c6405`
 
 **M7.A — Continuity Models, Persistence, Ordering, and Fingerprinting: COMPLETE**
-- ContinuityState model (unresolved/current/outdated), separate from Take.status
-- `continuity_states` table with UNIQUE(shot_id), FK to shots/scenes/takes
-- Nullable `continuity_snapshot` JSON on GenerationRequest (backward-compatible, immutable after persist)
-- Deterministic scene-scoped predecessor resolver: `(beats.order_index, beats.id, shots.order_index, shots.id)`
-- ContinuityResolver: `get_scene_shot_order`, `resolve_predecessor`, `get_downstream_shots`, `get_scene_id_for_shot`
-- ContinuityStateRepository: `save` (UPSERT), `get_by_shot`, `get_by_scene`, `mark_outdated`, `resolve_current`
-- `compute_continuity_fingerprint`: canonical JSON, sorted keys, compact separators, UTF-8, SHA-256
-- ContinuityError added to error taxonomy
-- Idempotent migration for existing M6 databases
-- M7.A independent review: 7 PASS, 1 WARN (DDL pattern — fixed), 0 FAIL
-- Baseline: 1380 passed, 12 deselected, 0 failed (1320 original + 60 new)
+- ContinuityState model, continuity_states table, ContinuityStateRepository, ContinuityResolver
+- Nullable continuity_snapshot on GenerationRequest, compute_continuity_fingerprint, ContinuityError
+- M7.A review: 7 PASS, 1 WARN (fixed), 0 FAIL
 
-**Resolved baseline discrepancy:** The planning report showed 1318/3 skipped/10 deselected because a less precise `-k` filter was used instead of `-m "not live"`. With the canonical `-m "not live"` marker filter, both main and m7-continuity produce identical 1320 passed, 12 deselected.
+**M7.B — Workflow Technical Preflight and Versioned Continuity Bindings: COMPLETE**
+- Technical preflight: HUMAN PASS (prompt `e8f2ba02-1127-4217-8a7d-eb889cbdaf2c`)
+- FLF does NOT support simultaneous character references (MiniMaxH3ImageToVideo has no ref_images input)
+- Downstream character identity relies on the predecessor frame propagated through first_frame
+- Workflow: `h3_flf_v1` v1.0.0, fingerprint `47d6706c93865d43213a8c1bdf46b4d07a1665155cfae6a7721239b5d42c43d6`
+- UNET: `minimax_h3_fl2va_pruned_int8_convrot.safetensors` (different from ref2va)
+- Audio finding: fl2va produces joint video+audio latents; audio_vae needed only at decoder stage
+- ContinuityBinding frozen dataclass with verified upstream provenance
+- build_continuity_injections for FLF parameter injection (prompt, first_frame, duration, seed, aspect, output)
+- resolve_for_continuity selection: continuity frame → FLF, no continuity → R2V v1/v2
+- r2v_v1/v2 fingerprints verified unchanged
+- M7.B review: 9 PASS, 0 WARN, 0 FAIL
+- Baseline: 1413 passed, 12 deselected, 0 failed (1380 + 33 new)
 
-**Subtasks:** M7.A ✓ → M7.B → M7.C → M7.D → M7.E → M7.F
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C → M7.D → M7.E → M7.F
 
-Next action: M7.B technical preflight only.
+Next action: M7.C implementation only.
 
 ---
 

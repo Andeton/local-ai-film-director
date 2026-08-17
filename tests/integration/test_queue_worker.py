@@ -454,3 +454,110 @@ class TestConcurrency:
         total = env["worker"].run_available()
         assert total == 0
         assert env["queue_repo"].list_by_shot("shot-1")[0].status == "failed"
+
+
+# ---------------------------------------------------------------------------
+# Prompt-ID recovery
+# ---------------------------------------------------------------------------
+
+class TestPromptIdRecovery:
+    def _setup_claimed_with_prompt(self, env):
+        """Enqueue, run (creates request+prompt_id), reset to claimed.
+
+        Simulates crash after ComfyUI completed but before finalization:
+        Take row deleted, request reset to queued, job reset to claimed,
+        final media directory cleaned up.
+        """
+        env["queue_svc"].enqueue_shot("shot-1", "key-prompt", takes_count=1, base_seed=42)
+        env["worker"].run_once()
+        jobs = env["queue_repo"].list_by_shot("shot-1")
+        job = jobs[0]
+        take = env["take_repo"].get_take(job.take_id)
+        # Clean up final media directory
+        if take and take.video_path:
+            final_dir = os.path.dirname(take.video_path)
+            if os.path.isdir(final_dir):
+                import shutil
+                shutil.rmtree(final_dir)
+        # Delete Take + reset request to queued + reset job to claimed
+        with env["db"].connection() as conn:
+            conn.execute("DELETE FROM takes WHERE id = ?", (job.take_id,))
+            conn.execute(
+                "UPDATE generation_requests SET status = 'queued' WHERE id = ?",
+                (job.generation_request_id,),
+            )
+        env["queue_repo"].update_status(job.id, "claimed", take_id=None)
+        return job
+
+    def test_completed_prompt_creates_take(self, env):
+        """ComfyUI prompt completed → download/validate/finalize automatically."""
+        job = self._setup_claimed_with_prompt(env)
+        # ComfyUI says succeeded
+        env["mock_comfyui"].check_prompt_status.return_value = "succeeded"
+        env["worker"].recover()
+        recovered = env["queue_repo"].get(job.id)
+        assert recovered.status == "succeeded"
+        assert recovered.take_id is not None
+        # Verify Take exists
+        take = env["take_repo"].get_take(recovered.take_id)
+        assert take is not None
+        assert take.seed == job.seed
+
+    def test_completed_prompt_submit_never_called(self, env):
+        """Recovery NEVER calls submit() — only get_result/download."""
+        job = self._setup_claimed_with_prompt(env)
+        env["mock_comfyui"].check_prompt_status.return_value = "succeeded"
+        env["mock_comfyui"].submit.reset_mock()
+        env["worker"].recover()
+        env["mock_comfyui"].submit.assert_not_called()
+
+    def test_queued_prompt_leaves_claimed(self, env):
+        """Prompt still queued → leave job claimed for later recovery."""
+        job = self._setup_claimed_with_prompt(env)
+        env["mock_comfyui"].check_prompt_status.return_value = "queued"
+        env["worker"].recover()
+        assert env["queue_repo"].get(job.id).status == "claimed"
+
+    def test_running_prompt_leaves_claimed(self, env):
+        """Prompt still running → leave job claimed for later recovery."""
+        job = self._setup_claimed_with_prompt(env)
+        env["mock_comfyui"].check_prompt_status.return_value = "running"
+        env["worker"].recover()
+        assert env["queue_repo"].get(job.id).status == "claimed"
+
+    def test_failed_prompt_marks_failed(self, env):
+        """ComfyUI reports prompt failed → mark job failed."""
+        job = self._setup_claimed_with_prompt(env)
+        env["mock_comfyui"].check_prompt_status.return_value = "failed"
+        env["worker"].recover()
+        assert env["queue_repo"].get(job.id).status == "failed"
+        assert "failed externally" in env["queue_repo"].get(job.id).error.lower()
+
+    def test_unknown_prompt_marks_failed(self, env):
+        """Prompt not found in reachable ComfyUI → external state lost."""
+        job = self._setup_claimed_with_prompt(env)
+        env["mock_comfyui"].check_prompt_status.return_value = "unknown"
+        env["worker"].recover()
+        assert env["queue_repo"].get(job.id).status == "failed"
+        assert "not found" in env["queue_repo"].get(job.id).error.lower()
+
+    def test_comfyui_unreachable_leaves_claimed(self, env):
+        """ComfyUI temporarily unreachable → leave claimed, no false failure."""
+        job = self._setup_claimed_with_prompt(env)
+        from film_director.errors import ComfyUIUnavailableError
+        env["mock_comfyui"].check_prompt_status.side_effect = \
+            ComfyUIUnavailableError("Cannot reach ComfyUI")
+        env["worker"].recover()
+        assert env["queue_repo"].get(job.id).status == "claimed"
+
+    def test_recovery_idempotent_after_finalization(self, env):
+        """Running recovery twice after finalization doesn't duplicate Take."""
+        job = self._setup_claimed_with_prompt(env)
+        env["mock_comfyui"].check_prompt_status.return_value = "succeeded"
+        env["worker"].recover()
+        # Now it's succeeded — running recover again should be safe
+        env["worker"].recover()
+        takes = env["take_repo"].get_takes_by_shot("shot-1")
+        # Only one Take should exist
+        take_for_req = [t for t in takes if t.generation_request_id == job.generation_request_id]
+        assert len(take_for_req) == 1

@@ -144,13 +144,17 @@ Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
   - False-success prevention: request succeeded + no Take/missing media → invariant failure
   - Prompt-ID recovery: never calls submit() during recovery
   - Recovery matrix: 12 states covering all (claimed, request_status, Take_exists, media_exists) combinations
+  - Prompt-ID resume: check_prompt_status → queued/running=leave claimed, succeeded=finalize_from_result, failed/unknown=mark failed
+  - GenerationService.finalize_from_result: shared download→validate→stage→finalize path for recovery (no submit)
+  - ComfyUIAdapter.check_prompt_status: non-blocking prompt state resolution
+  - Status-check exceptions leave job claimed (never false-fail a completed prompt)
   - run_available(): bounded ThreadPoolExecutor, recovery before first claim, stop() prevents new claims
   - Concurrency: 1–4 (validated), default 1
   - max_attempts=1: no retry in M6
-  - 24 integration tests (claim, execution, failure, recovery false-success, concurrency, stop)
+  - 32 integration tests (claim, execution, failure, recovery false-success, prompt-ID resume, concurrency, stop)
 - M6.D–M6.F: NOT STARTED
 
-**Baseline:** 1244 deterministic + 9 live deselected, 0 failed
+**Baseline:** 1252 deterministic + 9 live deselected, 0 failed
 
 Next: M6.D — TakeService (approve/reject/favorite/unfavorite).
 

@@ -270,40 +270,73 @@ class QueueWorker:
         )
 
     def _recover_with_prompt_id(self, job, req) -> None:
-        """States 4-7: resume exact ComfyUI prompt_id — never submit."""
+        """States 1-8: resume exact ComfyUI prompt_id — NEVER submit."""
         if self._comfyui is None:
-            self._mark_failed(job, "Cannot recover: ComfyUI adapter not available", gen_req_id=req.id)
+            # ComfyUI unavailable — leave claimed for later recovery
+            logger.info("Recovery: job %s ComfyUI unavailable, leaving claimed", job.id)
             return
 
         prompt_id = req.comfyui_prompt_id
-        try:
-            # Check ComfyUI history for this exact prompt
-            output_node_id = self._gen_service._get_output_node_id(
-                self._gen_service._workflow_resolver.resolve(req.workflow_definition_id.replace("_v1", "").replace("_v2", "").upper().replace("H3_R2V", "REFERENCE_TO_VIDEO"))
-                if hasattr(self._gen_service, '_workflow_resolver') else None
-            )
-        except Exception:
-            output_node_id = "92"  # verified fallback
 
         try:
-            result = self._comfyui.get_result(prompt_id, output_node_id)
-            # State 5: completed — retrieve and finalize
-            logger.info("Recovery: job %s prompt %s completed, finalizing", job.id, prompt_id)
-            # Mark as succeeded since result exists — actual finalization with Take
-            # would require the full media pipeline which is complex for recovery.
-            # For max_attempts=1, mark failed with recoverable info.
+            status = self._comfyui.check_prompt_status(prompt_id)
+        except Exception as e:
+            # Any exception checking status → leave claimed for later recovery.
+            # We cannot distinguish "ComfyUI unreachable" from other transient
+            # errors without risking false-failing a completed prompt.
+            logger.info("Recovery: job %s status check failed (%s), leaving claimed", job.id, e)
+            return
+
+        if status == "succeeded":
+            # State 3: completed — download/validate/finalize (no submit)
+            self._finalize_recovered_prompt(job, req)
+        elif status == "failed":
+            # State 7: definitively failed
+            self._mark_failed(job, f"ComfyUI prompt {prompt_id} failed externally", gen_req_id=req.id)
+        elif status in ("queued", "running"):
+            # States 1-2: still active — leave claimed for later recovery
+            logger.info("Recovery: job %s prompt %s still %s, leaving claimed", job.id, prompt_id, status)
+        elif status == "unknown":
+            # State 8: missing from reachable ComfyUI
             self._mark_failed(
                 job,
-                f"Recovery: prompt {prompt_id} completed but requires manual finalization",
+                f"External state lost: prompt {prompt_id} not found in ComfyUI",
                 gen_req_id=req.id,
             )
+
+    def _finalize_recovered_prompt(self, job, req) -> None:
+        """Download, validate, and finalize a completed ComfyUI result.
+
+        Uses GenerationService.finalize_from_result — never calls submit().
+        """
+        # Install atomic finalization callback
+        def finalize_cb(take, conn):
+            self._queue_repo.update_status(
+                job.id, "succeeded",
+                generation_request_id=take.generation_request_id,
+                take_id=take.id,
+                completed_at=_now_iso(),
+                conn=conn,
+            )
+
+        old_cb = self._gen_service._finalize_callback
+        self._gen_service._finalize_callback = finalize_cb
+        try:
+            take = self._gen_service.finalize_from_result(
+                request_id=req.id,
+                shot_id=job.shot_id,
+                take_number=job.take_number,
+                seed=job.seed,
+                prompt_id=req.comfyui_prompt_id,
+            )
+            logger.info("Recovery: job %s finalized from prompt %s → take %s",
+                        job.id, req.comfyui_prompt_id, take.id)
         except Exception as e:
-            if "not found" in str(e).lower():
-                # State 7: prompt lost/unknown
-                self._mark_failed(job, f"External state lost: prompt {prompt_id} not in ComfyUI history", gen_req_id=req.id)
-            else:
-                # State 6: ComfyUI definitive failure or state 4: still running
-                self._mark_failed(job, f"Recovery failed for prompt {prompt_id}: {e}", gen_req_id=req.id)
+            error_msg = f"Recovery finalization failed: {e}"[:1000]
+            logger.error("Recovery: job %s finalization error: %s", job.id, error_msg)
+            self._mark_failed(job, error_msg, gen_req_id=req.id)
+        finally:
+            self._gen_service._finalize_callback = old_cb
 
     def _mark_failed(self, job, error: str, gen_req_id: str | None = None) -> None:
         logger.info("Recovery: job %s → failed: %s", job.id, error)

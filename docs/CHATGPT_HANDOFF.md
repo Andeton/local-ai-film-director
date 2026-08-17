@@ -44,8 +44,8 @@
 | Main merged HEAD | `47d30c4` (M5 merge + docs checkpoint) |
 | Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m6-take-management` |
 | Active branch | `m6-take-management` |
-| Deterministic tests | 1320 passed, 9 live deselected, 0 failed |
-| Current milestone | M6 — Take Management (PLANNING COMPLETE, IMPLEMENTATION NOT STARTED) |
+| Deterministic tests | 1320 passed, 12 live deselected, 0 failed |
+| Current milestone | M6 — Take Management (COMPLETE / CLOSED) |
 
 **M5 Progress:**
 - M5.A: COMPLETE (ReferenceAsset + ReferenceGenerationRequest + ReferenceGenerationExecution)
@@ -70,7 +70,11 @@
 
 **M6.E:** COMPLETE — 11 API routes, Idempotency-Key header, standalone worker (`python -m film_director.queue_runner`), singleton lock, API 404 correction, 37 tests.
 
-**Next action:** M6.F — Live acceptance: 3 takes + queue proof + human approval.
+**M6.F:** COMPLETE — 3 real queued Takes (visual PASS), Take 2 approved, restart recovery proven, 20-shot/60-job queue proof, Chinese-audio deferred to M10.
+
+**M6 Status:** COMPLETE / CLOSED. Branch ready for merge.
+
+**Next action:** Merge M6 to main, then M7 — Continuity. NOT STARTED.
 
 ---
 

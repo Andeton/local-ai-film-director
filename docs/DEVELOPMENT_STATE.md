@@ -116,7 +116,7 @@ Backlog (NOT M5): MiniMax prompt enhancer, OpenRouter/WC Writer quality
 
 **M6 — Take Management**
 
-**Status:** PLANNING COMPLETE, IMPLEMENTATION NOT STARTED
+**Status:** COMPLETE / CLOSED
 
 Branch: `m6-take-management`
 Worktree: `D:\Ai\Local AI Film Director\.worktrees\m6-take-management`
@@ -172,11 +172,22 @@ Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
   - Settings: queue_worker_concurrency (1-4), queue_worker_poll_interval_seconds (1-300), queue_worker_enabled
   - API 404 correction: missing shot/scene → 404 (not 422)
   - 37 API+runner integration tests
-- M6.F: NOT STARTED
+- M6.F: COMPLETE — Live acceptance with 3 real queued Takes + queue proof + human approval
+  - Three Takes (tn=2,3,4) with distinct seeds via persistent queue
+  - Worker restart recovery: Take 4 recovered from WS timeout via prompt-ID finalization (no duplicate submit)
+  - Human visual verdict: PASS on all three
+  - Take 2 approved (deterministic first-acceptable)
+  - 20-shot / 60-job persistent queue proof (zero ComfyUI submissions)
+  - Idempotent replay after completion and DB reopen verified
+  - Chinese audio observation: H3 inferred Chinese from WC source text (deferred to M10)
+  - M5 source integrity verified unchanged
+  - 3 @pytest.mark.live evidence tests
 
-**Baseline:** 1320 deterministic + 9 live deselected, 0 failed
+**M6 Status:** COMPLETE / CLOSED
 
-Next: M6.F — Live acceptance: 3 takes + queue proof + human approval.
+**Baseline:** 1320 deterministic + 12 live deselected (9 M1-M5 + 3 M6), 0 failed
+
+Next: M7 — Continuity. NOT STARTED.
 
 ---
 

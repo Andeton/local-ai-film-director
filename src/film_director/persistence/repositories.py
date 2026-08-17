@@ -13,6 +13,7 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Generator
 
 from film_director.errors import PersistenceError
@@ -1455,6 +1456,48 @@ class QueueJobRepository:
         sql = f"UPDATE generation_queue SET {', '.join(sets)} WHERE id = ?"
         with _use_conn(self._db, conn) as c:
             c.execute(sql, params)
+
+    def claim_next(self, conn: sqlite3.Connection) -> QueueJob | None:
+        """Atomically claim the highest-priority pending job.
+
+        Must be called within a caller-owned transaction (conn).
+        Uses UPDATE with subquery — SQLite WAL serializes writers.
+        Returns the claimed job, or None if queue is empty.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        # Atomic: UPDATE the single best candidate in one statement
+        conn.execute(
+            """UPDATE generation_queue
+               SET status = 'claimed',
+                   claimed_at = ?,
+                   updated_at = ?,
+                   attempt_count = attempt_count + 1
+               WHERE id = (
+                   SELECT id FROM generation_queue
+                   WHERE status = 'pending' AND attempt_count < max_attempts
+                   ORDER BY priority DESC, created_at ASC, id ASC
+                   LIMIT 1
+               )""",
+            (now, now),
+        )
+        # Find the just-claimed row
+        row = conn.execute(
+            "SELECT * FROM generation_queue WHERE status = 'claimed' AND claimed_at = ? "
+            "ORDER BY id LIMIT 1",
+            (now,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_job(row)
+
+    def list_claimed(self, conn: sqlite3.Connection | None = None) -> list[QueueJob]:
+        """Return all claimed jobs (for restart recovery)."""
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM generation_queue WHERE status = 'claimed' "
+                "ORDER BY created_at ASC, id ASC",
+            ).fetchall()
+        return [self._row_to_job(r) for r in rows]
 
     def list_by_batch(self, batch_id: str, conn: sqlite3.Connection | None = None) -> list[QueueJob]:
         with _use_conn(self._db, conn) as c:

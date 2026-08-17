@@ -83,7 +83,22 @@ class GenerationService:
         self._timeout = generation_timeout
 
     def generate_shot(self, shot_id: str) -> Take:
-        """Execute full M3 generation pipeline for one shot.
+        """Synchronous single-take generation (M3 backward compat).
+
+        Delegates to generate_take with take_number=1 and plan-derived seed.
+        """
+        return self.generate_take(shot_id, take_number=1)
+
+    def generate_take(
+        self,
+        shot_id: str,
+        take_number: int = 1,
+        seed_override: int | None = None,
+    ) -> Take:
+        """Execute generation pipeline for one take of a shot.
+
+        When seed_override is provided (from QueueJob), it replaces the
+        plan-derived seed. take_number is persisted in GenerationRequest.
 
         Returns the persisted Take on success.
         Raises on any failure — pre-request failures leave NO GenerationRequest.
@@ -151,7 +166,10 @@ class GenerationService:
         uploaded_bindings = self._upload_references(resolved_bindings)
 
         # Step 10-11: Resolve seed, duration, aspect
-        seed = self._param_resolver.resolve_seed(plan, take_number=1)
+        if seed_override is not None:
+            seed = seed_override
+        else:
+            seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
 
         # Step 12: Build output prefix
         output_prefix = f"m3/{shot_id}/{uuid.uuid4().hex[:8]}"
@@ -188,7 +206,7 @@ class GenerationService:
             workflow_definition_id=workflow_def.id,
             workflow_definition_version=workflow_def.version,
             workflow_template_fingerprint=workflow_def.template_fingerprint,
-            take_number=1,
+            take_number=take_number,
             parameters_snapshot=[
                 {"name": i.name, "node_id": i.node_id, "field": i.field, "value": i.value}
                 for i in injections
@@ -251,7 +269,7 @@ class GenerationService:
             extract_last_frame(staged_video, last_frame_path)
 
             # Step 21: Move staging → final
-            final_dir = make_final_dir(self._storage_root, project_id, shot_id, 1)
+            final_dir = make_final_dir(self._storage_root, project_id, shot_id, take_number)
             move_to_final(staging_dir, final_dir)
 
             final_video = os.path.join(final_dir, safe_name)

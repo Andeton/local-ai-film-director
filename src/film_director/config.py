@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     comfyui_base_url: str = "http://127.0.0.1:8188"
     comfyui_generation_timeout: int = 600
 
+    # M6 queue worker
+    queue_worker_concurrency: int = 1
+
     windcomic_base_url: str = "http://127.0.0.1:3000"
     windcomic_email: str = ""
     windcomic_password: str = ""

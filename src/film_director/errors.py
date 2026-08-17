@@ -122,3 +122,15 @@ class QueueConflictError(FilmDirectorError):
 
 class QueueTransitionError(FilmDirectorError):
     """Illegal queue job status transition."""
+
+
+class TakeNotFoundError(FilmDirectorError):
+    """Take not found."""
+
+
+class TakeLifecycleError(FilmDirectorError):
+    """Illegal Take lifecycle transition."""
+
+
+class TakeConflictError(FilmDirectorError):
+    """Another Take already approved for this shot."""

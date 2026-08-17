@@ -152,11 +152,18 @@ Plan: `docs/superpowers/plans/2026-08-16-m6-take-management.md`
   - Concurrency: 1–4 (validated), default 1
   - max_attempts=1: no retry in M6
   - 32 integration tests (claim, execution, failure, recovery false-success, prompt-ID resume, concurrency, stop)
-- M6.D–M6.F: NOT STARTED
+- M6.D: COMPLETE — TakeService approve/reject/favorite/unfavorite
+  - Transition matrix: succeeded→approved/rejected (terminal), is_favorite orthogonal
+  - Single-approved invariant: partial unique index + service-level CAS check
+  - TakeRepository: update_review_status (CAS), update_favorite, get_approved_for_shot, count_approved_for_shot
+  - Media validation: video file existence + path confinement before approval
+  - TakeNotFoundError, TakeLifecycleError, TakeConflictError
+  - 31 unit tests (transitions, single-approved, favorites, media, immutability, migration)
+- M6.E–M6.F: NOT STARTED
 
-**Baseline:** 1252 deterministic + 9 live deselected, 0 failed
+**Baseline:** 1283 deterministic + 9 live deselected, 0 failed
 
-Next: M6.D — TakeService (approve/reject/favorite/unfavorite).
+Next: M6.E — Take management and queue API endpoints.
 
 ---
 

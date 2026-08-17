@@ -968,6 +968,55 @@ class TakeRepository:
             ).fetchall()
         return [self._row_to_take(r) for r in rows]
 
+    def update_review_status(
+        self,
+        take_id: str,
+        expected_statuses: tuple[str, ...],
+        new_status: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Compare-and-set status transition. Returns rows updated (0 or 1)."""
+        placeholders = ",".join("?" for _ in expected_statuses)
+        sql = (
+            f"UPDATE takes SET status = ? WHERE id = ? "
+            f"AND status IN ({placeholders})"
+        )
+        params = [new_status, take_id, *expected_statuses]
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, params)
+            return cursor.rowcount
+
+    def update_favorite(
+        self, take_id: str, value: bool, conn: sqlite3.Connection | None = None,
+    ) -> None:
+        with _use_conn(self._db, conn) as c:
+            c.execute(
+                "UPDATE takes SET is_favorite = ? WHERE id = ?",
+                (int(value), take_id),
+            )
+
+    def get_approved_for_shot(
+        self, shot_id: str, conn: sqlite3.Connection | None = None,
+    ) -> Take | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM takes WHERE shot_id = ? AND status = 'approved' LIMIT 1",
+                (shot_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_take(row)
+
+    def count_approved_for_shot(
+        self, shot_id: str, conn: sqlite3.Connection | None = None,
+    ) -> int:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT COUNT(*) as cnt FROM takes WHERE shot_id = ? AND status = 'approved'",
+                (shot_id,),
+            ).fetchone()
+        return row["cnt"]
+
     @staticmethod
     def _row_to_take(row: sqlite3.Row) -> Take:
         return Take(

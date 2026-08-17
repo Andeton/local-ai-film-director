@@ -199,6 +199,10 @@ CREATE TABLE IF NOT EXISTS takes (
     FOREIGN KEY (generation_request_id) REFERENCES generation_requests(id)
 );
 
+-- M6.D: at most one approved Take per shot
+CREATE UNIQUE INDEX IF NOT EXISTS idx_takes_one_approved_per_shot
+    ON takes(shot_id) WHERE status = 'approved';
+
 CREATE TABLE IF NOT EXISTS reference_assets (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
@@ -348,6 +352,27 @@ class Database:
                 "ALTER TABLE takes ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
             )
             logger.debug("Migration: added is_favorite to takes")
+
+        # M6.D: partial unique index for single-approved-per-shot
+        takes_indexes = {
+            row[1] for row in conn.execute("PRAGMA index_list(takes)").fetchall()
+        }
+        if "idx_takes_one_approved_per_shot" not in takes_indexes:
+            # Verify no duplicate approved Takes exist before creating index
+            dups = conn.execute(
+                "SELECT shot_id, COUNT(*) as cnt FROM takes "
+                "WHERE status = 'approved' GROUP BY shot_id HAVING cnt > 1"
+            ).fetchall()
+            if dups:
+                dup_info = ", ".join(f"{r['shot_id']}({r['cnt']})" for r in dups)
+                raise RuntimeError(
+                    f"Cannot create single-approved index: duplicate approved Takes: {dup_info}"
+                )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_takes_one_approved_per_shot "
+                "ON takes(shot_id) WHERE status = 'approved'"
+            )
+            logger.debug("Migration: added single-approved partial unique index")
 
         # M6.B: Add base_seed/seed and batch_id to generation_queue
         queue_tables = {

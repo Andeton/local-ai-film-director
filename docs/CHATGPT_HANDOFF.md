@@ -44,7 +44,7 @@
 | Main merged HEAD | `47d30c4` (M5 merge + docs checkpoint) |
 | Active worktree | `D:\Ai\Local AI Film Director\.worktrees\m6-take-management` |
 | Active branch | `m6-take-management` |
-| Deterministic tests | 1252 passed, 9 live deselected, 0 failed |
+| Deterministic tests | 1283 passed, 9 live deselected, 0 failed |
 | Current milestone | M6 — Take Management (PLANNING COMPLETE, IMPLEMENTATION NOT STARTED) |
 
 **M5 Progress:**
@@ -66,7 +66,9 @@
 
 **M6.C:** COMPLETE — QueueWorker (atomic claim+finalization, 12-state recovery, prompt-ID auto-finalization, false-success prevention, run_available with concurrency 1–4), 32 tests.
 
-**Next action:** M6.D — TakeService (approve/reject/favorite/unfavorite).
+**M6.D:** COMPLETE — TakeService (approve/reject/favorite/unfavorite, single-approved CAS, media validation, partial index), 31 tests.
+
+**Next action:** M6.E — Take management and queue API endpoints.
 
 ---
 

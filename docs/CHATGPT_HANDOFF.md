@@ -44,8 +44,8 @@
 | Main HEAD | M6 docs checkpoint (see below) |
 | M6 feature commit | `3a2fac7` (branch `m6-take-management`) |
 | M6 merge commit | `6b6e6e2` |
-| Deterministic tests | 1431 passed, 12 live deselected, 0 failed |
-| Current milestone | M7 — Continuity (M7.C COMPLETE) |
+| Deterministic tests | 1457 passed, 12 live deselected, 0 failed |
+| Current milestone | M7 — Continuity (M7.D COMPLETE) |
 | M7 planning branch | `m7-continuity` |
 | M7 worktree | `D:\Ai\Local AI Film Director\.worktrees\m7-continuity` |
 
@@ -57,13 +57,14 @@
 - Live acceptance: 3 real queued Takes (visual PASS), restart recovery proven, 20-shot/60-job queue proof.
 - Chinese-audio observation: H3 inferred Chinese from WC source text (deferred to M10).
 
-**M7 Status:** M7.C COMPLETE / M7.D NOT STARTED.
+**M7 Status:** M7.D COMPLETE / M7.E NOT STARTED.
 - Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
-- **FLF limitation:** MiniMaxH3ImageToVideo has NO ref_images input. Character identity in downstream continuity shots relies entirely on the predecessor frame.
-- M7.A: ContinuityState model, table, repository, resolver, continuity_snapshot, fingerprinting. 60 tests.
-- M7.B: Technical preflight HUMAN PASS. FLF workflow `h3_flf_v1` v1.0.0 (fingerprint `47d6706c...c43d6`). ContinuityBinding. Preflight evidence: `docs/M7_B_PREFLIGHT.md`. 33 tests.
-- M7.C: ContinuityService (predecessor resolution, frame validation, state persistence). GenerationService continuity-aware: chain head=R2V unchanged, downstream=FLF with predecessor frame. FLF prompt without Picture tags. Immutable continuity_snapshot with relative path. 18 tests. Review: 8 PASS, 2 WARN (fixed), 1 FAIL (fixed).
-- Subtasks: M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D → M7.E → M7.F.
+- **FLF limitation:** MiniMaxH3ImageToVideo has NO ref_images. Character identity from predecessor frame.
+- M7.A: ContinuityState model, table, repository, resolver, continuity_snapshot. 60 tests.
+- M7.B: Preflight HUMAN PASS. `h3_flf_v1` v1.0.0 (`47d6706c...c43d6`). ContinuityBinding. 33 tests.
+- M7.C: ContinuityService, continuity-aware GenerationService, FLF prompt. 18 tests.
+- M7.D: `superseded` terminal status. Atomic replace_approved (CAS demote+promote+invalidate in one txn). Deterministic idempotent downstream invalidation. Outdated blocks generation. 26 tests. Review: 11/12 PASS, 1 WARN (in-flight queue race — M7.E scope).
+- Subtasks: M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E → M7.F.
 
 **Non-blocking hardening observations (deferred to M10):**
 1. A QueueJob recovered to succeeded may retain an earlier transient error message; consider clearing or separating historical error state.

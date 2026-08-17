@@ -74,7 +74,7 @@ class Take(BaseModel):
     last_frame_path: str | None = None
     status: Literal[
         "pending", "generating", "succeeded", "failed",
-        "approved", "rejected",
+        "approved", "rejected", "superseded",
     ] = "pending"
     is_favorite: bool = False
     created_at: str = ""

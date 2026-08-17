@@ -8,7 +8,7 @@
 
 **M7 — Continuity**
 
-**Status:** M7.C COMPLETE / M7.D NOT STARTED
+**Status:** M7.D COMPLETE / M7.E NOT STARTED
 
 Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
 Branch: `m7-continuity`
@@ -46,9 +46,22 @@ Base: main at `18c6405`
 - M7.C review: 8 PASS, 2 WARN (symlink no-op fixed, state/request non-atomic but retry-safe), 1 FAIL (missing import — fixed)
 - Baseline: 1431 passed, 12 deselected, 0 failed (1413 + 18 new)
 
-**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D → M7.E → M7.F
+**M7.D — Approved-Take Replacement and Downstream Invalidation: COMPLETE**
+- `superseded` terminal Take status: approved → superseded only via replace_approved
+- Atomic replace_approved: CAS demote old + CAS promote new + invalidate downstream, one transaction
+- Partial unique index remains valid (demote before promote, never two approved)
+- Deterministic idempotent downstream invalidation: canonical scene order, CURRENT→OUTDATED
+- Already OUTDATED states remain stable (no timestamp/revision churn)
+- Outdated state blocks generation via ContinuityService (production-ineligible)
+- No deletion of Takes, media, GenerationRequests, or reference assets
+- Scene/project isolation enforced — no cross-boundary invalidation
+- M6 approve/reject/favorite unchanged (approve still rejects if existing approved)
+- M7.D review: 11 PASS, 1 WARN (in-flight queue race — M7.E scope), 0 FAIL
+- Baseline: 1457 passed, 12 deselected, 0 failed (1431 + 26 new)
 
-Next action: M7.D implementation only.
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E → M7.F
+
+Next action: M7.E implementation only.
 
 ---
 

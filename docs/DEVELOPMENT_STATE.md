@@ -8,7 +8,7 @@
 
 **M7 — Continuity**
 
-**Status:** M7.D COMPLETE / M7.E NOT STARTED
+**Status:** M7.E COMPLETE / M7.F NOT STARTED
 
 Plan: `docs/superpowers/plans/2026-08-17-m7-continuity.md`
 Branch: `m7-continuity`
@@ -59,9 +59,18 @@ Base: main at `18c6405`
 - M7.D review: 11 PASS, 1 WARN (in-flight queue race — M7.E scope), 0 FAIL
 - Baseline: 1457 passed, 12 deselected, 0 failed (1431 + 26 new)
 
-**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E → M7.F
+**M7.E — Continuity API, Rebuild, and Queue Hardening: COMPLETE**
+- 6 new API routes: GET continuity-state, GET predecessor, POST replace-approved, GET continuity-chain, GET outdated-shots, POST continuity/rebuild
+- rebuild_for_shot: OUTDATED→CURRENT with revision increment, predecessor validation, frame re-verification
+- In-flight race guard: persist_state refuses to reactivate OUTDATED state (prevents stale generation from clobbering invalidation)
+- Queue dependency: OUTDATED blocks resolve_for_generation, repaired state allows it
+- GET routes are read-only, POST routes map ContinuityError→409, TakeNotFound→404
+- M7.E review: 9 PASS, 2 WARN (SQLite txn atomicity, concurrent safety), 1 FAIL (in-flight race — fixed)
+- Baseline: 1484 passed, 12 deselected, 0 failed (1457 + 27 new)
 
-Next action: M7.E implementation only.
+**Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F
+
+Next action: M7.F live acceptance only.
 
 ---
 

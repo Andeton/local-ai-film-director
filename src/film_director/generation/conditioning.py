@@ -3,9 +3,12 @@
 Provider-layer infrastructure for mapping canonical VisualAssetPack
 semantic roles to concrete generator/provider workflow capabilities.
 
-Source of truth: Code-based registries (following WorkflowDefinition pattern).
-No new database tables. Static declarations are immutable frozen dataclasses.
-Mutable lifecycle state lives in CapabilityRegistry (in-memory).
+Source of truth:
+- Static ConditioningRecipe/CapabilityProfile: code-based registries
+  (following WorkflowDefinition pattern). Frozen dataclasses.
+- Mutable CapabilityState lifecycle: durable SQLite persistence via
+  capability_registry_states table. Survives process restart.
+- ProbeResult: transient runtime observation, never persisted.
 
 Canonical entities (VisualAssetPack, AssetRole, GenerationPlan, etc.)
 are NOT modified. All provider-specific fields remain in this layer only.
@@ -15,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -24,8 +28,13 @@ from film_director.models.reference import AssetRole
 
 if TYPE_CHECKING:
     from film_director.generation.comfyui_adapter import ComfyUIAdapter
+    from film_director.persistence.database import Database
 
 logger = logging.getLogger(__name__)
+
+_MODEL_EXTENSIONS = frozenset({
+    ".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -258,9 +267,43 @@ class CapabilityProfile:
     license_info: str = ""
     access_restrictions: str = ""
 
-    # Runtime expectations (advisory)
+    # Runtime expectations (advisory — NOT part of fingerprint)
     expected_vram_gb: float | None = None
     expected_runtime_class: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Capability profile fingerprinting
+# ---------------------------------------------------------------------------
+
+def compute_capability_fingerprint(profile: CapabilityProfile) -> str:
+    """Deterministic SHA-256 fingerprint of a capability profile's stable semantics.
+
+    Includes all declarative fields that define the profile's identity.
+    Excludes: lifecycle state, timestamps, probe observations, VRAM,
+    runtime class (advisory only).
+    """
+    payload = {
+        "id": profile.id,
+        "provider": profile.provider,
+        "model_family": profile.model_family,
+        "execution_mode": profile.execution_mode,
+        "supported_strategies": sorted(profile.supported_strategies),
+        "supported_modalities": sorted(profile.supported_modalities),
+        "max_references": profile.max_references,
+        "generation_constraints": profile.generation_constraints,
+        "windows_compatible": profile.windows_compatible,
+        "comfyui_compatible": profile.comfyui_compatible,
+        "required_models": sorted(profile.required_models),
+        "required_nodes": sorted(profile.required_nodes),
+        "source_url": profile.source_url,
+        "license_info": profile.license_info,
+        "access_restrictions": profile.access_restrictions,
+    }
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -273,25 +316,31 @@ class ProbeResult:
 
     Captures current machine/runtime state at probe time.
     Does NOT alter the CapabilityProfile or its identity.
+
+    models_present values:
+    - True  = confirmed present in ComfyUI model inventory
+    - False = confirmed missing from inventory
+    - None  = inventory unavailable, cannot be determined
     """
     profile_id: str
     comfyui_reachable: bool = False
     nodes_present: dict[str, bool] = field(default_factory=dict)
-    models_present: dict[str, bool] = field(default_factory=dict)
+    models_present: dict[str, bool | None] = field(default_factory=dict)
     free_vram_gb: float | None = None
     gpu_name: str = ""
     probed_at: str = ""
 
 
 # ---------------------------------------------------------------------------
-# CapabilityRegistry — lifecycle management
+# CapabilityRegistry — lifecycle management with durable persistence
 # ---------------------------------------------------------------------------
 
 class CapabilityRegistry:
-    """In-memory registry for provider capability profiles and lifecycle state.
+    """Registry for provider capability profiles and lifecycle state.
 
-    Static CapabilityProfile declarations are immutable.
-    Lifecycle state (CapabilityState) is mutable via explicit transitions.
+    Static CapabilityProfile declarations are immutable code-based constants.
+    Lifecycle state (CapabilityState) is durably persisted in SQLite when
+    a Database is provided. Without a Database, operates in-memory only.
 
     Invariants:
     - Probe never auto-approves
@@ -299,26 +348,57 @@ class CapabilityRegistry:
     - DEPRECATED preserves profile (no deletion)
     - New capabilities never replace existing APPROVED ones
     - Historical profiles remain discoverable
+    - APPROVED/DEPRECATED survive process restart (when DB provided)
+    - Changed profile fingerprint does NOT inherit old APPROVED state
     """
 
-    def __init__(self) -> None:
+    def __init__(self, db: Database | None = None) -> None:
         self._profiles: dict[str, CapabilityProfile] = {}
         self._states: dict[str, CapabilityState] = {}
+        self._fingerprints: dict[str, str] = {}
+        self._revisions: dict[str, int] = {}
+        self._db = db
 
     def register(
         self,
         profile: CapabilityProfile,
         state: CapabilityState = CapabilityState.DISCOVERED,
     ) -> None:
+        fp = compute_capability_fingerprint(profile)
         self._profiles[profile.id] = profile
+        self._fingerprints[profile.id] = fp
+
+        # Try to restore persisted state
+        if self._db is not None and profile.id not in self._states:
+            persisted = self._load_state(profile.id)
+            if persisted is not None:
+                if persisted["capability_fingerprint"] == fp:
+                    # Same profile semantics — restore durable state
+                    self._states[profile.id] = CapabilityState(persisted["state"])
+                    self._revisions[profile.id] = persisted["revision"]
+                    return
+                else:
+                    # Profile definition changed — do NOT inherit old state
+                    logger.warning(
+                        "Capability %r profile fingerprint changed "
+                        "(stored=%s, current=%s) — resetting to %s",
+                        profile.id, persisted["capability_fingerprint"][:16],
+                        fp[:16], state.value,
+                    )
+
         if profile.id not in self._states:
             self._states[profile.id] = state
+            self._revisions[profile.id] = 1
+            self._persist_state(profile.id)
 
     def get(self, profile_id: str) -> CapabilityProfile | None:
         return self._profiles.get(profile_id)
 
     def get_state(self, profile_id: str) -> CapabilityState | None:
         return self._states.get(profile_id)
+
+    def get_fingerprint(self, profile_id: str) -> str | None:
+        return self._fingerprints.get(profile_id)
 
     def transition(self, profile_id: str, target_state: CapabilityState) -> None:
         current = self._states.get(profile_id)
@@ -331,12 +411,95 @@ class CapabilityRegistry:
                 f"for profile {profile_id!r}"
             )
         self._states[profile_id] = target_state
+        self._revisions[profile_id] = self._revisions.get(profile_id, 0) + 1
+        self._persist_state(profile_id)
 
     def list_all(self) -> list[tuple[CapabilityProfile, CapabilityState]]:
         return sorted(
             [(self._profiles[pid], self._states[pid]) for pid in self._profiles],
             key=lambda t: t[0].id,
         )
+
+    # -- Persistence helpers --
+
+    def _persist_state(self, profile_id: str) -> None:
+        if self._db is None:
+            return
+        state = self._states.get(profile_id)
+        fp = self._fingerprints.get(profile_id)
+        rev = self._revisions.get(profile_id, 1)
+        if state is None or fp is None:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            with self._db.connection() as conn:
+                conn.execute(
+                    """INSERT INTO capability_registry_states
+                        (capability_id, capability_fingerprint, state, revision,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(capability_id) DO UPDATE SET
+                        capability_fingerprint = excluded.capability_fingerprint,
+                        state = excluded.state,
+                        revision = excluded.revision,
+                        updated_at = excluded.updated_at
+                    """,
+                    (profile_id, fp, state.value, rev, now, now),
+                )
+        except sqlite3.Error as exc:
+            logger.warning("Failed to persist capability state for %r: %s",
+                          profile_id, exc)
+
+    def _load_state(self, profile_id: str) -> dict | None:
+        if self._db is None:
+            return None
+        try:
+            with self._db.connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM capability_registry_states WHERE capability_id = ?",
+                    (profile_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            return dict(row)
+        except sqlite3.Error:
+            return None
+
+
+# ---------------------------------------------------------------------------
+# Model inventory extraction from ComfyUI object_info
+# ---------------------------------------------------------------------------
+
+def extract_available_models(object_info: dict) -> set[str]:
+    """Extract model filenames available in ComfyUI from /object_info response.
+
+    Scans all node class definitions for combo-type inputs that contain
+    model filenames (identified by common model file extensions).
+    This is generic — not specific to any particular model family.
+    """
+    models: set[str] = set()
+    for _node_class, node_def in object_info.items():
+        if not isinstance(node_def, dict):
+            continue
+        inputs = node_def.get("input", {})
+        if not isinstance(inputs, dict):
+            continue
+        for category in ("required", "optional"):
+            cat_inputs = inputs.get(category, {})
+            if not isinstance(cat_inputs, dict):
+                continue
+            for _param, param_def in cat_inputs.items():
+                if not isinstance(param_def, (list, tuple)) or len(param_def) < 1:
+                    continue
+                choices = param_def[0]
+                if not isinstance(choices, list):
+                    continue
+                for choice in choices:
+                    if isinstance(choice, str):
+                        lower = choice.lower()
+                        if any(lower.endswith(ext) for ext in _MODEL_EXTENSIONS):
+                            models.add(choice)
+    return models
 
 
 # ---------------------------------------------------------------------------
@@ -349,8 +512,13 @@ def probe_runtime(
 ) -> ProbeResult:
     """Probe current runtime state for a capability profile.
 
-    Uses ComfyUIAdapter for reachability and node discovery.
+    Uses ComfyUIAdapter for reachability, node discovery, and model discovery.
     Returns a transient ProbeResult — does NOT alter profile or registry state.
+
+    models_present values:
+    - True  = model filename found in ComfyUI's known model inventory
+    - False = model filename NOT found in inventory (inventory was available)
+    - None  = model inventory could not be determined
 
     Does NOT:
     - Run generation
@@ -362,7 +530,7 @@ def probe_runtime(
 
     reachable = False
     nodes_present: dict[str, bool] = {}
-    models_present: dict[str, bool] = {m: False for m in profile.required_models}
+    models_present: dict[str, bool | None] = {m: None for m in profile.required_models}
     free_vram: float | None = None
     gpu_name = ""
 
@@ -382,15 +550,21 @@ def probe_runtime(
     except ComfyUIUnavailableError:
         pass
 
-    # Check node availability
+    # Check node and model availability
     if reachable:
         try:
             object_info = adapter.get_object_info()
+            # Node check
             for node_name in profile.required_nodes:
                 nodes_present[node_name] = node_name in object_info
+            # Model check — extract from combo inputs
+            available_models = extract_available_models(object_info)
+            for model_name in profile.required_models:
+                models_present[model_name] = model_name in available_models
         except Exception:
             for node_name in profile.required_nodes:
                 nodes_present[node_name] = False
+            # Models remain None (unknown)
 
     return ProbeResult(
         profile_id=profile.id,

@@ -17,11 +17,14 @@ from film_director.generation.conditioning import (
     ProbeResult,
     RecipeRegistry,
     RecipeRoleRequirement,
+    compute_capability_fingerprint,
     compute_recipe_fingerprint,
+    extract_available_models,
     probe_runtime,
     validate_recipe_capability,
 )
 from film_director.models.reference import AssetRole
+from film_director.persistence.database import Database
 
 
 # ---------------------------------------------------------------------------
@@ -554,14 +557,41 @@ class TestRuntimeProbe:
         result = probe_runtime(cap, mock_adapter)
         assert result.nodes_present["MissingNode"] is False
 
-    def test_required_models_present(self):
+    def test_required_models_present_from_object_info(self):
         mock_adapter = MagicMock()
         mock_adapter.health.return_value = {"devices": []}
-        mock_adapter.get_object_info.return_value = {}
-        # Model presence is best-effort — returns unknown if not discoverable
+        mock_adapter.get_object_info.return_value = {
+            "CheckpointLoaderSimple": {
+                "input": {
+                    "required": {
+                        "ckpt_name": [["model.safetensors", "other.ckpt"]]
+                    }
+                }
+            }
+        }
         cap = _capability(required_models=("model.safetensors",))
         result = probe_runtime(cap, mock_adapter)
-        assert "model.safetensors" in result.models_present
+        assert result.models_present["model.safetensors"] is True
+
+    def test_required_model_missing_from_inventory(self):
+        mock_adapter = MagicMock()
+        mock_adapter.health.return_value = {"devices": []}
+        mock_adapter.get_object_info.return_value = {
+            "CheckpointLoaderSimple": {
+                "input": {"required": {"ckpt_name": [["other.safetensors"]]}}
+            }
+        }
+        cap = _capability(required_models=("missing.safetensors",))
+        result = probe_runtime(cap, mock_adapter)
+        assert result.models_present["missing.safetensors"] is False
+
+    def test_model_inventory_unavailable_returns_none(self):
+        from film_director.errors import ComfyUIUnavailableError
+        mock_adapter = MagicMock()
+        mock_adapter.health.side_effect = ComfyUIUnavailableError("down")
+        cap = _capability(required_models=("model.safetensors",))
+        result = probe_runtime(cap, mock_adapter)
+        assert result.models_present["model.safetensors"] is None
 
     def test_vram_observation_captured(self):
         mock_adapter = MagicMock()
@@ -736,16 +766,13 @@ class TestBackwardCompatibility:
         assert len(ReferenceSourceState) == 2
 
     def test_historical_data_readable(self, tmp_path):
-        """Historical DB data must survive M7.G.B (no schema changes)."""
-        from film_director.persistence.database import Database
+        """Historical DB data must survive M7.G.B."""
         from film_director.persistence.repositories import ReferenceAssetRepository
         from film_director.models.reference import (
             ReferenceAsset, ReferenceKind, ReferenceSource,
-            ReferenceStatus, ReferenceSourceState,
         )
         db = Database(str(tmp_path / "test.db"))
         db.init_schema()
-        # Seed project
         with db.connection() as conn:
             conn.execute(
                 "INSERT INTO production_projects VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -768,3 +795,386 @@ class TestBackwardCompatibility:
         fetched = repo.get("ref-hist")
         assert fetched is not None
         assert fetched.id == "ref-hist"
+
+
+# ===========================================================================
+# M7.G.B HARDENING — CAPABILITY FINGERPRINT
+# ===========================================================================
+
+class TestCapabilityFingerprint:
+    def test_deterministic_identical_semantics(self):
+        fp1 = compute_capability_fingerprint(_capability())
+        fp2 = compute_capability_fingerprint(_capability())
+        assert fp1 == fp2
+
+    def test_valid_sha256(self):
+        fp = compute_capability_fingerprint(_capability())
+        assert len(fp) == 64
+        assert all(c in "0123456789abcdef" for c in fp)
+
+    def test_unordered_collections_canonicalized(self):
+        c1 = _capability(supported_strategies=("B", "A"))
+        c2 = _capability(supported_strategies=("A", "B"))
+        assert compute_capability_fingerprint(c1) == compute_capability_fingerprint(c2)
+
+    def test_required_model_change_changes_fingerprint(self):
+        c1 = _capability(required_models=("model_a.safetensors",))
+        c2 = _capability(required_models=("model_b.safetensors",))
+        assert compute_capability_fingerprint(c1) != compute_capability_fingerprint(c2)
+
+    def test_required_node_change_changes_fingerprint(self):
+        c1 = _capability(required_nodes=("NodeA",))
+        c2 = _capability(required_nodes=("NodeB",))
+        assert compute_capability_fingerprint(c1) != compute_capability_fingerprint(c2)
+
+    def test_modality_change_changes_fingerprint(self):
+        c1 = _capability(supported_modalities=("image",))
+        c2 = _capability(supported_modalities=("image", "video"))
+        assert compute_capability_fingerprint(c1) != compute_capability_fingerprint(c2)
+
+    def test_probe_result_not_in_fingerprint(self):
+        """ProbeResult is transient — must not affect fingerprint."""
+        cap = _capability()
+        fp = compute_capability_fingerprint(cap)
+        # Different probe results with same profile
+        assert fp == compute_capability_fingerprint(cap)
+
+    def test_lifecycle_state_not_in_fingerprint(self):
+        """Lifecycle state is mutable — must not affect profile fingerprint."""
+        cap = _capability()
+        fp = compute_capability_fingerprint(cap)
+        # Fingerprint depends only on static profile, not on state
+        assert fp == compute_capability_fingerprint(cap)
+
+    def test_timestamps_not_in_fingerprint(self):
+        cap = _capability()
+        fp1 = compute_capability_fingerprint(cap)
+        fp2 = compute_capability_fingerprint(cap)
+        assert fp1 == fp2
+
+    def test_vram_advisory_not_in_fingerprint(self):
+        c1 = _capability(expected_vram_gb=24.0)
+        c2 = _capability(expected_vram_gb=48.0)
+        assert compute_capability_fingerprint(c1) == compute_capability_fingerprint(c2)
+
+
+# ===========================================================================
+# M7.G.B HARDENING — DURABLE PERSISTENCE
+# ===========================================================================
+
+class TestDurablePersistence:
+    @pytest.fixture
+    def db(self, tmp_path):
+        d = Database(str(tmp_path / "test.db"))
+        d.init_schema()
+        return d
+
+    def test_lifecycle_state_roundtrip(self, db):
+        reg = CapabilityRegistry(db=db)
+        cap = _capability()
+        reg.register(cap, CapabilityState.DISCOVERED)
+        reg.transition(cap.id, CapabilityState.AVAILABLE)
+        # Reconstruct registry
+        reg2 = CapabilityRegistry(db=db)
+        reg2.register(cap, CapabilityState.DISCOVERED)
+        assert reg2.get_state(cap.id) == CapabilityState.AVAILABLE
+
+    def test_approved_survives_restart(self, db):
+        reg = CapabilityRegistry(db=db)
+        cap = _capability()
+        reg.register(cap, CapabilityState.DISCOVERED)
+        reg.transition(cap.id, CapabilityState.AVAILABLE)
+        reg.transition(cap.id, CapabilityState.INSTALLED)
+        reg.transition(cap.id, CapabilityState.VERIFIED)
+        reg.transition(cap.id, CapabilityState.APPROVED)
+        # Reconstruct
+        reg2 = CapabilityRegistry(db=db)
+        reg2.register(cap, CapabilityState.DISCOVERED)
+        assert reg2.get_state(cap.id) == CapabilityState.APPROVED
+
+    def test_deprecated_survives_restart(self, db):
+        reg = CapabilityRegistry(db=db)
+        cap = _capability()
+        reg.register(cap, CapabilityState.APPROVED)
+        reg.transition(cap.id, CapabilityState.DEPRECATED)
+        reg2 = CapabilityRegistry(db=db)
+        reg2.register(cap, CapabilityState.DISCOVERED)
+        assert reg2.get_state(cap.id) == CapabilityState.DEPRECATED
+
+    def test_migration_from_pre_hardening_db(self, tmp_path):
+        """DB created before hardening must gain the new table."""
+        db = Database(str(tmp_path / "old.db"))
+        db.init_schema()
+        import sqlite3
+        conn = sqlite3.connect(str(tmp_path / "old.db"))
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        conn.close()
+        assert "capability_registry_states" in tables
+
+    def test_static_profile_not_duplicated_in_db(self, db):
+        """Static CapabilityProfile fields should NOT be stored in DB."""
+        reg = CapabilityRegistry(db=db)
+        reg.register(_capability(), CapabilityState.DISCOVERED)
+        with db.connection() as conn:
+            cols = {r[1] for r in conn.execute(
+                "PRAGMA table_info(capability_registry_states)"
+            ).fetchall()}
+        # Table stores only: capability_id, fingerprint, state, revision, timestamps
+        assert "provider" not in cols
+        assert "model_family" not in cols
+        assert "required_models" not in cols
+
+    def test_historical_state_preserved(self, db):
+        reg = CapabilityRegistry(db=db)
+        cap = _capability()
+        reg.register(cap, CapabilityState.DISCOVERED)
+        reg.transition(cap.id, CapabilityState.AVAILABLE)
+        # Check DB directly
+        with db.connection() as conn:
+            row = conn.execute(
+                "SELECT state, revision FROM capability_registry_states WHERE capability_id = ?",
+                (cap.id,),
+            ).fetchone()
+        assert row["state"] == "available"
+        assert row["revision"] >= 1
+
+
+# ===========================================================================
+# M7.G.B HARDENING — PROFILE CHANGE SAFETY
+# ===========================================================================
+
+class TestProfileChangeSafety:
+    @pytest.fixture
+    def db(self, tmp_path):
+        d = Database(str(tmp_path / "test.db"))
+        d.init_schema()
+        return d
+
+    def test_same_fingerprint_restores_state(self, db):
+        cap = _capability()
+        reg = CapabilityRegistry(db=db)
+        reg.register(cap, CapabilityState.DISCOVERED)
+        reg.transition(cap.id, CapabilityState.AVAILABLE)
+        reg.transition(cap.id, CapabilityState.INSTALLED)
+        reg.transition(cap.id, CapabilityState.VERIFIED)
+        reg.transition(cap.id, CapabilityState.APPROVED)
+        # Same profile → APPROVED restored
+        reg2 = CapabilityRegistry(db=db)
+        reg2.register(cap, CapabilityState.DISCOVERED)
+        assert reg2.get_state(cap.id) == CapabilityState.APPROVED
+
+    def test_changed_fingerprint_does_not_inherit_approved(self, db):
+        """Changed profile semantics must NOT inherit old APPROVED state."""
+        cap_old = _capability(required_models=("old_model.safetensors",))
+        reg = CapabilityRegistry(db=db)
+        reg.register(cap_old, CapabilityState.DISCOVERED)
+        reg.transition(cap_old.id, CapabilityState.AVAILABLE)
+        reg.transition(cap_old.id, CapabilityState.INSTALLED)
+        reg.transition(cap_old.id, CapabilityState.VERIFIED)
+        reg.transition(cap_old.id, CapabilityState.APPROVED)
+        # Changed profile (different required_models → different fingerprint)
+        cap_new = _capability(required_models=("new_model.safetensors",))
+        reg2 = CapabilityRegistry(db=db)
+        reg2.register(cap_new, CapabilityState.DISCOVERED)
+        # Must NOT inherit APPROVED
+        assert reg2.get_state(cap_new.id) == CapabilityState.DISCOVERED
+
+    def test_old_state_not_deleted_on_fingerprint_change(self, db):
+        """DB row should be updated, not deleted, on profile change."""
+        cap = _capability(required_models=("old.safetensors",))
+        reg = CapabilityRegistry(db=db)
+        reg.register(cap, CapabilityState.APPROVED)
+        # Changed profile
+        cap2 = _capability(required_models=("new.safetensors",))
+        reg2 = CapabilityRegistry(db=db)
+        reg2.register(cap2, CapabilityState.DISCOVERED)
+        # DB still has a row
+        with db.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM capability_registry_states WHERE capability_id = ?",
+                (cap.id,),
+            ).fetchone()
+        assert row is not None
+
+
+# ===========================================================================
+# M7.G.B HARDENING — MODEL PROBE
+# ===========================================================================
+
+class TestModelProbe:
+    def test_model_present_in_inventory(self):
+        mock_adapter = MagicMock()
+        mock_adapter.health.return_value = {"devices": []}
+        mock_adapter.get_object_info.return_value = {
+            "LoadCheckpoint": {
+                "input": {"required": {"ckpt_name": [["my_model.safetensors"]]}}
+            }
+        }
+        cap = _capability(required_models=("my_model.safetensors",))
+        result = probe_runtime(cap, mock_adapter)
+        assert result.models_present["my_model.safetensors"] is True
+
+    def test_model_missing_from_inventory(self):
+        mock_adapter = MagicMock()
+        mock_adapter.health.return_value = {"devices": []}
+        mock_adapter.get_object_info.return_value = {
+            "LoadCheckpoint": {
+                "input": {"required": {"ckpt_name": [["other.safetensors"]]}}
+            }
+        }
+        cap = _capability(required_models=("needed.safetensors",))
+        result = probe_runtime(cap, mock_adapter)
+        assert result.models_present["needed.safetensors"] is False
+
+    def test_several_models_all_present(self):
+        mock_adapter = MagicMock()
+        mock_adapter.health.return_value = {"devices": []}
+        mock_adapter.get_object_info.return_value = {
+            "Loader1": {"input": {"required": {"ckpt": [["a.safetensors", "b.safetensors"]]}}},
+            "Loader2": {"input": {"required": {"model": [["c.ckpt"]]}}},
+        }
+        cap = _capability(required_models=("a.safetensors", "b.safetensors", "c.ckpt"))
+        result = probe_runtime(cap, mock_adapter)
+        assert all(v is True for v in result.models_present.values())
+
+    def test_one_of_several_missing(self):
+        mock_adapter = MagicMock()
+        mock_adapter.health.return_value = {"devices": []}
+        mock_adapter.get_object_info.return_value = {
+            "Loader": {"input": {"required": {"ckpt": [["a.safetensors"]]}}},
+        }
+        cap = _capability(required_models=("a.safetensors", "missing.safetensors"))
+        result = probe_runtime(cap, mock_adapter)
+        assert result.models_present["a.safetensors"] is True
+        assert result.models_present["missing.safetensors"] is False
+
+    def test_inventory_unavailable_returns_none(self):
+        from film_director.errors import ComfyUIUnavailableError
+        mock_adapter = MagicMock()
+        mock_adapter.health.side_effect = ComfyUIUnavailableError("down")
+        cap = _capability(required_models=("model.safetensors",))
+        result = probe_runtime(cap, mock_adapter)
+        assert result.models_present["model.safetensors"] is None
+
+    def test_node_present_model_missing_not_installed(self):
+        """Node present + required model missing = NOT installation-ready."""
+        mock_adapter = MagicMock()
+        mock_adapter.health.return_value = {"devices": []}
+        mock_adapter.get_object_info.return_value = {
+            "MiniMaxH3ReferenceToVideo": {"input": {"required": {}}},
+        }
+        cap = _capability(
+            required_nodes=("MiniMaxH3ReferenceToVideo",),
+            required_models=("missing.safetensors",),
+        )
+        result = probe_runtime(cap, mock_adapter)
+        assert result.nodes_present["MiniMaxH3ReferenceToVideo"] is True
+        assert result.models_present["missing.safetensors"] is False
+
+    def test_runtime_unreachable(self):
+        from film_director.errors import ComfyUIUnavailableError
+        mock_adapter = MagicMock()
+        mock_adapter.health.side_effect = ComfyUIUnavailableError("down")
+        result = probe_runtime(_capability(), mock_adapter)
+        assert result.comfyui_reachable is False
+
+    def test_node_missing(self):
+        mock_adapter = MagicMock()
+        mock_adapter.health.return_value = {"devices": []}
+        mock_adapter.get_object_info.return_value = {}
+        cap = _capability(required_nodes=("MissingNode",))
+        result = probe_runtime(cap, mock_adapter)
+        assert result.nodes_present["MissingNode"] is False
+
+
+# ===========================================================================
+# M7.G.B HARDENING — TRANSIENT SEPARATION
+# ===========================================================================
+
+class TestTransientSeparation:
+    def test_vram_change_not_in_fingerprint(self):
+        cap = _capability(expected_vram_gb=24.0)
+        fp = compute_capability_fingerprint(cap)
+        cap2 = _capability(expected_vram_gb=48.0)
+        assert compute_capability_fingerprint(cap2) == fp
+
+    def test_gpu_name_not_in_fingerprint(self):
+        cap = _capability()
+        fp = compute_capability_fingerprint(cap)
+        # GPU name is in ProbeResult, not profile — no effect
+        assert compute_capability_fingerprint(cap) == fp
+
+    def test_probe_timestamp_not_in_fingerprint(self):
+        cap = _capability()
+        fp = compute_capability_fingerprint(cap)
+        assert compute_capability_fingerprint(cap) == fp
+
+    def test_probe_does_not_overwrite_approved(self, tmp_path):
+        """Probing must not change APPROVED state."""
+        db = Database(str(tmp_path / "test.db"))
+        db.init_schema()
+        reg = CapabilityRegistry(db=db)
+        cap = _capability()
+        reg.register(cap, CapabilityState.APPROVED)
+        # Probe happens externally, returns ProbeResult
+        mock_adapter = MagicMock()
+        mock_adapter.health.return_value = {"devices": []}
+        mock_adapter.get_object_info.return_value = {}
+        result = probe_runtime(cap, mock_adapter)
+        # Registry state unchanged
+        assert reg.get_state(cap.id) == CapabilityState.APPROVED
+
+
+# ===========================================================================
+# M7.G.B HARDENING — EXTRACT AVAILABLE MODELS
+# ===========================================================================
+
+class TestExtractAvailableModels:
+    def test_basic_extraction(self):
+        info = {
+            "LoadCheckpoint": {
+                "input": {
+                    "required": {
+                        "ckpt_name": [["model_a.safetensors", "model_b.ckpt"]]
+                    }
+                }
+            }
+        }
+        models = extract_available_models(info)
+        assert "model_a.safetensors" in models
+        assert "model_b.ckpt" in models
+
+    def test_multiple_nodes(self):
+        info = {
+            "Node1": {"input": {"required": {"model": [["a.safetensors"]]}}},
+            "Node2": {"input": {"required": {"unet": [["b.safetensors"]]}}},
+        }
+        models = extract_available_models(info)
+        assert "a.safetensors" in models
+        assert "b.safetensors" in models
+
+    def test_optional_inputs(self):
+        info = {
+            "Node": {"input": {"optional": {"lora": [["my.safetensors"]]}}}
+        }
+        models = extract_available_models(info)
+        assert "my.safetensors" in models
+
+    def test_non_model_values_excluded(self):
+        info = {
+            "Node": {"input": {"required": {"mode": [["nearest", "bilinear"]]}}}
+        }
+        models = extract_available_models(info)
+        assert len(models) == 0
+
+    def test_empty_object_info(self):
+        assert extract_available_models({}) == set()
+
+    def test_subdirectory_models(self):
+        info = {
+            "Node": {"input": {"required": {"ckpt": [["minimax/h3/model.safetensors"]]}}}
+        }
+        models = extract_available_models(info)
+        assert "minimax/h3/model.safetensors" in models

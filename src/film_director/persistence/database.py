@@ -368,6 +368,16 @@ CREATE TABLE IF NOT EXISTS asset_role_bindings (
 
 CREATE INDEX IF NOT EXISTS idx_asset_role_bindings_pack ON asset_role_bindings(pack_id);
 CREATE INDEX IF NOT EXISTS idx_asset_role_bindings_asset ON asset_role_bindings(reference_asset_id);
+
+-- M7.G.B hardening: Durable capability lifecycle state
+CREATE TABLE IF NOT EXISTS capability_registry_states (
+    capability_id           TEXT PRIMARY KEY,
+    capability_fingerprint  TEXT NOT NULL,
+    state                   TEXT NOT NULL DEFAULT 'discovered',
+    revision                INTEGER NOT NULL DEFAULT 1,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL
+);
 """
 
 

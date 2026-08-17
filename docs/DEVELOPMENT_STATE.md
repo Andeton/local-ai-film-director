@@ -106,16 +106,19 @@ Base: main at `18c6405`
 - RecipeRoleRequirement: role, required/optional, slot_index, modality, cardinality
 - compute_recipe_fingerprint: SHA-256 over semantic fields (excludes advisory vram/runtime)
 - RecipeRegistry: in-memory append-only, idempotent re-register, rejects fingerprint conflicts
-- CapabilityProfile: frozen static declaration (provider, model family, strategies, modalities, nodes, models)
+- CapabilityProfile: frozen static declaration with compute_capability_fingerprint SHA-256
 - CapabilityState lifecycle: DISCOVERED→AVAILABLE→INSTALLED→VERIFIED→APPROVED→DEPRECATED
-- CapabilityRegistry: in-memory lifecycle management, explicit transitions, no auto-approval
-- ProbeResult: transient runtime observation (reachable, nodes, vram) separate from static profile
-- probe_runtime: uses ComfyUIAdapter.health() + get_object_info(), no generation
+- CapabilityRegistry: durable lifecycle persistence via capability_registry_states table
+  - APPROVED/DEPRECATED survive process restart (SQLite-backed when db provided)
+  - Changed profile fingerprint does NOT inherit old APPROVED state
+  - Probe never auto-approves; explicit transitions only; no automatic replacement
+- ProbeResult: transient tri-state observation (nodes: bool, models: True/False/None for unknown)
+- probe_runtime: real model probing via extract_available_models from /object_info combo inputs
 - validate_recipe_capability: provider/model/strategy/modality/limit compatibility check
-- Source of truth: code-based registries (following WorkflowDefinition pattern), no new DB tables
-- ComfyUIAdapter.get_object_info() added for node class discovery
-- M7.G.B review: 18 PASS, 0 WARN, 0 FAIL
-- Baseline: 1653 passed, 12 deselected, 0 failed (1580 + 73 new)
+- Source of truth: code-based registries for static profiles, SQLite for mutable lifecycle state
+- ComfyUIAdapter.get_object_info() for node + model discovery
+- M7.G.B review: 18 PASS; hardening review: 12 PASS, 0 WARN, 0 FAIL
+- Baseline: 1692 passed, 12 deselected, 0 failed (1580 + 112 conditioning tests)
 
 **Subtasks:** M7.A ✓ → M7.B ✓ → M7.C ✓ → M7.D ✓ → M7.E ✓ → M7.F (conditional) → M7.G.A ✓ → M7.G.B ✓ → M7.G.C (not started)
 

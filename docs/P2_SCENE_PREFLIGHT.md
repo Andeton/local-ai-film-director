@@ -1,6 +1,6 @@
 # P2 Scene Preflight — Real Multi-Shot Scene Validation
 
-**Status:** WC COMPLETE, IMPORT COMPLETE, ENRICHMENT BLOCKED (Ollama down)  
+**Status:** READY FOR SHOT 1 GENERATION  
 **Branch:** `p2-real-scene`
 
 ---
@@ -189,21 +189,23 @@ No batch generation. Each shot waits for predecessor approval.
 
 ## 11. Generation Readiness
 
-**NOT READY** — one remaining blocker:
-1. **Start Ollama** — required for enrichment (beat decomposition, shot specification, generation plans)
+**READY** — all blockers resolved.
 
-**Already completed:**
+**Completed:**
 - ✓ Wind Comic preproduction (`jaElem8f9MRrs94gFRrPU`)
-- ✓ Canonical import (`proj_5339656ad20f` — 2 scenes, 2 characters)
-- ✓ `.env` configured
-- ✓ ComfyUI running
+- ✓ Canonical import (`proj_5339656ad20f`)
+- ✓ Enrichment attempted — LLM (qwen3:14b) hallucinated wrong content (known M4 quality gap)
+- ✓ Manual shot correction: 5 human-designed shots matching apartment/envelope scene
+- ✓ Character reference generated (Z-Image Turbo, 1024x1024, approved+current)
+- ✓ Environment reference generated (Z-Image Turbo, 1024x1024, approved+current)
 - ✓ All deterministic tests pass (1716/0 failed)
 
-**After starting Ollama:**
-1. Run enrichment on `proj_5339656ad20f` to create beats/shots/plans
-2. Inspect resulting shot plan — verify 4-5 usable shots
-3. Generate character reference (Z-Image or Krea2 via existing workflows)
-4. Generate environment reference
-5. Begin sequential Shot 1 generation
+**References:**
+- Character: `ref_5222d638c7f1` — European man, dark coat, approved
+- Environment: `ref_512ad37aa29a` — apartment interior, night, approved
 
-**Database:** `data/p2_scene.db` (isolated from M7 evidence)
+**Database:** `data/p2_scene.db` (isolated)
+
+**Product gap confirmed:** LLM enrichment (qwen3:14b) does not reliably follow scene ideas. Human shot design was necessary. This validates the human-edit workflow path.
+
+**NEXT:** Generate Shot 1 using h3_r2v_v2 (character + environment, scene head)

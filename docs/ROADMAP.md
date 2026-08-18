@@ -42,21 +42,17 @@ Create smallest workflow derived from proven R2V template. One live acceptance r
 
 Not needed while H3 image-pack works. Evaluate only if H3 later fails a concrete production requirement.
 
-### P2 — One complete real multi-shot scene
+### P2 — First complete real scene — COMPLETE / HUMAN PASS
 
-Full pipeline: idea → Wind Comic → canonical shots → references → generation → Takes → approval → continuity → complete scene.
+5-shot scene generated, approved, assembled. Operator UI built. Scene export working.
 
-No new abstraction unless this scene proves it necessary.
+### P3 — Second project entirely through operator UI
 
-### P3 — Minimal operator UI — PULLED FORWARD INTO P2
+Acceptance: new idea → generation-ready shots WITHOUT direct SQLite or Claude manual data creation.
 
-Operator console: project/shot navigation, reference display, video playback, approve/reject/generate actions. Required for human-testable product workflow.
+Required: project creation UI, shot-plan inspection/editing, reference preparation — all through the operator console.
 
-### P4 — Assembly/export
-
-Approved Takes → ordered scene → MP4/timeline output.
-
-### P5 — Deferred (after useful product exists)
+### P4 — Deferred (after useful product exists)
 
 - AI reviewer (M8)
 - Broad model routing

@@ -4,58 +4,52 @@
 
 ---
 
-## Current Milestone
+## Current State
 
-**M7 — Continuity**
+**Production loop: PROVEN**
 
-**Status:** COMPLETE / CLOSED / MERGED
+P2 completed the first real end-to-end scene: idea → Wind Comic → canonical shots → references → H3 generation → Takes → approval → continuity → scene assembly → playable MP4 export. Human acceptance: PASS.
 
-### Result
+**Active branch:** `main`
 
-M7 proves deterministic multi-shot video continuity with character identity, environment, and temporal continuity preservation using MiniMax H3 Reference-to-Video with simultaneous image references.
+---
 
-**Selected production continuity strategy:**
-- H3 R2V image-pack (character + environment + predecessor frame)
-- No ref_video, no reference-audio conditioning
-- Human visual acceptance: PASS
+## P2 — First Complete Scene
 
-### Completed Subtasks
+**Status:** COMPLETE / HUMAN PASS / MERGED
 
-| Subtask | Commit | Tests |
-|---|---|---|
-| M7.A — Continuity models, persistence, ordering, fingerprinting | `d611d11` | +33 |
-| M7.B — FLF workflow preflight and versioned continuity bindings | `edaabda` | +33 |
-| M7.C — Continuity resolution and GenerationService integration | `33edd9f` | +18 |
-| M7.D — Approved-Take replacement and downstream invalidation | `5f936c7` | +26 |
-| M7.E — Continuity API, rebuild, and queue dependency hardening | `3eb48e3` | +36 |
-| M7.F — Live acceptance (conditional) + identity fix | `9dc24a0` | +20 |
-| M7.G.A — VisualAssetPack, AssetRole, AssetRoleBinding | `a4b06a7` | +67 |
-| M7.G.B — ConditioningRecipe, CapabilityRegistry (FROZEN) | `f5f5b20` | +112 |
-| M7.G.C — H3 image-only multi-reference recipe — HUMAN PASS | `12e7cbe` | +24 |
-| M7 closure + snapshot fix | pending | — |
+**Project:** `proj_5339656ad20f`  
+**Scene:** 5 shots, all approved  
+**Output:** `storage/exports/proj_5339656ad20f/scene_main_v1.mp4`  
+**Duration:** 30.825s · 1376x768 · 24fps · H264+AAC
 
-### M7.G.C Live Acceptance
+**Operator UI:** Minimal production console at `http://127.0.0.1:8000/`
+- Project/shot navigation, video playback, approve/reject
+- Generation preview with prompt/duration/seed controls
+- Continuity visualization, blocked-shot messaging
+- Scene assembly with one-click build
 
-- Prompt ID: `1f05a478-c406-4d30-8209-750c1c1259e5`
-- Runtime: 287s (~4.8 min) on RTX 5090
-- Output: 1376x768, 124 frames, 5.167s, H264+AAC
-- 3 simultaneous image references (character, environment, predecessor frame)
-- Stress test: shot_m7f_04 (back-facing predecessor — identity must come from Picture 1)
-- Human verdict: **PASS** — character identity, environment, continuity, motion all accepted
+**Known P2 Gaps:**
 
-### Frozen Infrastructure
+| Gap | Description |
+|---|---|
+| Enrichment quality | qwen3:14b did not reliably convert scene idea into correct shots. Human correction was required. |
+| Shot editing path | Corrected shots were inserted via direct SQLite, not through operator UI. |
+| Pre-production UI | No UI for new project creation, WC launch, shot-plan inspection, or reference preparation. |
 
-- CapabilityRegistry: FROZEN — not wired to production, no further expansion
-- VisualAssetPack: available infrastructure, not required by current generation path
-- LTX Ingredients: DEFERRED FALLBACK — not needed while H3 image-pack works
+---
+
+## M7 — Continuity
+
+**Status:** COMPLETE / CLOSED / MERGED at `30aab73`
+
+Selected strategy: H3 R2V image-pack (character + environment + predecessor frame). Human PASS.
 
 ---
 
 ## Deterministic Baseline
 
-**1716 passed, 12 deselected, 0 failed**
-
-Live tests (deselected): Ollama (5), ComfyUI (4), Wind Comic (3)
+**1743 passed, 12 deselected, 0 failed**
 
 ---
 
@@ -78,9 +72,10 @@ Live tests (deselected): Ollama (5), ComfyUI (4), Wind Comic (3)
 | M2 | `main` | Beats, shots, plans, strategy selection, enrichment |
 | M3 | `main` | Shot→R2V→ComfyUI→Take vertical slice |
 | M4 | `main` | idea→WC SSE→canonical import→enrichment |
-| M5 | `main` at `d4e0fbe` | Reference lifecycle, ingest, generators, r2v_v2, staleness |
-| M6 | `main` at `6b6e6e2` | Take approval, persistent queue, worker recovery |
-| M7 | `main` at `30aab73` | Continuity: chain state, FLF, image-pack multi-ref, human PASS |
+| M5 | `main` | Reference lifecycle, ingest, generators, r2v_v2, staleness |
+| M6 | `main` | Take approval, persistent queue, worker recovery |
+| M7 | `main` | Continuity: chain state, FLF, image-pack multi-ref |
+| P2 | `main` | First complete scene: 5 shots, operator UI, assembly, human PASS |
 
 ---
 
@@ -96,18 +91,24 @@ Live tests (deselected): Ollama (5), ComfyUI (4), Wind Comic (3)
 
 ---
 
-## Known Backlog
+## Frozen Infrastructure
 
-| Item | Severity | Notes |
-|---|---|---|
-| H3 Turbo LoRA not installed | LOW | 20-step generation (~4 min) is acceptable |
-| WC Writer dialogue quality (qwen3:14b) | LOW | Fields may be empty; LLM fallback works |
-| `_find_project_id_for_scene` O(N) scan | MINOR | Acceptable for current project sizes |
+- CapabilityRegistry: FROZEN — no expansion
+- VisualAssetPack: available, not required by current path
+- LTX Ingredients: DEFERRED FALLBACK
 
 ---
 
-## Next Product Work (After Merge)
+## Next Product Target
 
-**P2 — Complete one real multi-shot scene end-to-end**
+**P3 — Second project entirely through the operator UI**
 
-idea → Wind Comic → canonical shots → references → H3 image-pack → Takes → approval → continuity → completed scene
+Acceptance: Tony starts with a new idea and reaches generation-ready shots WITHOUT direct SQLite mutation or Claude manual data creation.
+
+Required new UI capabilities:
+- New project creation (Wind Comic launch)
+- Imported shot-plan inspection
+- Shot editing/correction in UI
+- Reference preparation in UI
+
+Then reuse proven: Generate → Review → Approve → Continuity → Assembly

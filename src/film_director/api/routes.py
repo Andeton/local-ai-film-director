@@ -1088,4 +1088,84 @@ def create_router(
             raise HTTPException(status_code=409, detail=e.message)
         return state.model_dump()
 
+    # ------------------------------------------------------------------
+    # P2 — Scene Assembly
+    # ------------------------------------------------------------------
+
+    @router.post("/projects/{project_id}/build-scene")
+    def build_scene(project_id: str, request: Request) -> dict:
+        """Assemble all approved Takes into a single scene export."""
+        if shot_repo is None or take_service is None:
+            raise HTTPException(status_code=501, detail="Scene assembly not available")
+        from film_director.services.scene_assembly import (
+            AssemblyInput, assemble_scene, _sha256,
+        )
+
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        shots = shot_repo.get_current_shots_by_project(project_id)
+        shots.sort(key=lambda s: s.order_index)
+
+        inputs: list[AssemblyInput] = []
+        for shot in shots:
+            approved = take_service.get_approved_for_shot(shot.id)
+            if approved is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Shot {shot.order_index + 1} ({shot.id}) has no approved Take",
+                )
+            inputs.append(AssemblyInput(
+                shot_id=shot.id,
+                shot_index=shot.order_index,
+                take_id=approved.id,
+                video_path=approved.video_path,
+                sha256=_sha256(approved.video_path),
+            ))
+
+        import os as _os
+        _settings = request.app.state.settings
+        output_dir = _os.path.join(_settings.storage_root, "exports", project_id)
+        output_path = _os.path.join(output_dir, "scene_main_v1.mp4")
+
+        result = assemble_scene(
+            inputs=inputs,
+            output_path=output_path,
+            project_id=project_id,
+        )
+
+        return {
+            "output_path": result.output_path,
+            "output_sha256": result.output_sha256,
+            "duration": result.duration,
+            "resolution": result.resolution,
+            "fps": result.fps,
+            "video_codec": result.video_codec,
+            "audio_codec": result.audio_codec,
+            "size_bytes": result.size_bytes,
+            "manifest_path": result.manifest_path,
+            "shots_assembled": len(result.inputs),
+        }
+
+    @router.get("/projects/{project_id}/scene-export")
+    def get_scene_export(project_id: str, request: Request) -> dict:
+        """Return metadata of the current scene export if it exists."""
+        import os as _os
+        _settings = request.app.state.settings
+        output_path = _os.path.join(_settings.storage_root, "exports", project_id, "scene_main_v1.mp4")
+        manifest_path = _os.path.join(_settings.storage_root, "exports", project_id, "scene_main_v1_manifest.json")
+        if not _os.path.isfile(output_path):
+            raise HTTPException(status_code=404, detail="No scene export found")
+        import json as _json
+        manifest = {}
+        if _os.path.isfile(manifest_path):
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = _json.load(f)
+        return {
+            "output_path": output_path,
+            "media_url": f"/media/{output_path.replace(chr(92), '/')}",
+            "manifest": manifest,
+        }
+
     return router

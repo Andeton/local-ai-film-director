@@ -91,6 +91,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
   <div class="sidebar">
     <div class="sidebar-header"><h1>Film Director</h1><div class="sub" id="project-sub">Loading...</div></div>
     <ul class="shot-list" id="shot-list"></ul>
+    <div id="scene-assembly" style="padding:8px;border-top:1px solid var(--border);margin-top:8px;"></div>
   </div>
   <div class="main" id="main-panel"><div class="loading">Select a shot</div></div>
   <div class="panel" id="panel"><div class="loading">Select a shot</div></div>
@@ -119,6 +120,7 @@ async function loadShots(){
   shotTakesCache={};
   for(const s of shots){try{shotTakesCache[s.id]=await api(`/shots/${s.id}/takes`)}catch(e){shotTakesCache[s.id]=[]}}
   renderShotList();
+  renderSceneAssembly();
 }
 
 function renderShotList(){
@@ -340,6 +342,66 @@ async function doGenerate(shotId){
     await api(`/shots/${shotId}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     toast('Take generated');await loadShots();await selectShot(shotId);
   }catch(e){toast('Generation failed: '+e.message,false)}
+}
+
+function renderSceneAssembly(){
+  const el=document.getElementById('scene-assembly');
+  if(!currentProject||!currentShots.length){el.innerHTML='';return}
+  const allApproved=currentShots.every(s=>(shotTakesCache[s.id]||[]).some(t=>t.status==='approved'));
+  const shotCount=currentShots.length;
+  const approvedCount=currentShots.filter(s=>(shotTakesCache[s.id]||[]).some(t=>t.status==='approved')).length;
+  el.innerHTML=`
+    <div class="panel-title" style="margin-top:0">Scene</div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:6px">${approvedCount}/${shotCount} shots approved</div>
+    <button class="btn btn-primary" style="width:100%;font-size:12px;padding:8px" ${allApproved?'':'disabled'} onclick="buildScene()">
+      ${allApproved?'Build Scene':'Waiting for approvals'}
+    </button>
+    <div id="scene-result"></div>
+  `;
+  // Check if export exists
+  api(`/projects/${currentProject.id}/scene-export`).then(data=>{
+    const r=document.getElementById('scene-result');
+    if(r)r.innerHTML=`<div style="margin-top:6px;font-size:11px;color:var(--green)">Scene exported<br><button class="btn-link" onclick="viewScene()">Watch scene →</button></div>`;
+  }).catch(()=>{});
+}
+
+async function buildScene(){
+  toast('Assembling scene...');
+  try{
+    const r=await api(`/projects/${currentProject.id}/build-scene`,{method:'POST'});
+    toast('Scene assembled: '+r.duration+'s');
+    renderSceneAssembly();
+    viewScene();
+  }catch(e){toast('Assembly failed: '+e.message,false)}
+}
+
+async function viewScene(){
+  try{
+    const data=await api(`/projects/${currentProject.id}/scene-export`);
+    const panel=document.getElementById('main-panel');
+    const m=data.manifest||{};
+    const out=m.output||{};
+    panel.innerHTML=`
+      <div class="shot-title">Complete Scene</div>
+      <div class="meta-row">
+        <div><div class="meta-label">Duration</div><div class="meta-value">${out.duration||'?'}s</div></div>
+        <div><div class="meta-label">Resolution</div><div class="meta-value">${out.resolution||'?'}</div></div>
+        <div><div class="meta-label">Shots</div><div class="meta-value">${(m.inputs||[]).length}</div></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Scene Video</div>
+        <div class="video-wrap"><video controls autoplay muted style="max-height:500px"><source src="${data.media_url}" type="video/mp4"></video></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Assembly Manifest</div>
+        <div style="font-size:11px;color:var(--text2)">
+          ${(m.inputs||[]).map(i=>'Shot '+(i.shot_index+1)+': '+i.take_id.substring(0,12)).join('<br>')}
+        </div>
+      </div>
+    `;
+    selectedShotId=null;
+    renderShotList();
+  }catch(e){toast('Scene not found',false)}
 }
 
 loadProject();

@@ -6,7 +6,7 @@ import tempfile
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, model_validator
 
 from film_director.adapters.wind_comic import WindComicAdapter
@@ -57,6 +57,13 @@ class FromIdeaRequest(BaseModel):
     style: str | None = None
     aspect: str | None = None
     language: str | None = None
+
+
+class GenerateRequest(BaseModel):
+    """Optional operator overrides for generation."""
+    prompt_override: str | None = None
+    duration_sec: float | None = None
+    seed: int | None = None
 
 
 class BeatEditRequest(BaseModel):
@@ -388,11 +395,16 @@ def create_router(
     # ------------------------------------------------------------------
 
     @router.get("/shots/{shot_id}/generation-preview")
-    def get_generation_preview(shot_id: str) -> dict:
+    def get_generation_preview(
+        shot_id: str,
+        prompt_override: str | None = Query(default=None),
+        duration_sec: float | None = Query(default=None),
+        seed: int | None = Query(default=None),
+    ) -> dict:
         """Dry-run preview of what generation would submit.
 
         Uses production resolution logic but does NOT submit to ComfyUI.
-        Returns workflow, prompt, references, duration, seed policy.
+        Accepts optional operator overrides via query params.
         """
         if generation_service is None or plan_repo is None or shot_repo is None:
             raise HTTPException(status_code=501, detail="Generation not available")
@@ -455,12 +467,14 @@ def create_router(
             workflow_id = "h3_r2v_image_pack_v1"
             workflow_version = "1.0.0"
 
-        # Duration resolution
-        frames = _seconds_to_grid_frames(plan.duration_sec)
+        # Duration resolution (operator override or plan default)
+        effective_duration = duration_sec if duration_sec is not None else plan.duration_sec
+        frames = _seconds_to_grid_frames(effective_duration)
         actual_duration = round(frames / 24.0, 3)
 
-        # Build prompt using existing builder
+        # Prompt (operator override or existing artifact)
         prompt_text = ""
+        prompt_source = "generated"
         existing_prompt = None
         try:
             existing_prompt = generation_service._prompt_repo.get_current_prompt(
@@ -468,8 +482,16 @@ def create_router(
             )
         except Exception:
             pass
-        if existing_prompt:
+        if prompt_override is not None and prompt_override.strip():
+            prompt_text = prompt_override
+            prompt_source = "operator_override"
+        elif existing_prompt:
             prompt_text = existing_prompt.rendered_prompt_text
+
+        # Seed resolution
+        effective_seed = seed
+        seed_policy = "explicit" if seed is not None else plan.seed_policy
+        seed_display = seed if seed is not None else plan.seed
 
         # Pictures
         pictures = []
@@ -510,15 +532,17 @@ def create_router(
             "workflow_version": workflow_version,
             "strategy": plan.strategy,
             "continuity_mode": plan.continuity_mode,
-            "duration_sec": plan.duration_sec,
+            "duration_sec": effective_duration,
+            "plan_duration_sec": plan.duration_sec,
             "resolved_frames": frames,
             "resolved_duration_sec": actual_duration,
             "fps": 24,
             "aspect": "16:9",
             "resolution": "1376x768",
-            "seed_policy": plan.seed_policy,
-            "seed": plan.seed,
+            "seed_policy": seed_policy,
+            "seed": seed_display,
             "prompt_text": prompt_text,
+            "prompt_source": prompt_source,
             "pictures": pictures,
             "continuity_blocked": continuity_blocked,
             "predecessor_shot_index": shot_idx - 1 if shot_idx > 0 else None,
@@ -526,16 +550,23 @@ def create_router(
         }
 
     @router.post("/shots/{shot_id}/generate")
-    def generate_shot(shot_id: str) -> dict:
-        """Synchronous M3 generation: Shot → H3 R2V → Take.
+    def generate_shot(shot_id: str, body: GenerateRequest = Body(default=GenerateRequest())) -> dict:
+        """Synchronous generation with optional operator overrides.
 
-        No queue, no background worker. The request stays open during
-        the entire H3 generation (~3-5 min on RTX 5090). Later milestones
-        will add async job support.
+        Accepts optional prompt_override, duration_sec, and seed.
+        If omitted, uses plan defaults (backward compatible).
         """
         if generation_service is None:
             raise HTTPException(status_code=501, detail="M3 generation not available")
-        take = generation_service.generate_shot(shot_id)
+        kwargs: dict = {}
+        if body:
+            if body.seed is not None:
+                kwargs["seed_override"] = body.seed
+            if body.prompt_override is not None:
+                kwargs["prompt_override"] = body.prompt_override
+            if body.duration_sec is not None:
+                kwargs["duration_override"] = body.duration_sec
+        take = generation_service.generate_take(shot_id, **kwargs)
         return {
             "take_id": take.id,
             "shot_id": take.shot_id,

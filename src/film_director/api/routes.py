@@ -208,6 +208,7 @@ def create_router(
     # M7 services
     continuity_service=None,  # ContinuityService | None
     continuity_state_repo=None,  # ContinuityStateRepository | None
+    activity_monitor=None,  # ActivityMonitor | None
 ) -> APIRouter:
     router = APIRouter()
 
@@ -715,24 +716,39 @@ def create_router(
 
     @router.post("/projects/from-idea")
     def create_from_idea(body: FromIdeaRequest) -> dict:
-        """Synchronous idea → WC pre-production → canonical import → enrichment.
-
-        Blocks until the full pipeline completes. No background job.
-        """
+        """Wind Comic → canonical import. Enrichment is a separate explicit action."""
         if preproduction_service is None:
             raise HTTPException(status_code=501, detail="M4 preproduction not available")
-        result = preproduction_service.create_from_idea(
-            body.idea, style=body.style, aspect=body.aspect, language=body.language,
-        )
-        return {
-            "project_id": result.project_id,
-            "wc_project_id": result.wc_project_id,
-            "scenes_imported": result.import_result.scenes_imported,
-            "characters_imported": result.import_result.characters_imported,
-            "beats_created": result.enrichment_result.beats_created,
-            "shots_created": result.enrichment_result.shots_created,
-            "plans_created": result.enrichment_result.plans_created,
-        }
+        monitor = activity_monitor
+        if monitor and not monitor.start("creating_project", "wind_comic", body.idea[:80]):
+            raise HTTPException(status_code=409, detail="Another operation is in progress")
+        try:
+            if monitor:
+                monitor.update_stage("wind_comic", "Running Wind Comic pre-production...")
+            result = preproduction_service.create_from_idea(
+                body.idea, style=body.style, aspect=body.aspect, language=body.language,
+            )
+            if monitor:
+                monitor.complete(f"Project {result.project_id} created")
+            # Release WC Ollama model if safe
+            try:
+                from film_director.services.resource_cleanup import unload_ollama_models
+                unload_ollama_models()
+            except Exception:
+                pass
+            return {
+                "project_id": result.project_id,
+                "wc_project_id": result.wc_project_id,
+                "scenes_imported": result.import_result.scenes_imported,
+                "characters_imported": result.import_result.characters_imported,
+                "beats_created": 0,
+                "shots_created": 0,
+                "plans_created": 0,
+            }
+        except Exception as e:
+            if monitor:
+                monitor.fail(str(e)[:200])
+            raise
 
     # ------------------------------------------------------------------
     # M5 — Reference Management
@@ -1193,6 +1209,83 @@ def create_router(
         except ContinuityError as e:
             raise HTTPException(status_code=409, detail=e.message)
         return state.model_dump()
+
+    # ------------------------------------------------------------------
+    # Activity + System
+    # ------------------------------------------------------------------
+
+    @router.get("/activity")
+    def get_activity() -> dict:
+        if activity_monitor is None:
+            return {"status": "idle", "operation": "", "stage": "", "detail": "", "elapsed_seconds": 0, "error": "", "stages_completed": []}
+        return activity_monitor.get_state()
+
+    @router.post("/activity/reset")
+    def reset_activity() -> dict:
+        if activity_monitor:
+            activity_monitor.reset()
+        return {"status": "idle"}
+
+    @router.get("/system/status")
+    def get_system_status() -> dict:
+        from film_director.services.resource_cleanup import get_gpu_status, get_ollama_status
+        return {
+            "gpu": get_gpu_status(),
+            "ollama": get_ollama_status(),
+        }
+
+    @router.post("/system/free-memory")
+    def free_memory() -> dict:
+        """Manually free unused GPU memory from Ollama + ComfyUI."""
+        if activity_monitor and activity_monitor.is_busy:
+            raise HTTPException(status_code=409, detail="Cannot free memory while an operation is active")
+        from film_director.services.resource_cleanup import unload_ollama_models, free_comfyui_memory
+        return {
+            "ollama": unload_ollama_models(),
+            "comfyui": free_comfyui_memory(),
+        }
+
+    @router.get("/projects/{project_id}/readiness")
+    def get_readiness(project_id: str) -> dict:
+        """Check generation readiness for a project."""
+        if project_repo is None or shot_repo is None:
+            raise HTTPException(status_code=501)
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        shots = shot_repo.get_current_shots_by_project(project_id)
+        refs = ref_asset_repo.list_by_project(project_id) if ref_asset_repo else []
+        has_char = any(r.kind.value == "character_face" and r.status.value == "approved" and r.source_state.value == "current" for r in refs)
+        has_env = any(r.status.value == "approved" and r.source_state.value == "current" and r.kind.value in ("storyboard",) for r in refs)
+        has_shots = len(shots) > 0
+        approved_takes = 0
+        if take_repo:
+            for s in shots:
+                t = take_repo.get_approved_for_shot(s.id)
+                if t:
+                    approved_takes += 1
+        missing = []
+        if not has_shots:
+            missing.append("Shot plan (no shots)")
+        if not has_char:
+            missing.append("Character reference")
+        if not has_env:
+            missing.append("Environment reference")
+        ready = has_shots and has_char and has_env
+        next_action = "Review and correct the shot plan." if not has_shots else \
+                      "Prepare character and environment references." if not ready else \
+                      "Generate Shot 1." if approved_takes == 0 else \
+                      f"Review/approve Takes ({approved_takes}/{len(shots)} approved)."
+        return {
+            "ready": ready,
+            "shot_count": len(shots),
+            "has_character_ref": has_char,
+            "has_environment_ref": has_env,
+            "approved_takes": approved_takes,
+            "total_shots": len(shots),
+            "missing": missing,
+            "next_action": next_action,
+        }
 
     # ------------------------------------------------------------------
     # P2 — Scene Assembly

@@ -228,12 +228,10 @@ class TestSuccessPath:
         assert result.import_result.scenes_imported == 1
         assert result.import_result.characters_imported == 1
 
-    def test_enrichment_result_preserved(self):
+    def test_enrichment_not_run_during_create(self):
         svc = _service()
         result = svc.create_from_idea("A detective story")
-        assert result.enrichment_result.beats_created == 1
-        assert result.enrichment_result.shots_created == 1
-        assert result.enrichment_result.plans_created == 1
+        assert result.enrichment_result is None
 
     def test_idea_passed_to_wc_client(self):
         client = FakeWCClient(result=_wc_result())
@@ -254,11 +252,12 @@ class TestSuccessPath:
         svc.create_from_idea("A story")
         assert import_svc.calls[0] == ("import_project", "wc-proj-1")
 
-    def test_canonical_project_id_passed_to_enrich(self):
+    def test_enrichment_not_called_during_create(self):
+        """Enrichment is now an explicit operator action, not automatic."""
         enrich_svc = FakeEnrichmentService(result=_enrichment_result())
         svc = _service(enrich_svc=enrich_svc)
         svc.create_from_idea("A story")
-        assert enrich_svc.calls[0] == ("enrich_project", "proj-canonical-1")
+        assert len(enrich_svc.calls) == 0
 
 
 # ===========================================================================
@@ -308,8 +307,8 @@ class TestCallOrder:
         svc.create_from_idea("A story")
         assert order.index("read") < order.index("import")
 
-    def test_import_before_enrich(self):
-        """Import must precede enrichment."""
+    def test_import_completes_without_enrich(self):
+        """Import completes without enrichment (enrichment is now explicit)."""
         order: list[str] = []
 
         class OrderImport(FakeImportService):
@@ -327,7 +326,8 @@ class TestCallOrder:
             enrich_svc=OrderEnrich(result=_enrichment_result()),
         )
         svc.create_from_idea("A story")
-        assert order.index("import") < order.index("enrich")
+        assert "import" in order
+        assert "enrich" not in order  # enrichment no longer automatic
 
 
 # ===========================================================================
@@ -461,22 +461,25 @@ class TestImportEnrichFailures:
         with pytest.raises(NormalizationError, match="Import failed"):
             svc.create_from_idea("A story")
 
-    def test_enrichment_failure_propagated(self):
+    def test_enrichment_not_triggered_during_create(self):
+        """Enrichment errors cannot propagate because enrichment is not called."""
         enrich_svc = FakeEnrichmentService(error=EnrichmentError("LLM failed"))
         svc = _service(enrich_svc=enrich_svc)
-        with pytest.raises(EnrichmentError, match="LLM failed"):
-            svc.create_from_idea("A story")
+        # Should succeed — enrichment is not called
+        result = svc.create_from_idea("A story")
+        assert result.project_id == "proj-canonical-1"
 
-    def test_human_edit_conflict_propagated(self):
+    def test_human_edit_conflict_not_triggered_during_create(self):
+        """Human edit conflicts cannot occur during create (no enrichment)."""
         enrich_svc = FakeEnrichmentService(
             error=HumanEditConflictError("Human edits exist"),
         )
         svc = _service(enrich_svc=enrich_svc)
-        with pytest.raises(HumanEditConflictError):
-            svc.create_from_idea("A story")
+        result = svc.create_from_idea("A story")
+        assert result.project_id == "proj-canonical-1"
 
-    def test_no_force_overwrite_of_human_edits(self):
-        """Service must NOT call enrich with force=True to bypass conflict."""
+    def test_enrich_not_called_during_create(self):
+        """Enrichment is now explicit — create_from_idea must not call it."""
         calls_with_args: list[dict] = []
 
         class SpyEnrich(FakeEnrichmentService):
@@ -486,9 +489,7 @@ class TestImportEnrichFailures:
 
         svc = _service(enrich_svc=SpyEnrich(result=_enrichment_result()))
         svc.create_from_idea("A story")
-        # enrich_project should be called with no extra kwargs (no force=True)
-        for call_kwargs in calls_with_args:
-            assert "force" not in call_kwargs
+        assert len(calls_with_args) == 0
 
     def test_no_enrich_when_import_fails(self):
         enrich_svc = FakeEnrichmentService(result=_enrichment_result())

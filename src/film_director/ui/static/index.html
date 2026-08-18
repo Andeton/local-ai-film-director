@@ -79,6 +79,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
     <div class="project-selector" id="project-selector"></div>
     <ul class="shot-list" id="shot-list"></ul>
     <div id="scene-assembly" style="padding:8px;border-top:1px solid var(--border);margin-top:4px;"></div>
+    <div id="system-bar" style="padding:8px;border-top:1px solid var(--border);margin-top:auto;font-size:10px;"></div>
   </div>
   <div class="main" id="main-panel"><div class="loading">Select a project</div></div>
   <div class="panel" id="panel"><div class="loading">Select a shot</div></div>
@@ -232,11 +233,7 @@ function showShotPlanEditor(){
   }
   if(!currentShots.length)html+='<div style="color:var(--text2);font-size:12px;padding:16px">No shots yet. Click + Add Shot or run enrichment.</div>';
   panel.innerHTML=html;
-  document.getElementById('panel').innerHTML=`
-    <div class="panel-title">Pre-Production</div>
-    <div class="setting"><label>Project</label><div class="val">${currentProject.id}</div></div>
-    <div class="setting"><label>Shots</label><div class="val">${currentShots.length}</div></div>
-    <div style="margin-top:12px"><button class="btn btn-primary" style="width:100%;font-size:11px" onclick="enrichProject()">Enrich with LLM</button><div style="font-size:9px;color:var(--text2);margin-top:3px">Runs qwen3:14b beat/shot generation. Results may need manual correction.</div></div>`;
+  showReadiness();
   selectedShotId=null;renderShotList();
 }
 
@@ -352,6 +349,50 @@ function onSeedChange(v){const n=parseInt(v);draftSeedValue=isNaN(n)?null:n;refr
 async function approveTake(id){try{await api(`/takes/${id}/approve`,{method:'POST'});toast('Approved');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
 async function rejectTake(id){try{await api(`/takes/${id}/reject`,{method:'POST'});toast('Rejected');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
 async function doGenerate(sid){const body={};if(draftPrompt!==null)body.prompt_override=draftPrompt;if(draftDuration!==null)body.duration_sec=draftDuration;if(draftSeedMode==='explicit'&&draftSeedValue!==null)body.seed=draftSeedValue;toast('Generating...');try{await api(`/shots/${sid}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast('Done');await loadShots();await selectShot(sid)}catch(e){toast('Failed: '+e.message,false)}}
+
+// Activity + System polling
+async function pollSystem(){
+  try{
+    const [act,sys]=await Promise.all([api('/activity'),api('/system/status')]);
+    const bar=document.getElementById('system-bar');
+    const gpu=sys.gpu||{};const oll=sys.ollama||{};
+    let actHtml='';
+    if(act.status==='running'){
+      actHtml=`<div style="color:var(--yellow);font-weight:700">${esc(act.operation)} · ${esc(act.stage)}</div><div>${act.elapsed_seconds.toFixed(0)}s</div>`;
+      if(act.stages_completed.length)actHtml+=`<div style="color:var(--green)">${act.stages_completed.join(' → ')} ✓</div>`;
+    }else if(act.status==='failed'){
+      actHtml=`<div style="color:var(--red)">FAILED: ${esc(act.error).substring(0,60)}</div><button class="btn-link" onclick="api('/activity/reset',{method:'POST'})">Dismiss</button>`;
+    }else if(act.status==='complete'){
+      actHtml=`<div style="color:var(--green)">${esc(act.detail).substring(0,50)} ✓</div>`;
+    }
+    bar.innerHTML=`${actHtml}<div style="margin-top:4px;color:var(--text2)">GPU: ${gpu.vram_used_gb||'?'}/${gpu.vram_total_gb||'?'}GB · Ollama: ${oll.status||'?'}</div><button class="btn-link" style="margin-top:2px" onclick="freeMemory()">Free memory</button>`;
+  }catch(e){}
+}
+async function freeMemory(){try{const r=await api('/system/free-memory',{method:'POST'});toast('Memory freed')}catch(e){toast(e.message,false)}}
+setInterval(pollSystem,2000);pollSystem();
+
+// Readiness in panel
+async function showReadiness(){
+  if(!currentProject)return;
+  try{
+    const r=await api(`/projects/${currentProject.id}/readiness`);
+    const panel=document.getElementById('panel');
+    const missing=r.missing.length?r.missing.map(m=>`<div style="color:var(--red)">• ${esc(m)}</div>`).join(''):'';
+    panel.innerHTML=`
+      <div class="panel-title">Generation Readiness</div>
+      <div style="font-size:12px;font-weight:700;color:${r.ready?'var(--green)':'var(--yellow)'};">${r.ready?'READY':'NOT READY'}</div>
+      <div style="margin:6px 0">${missing}</div>
+      <div class="panel-title">Next Action</div>
+      <div style="font-size:12px">${esc(r.next_action)}</div>
+      <div class="panel-title" style="margin-top:12px">Project</div>
+      <div class="setting"><label>Shots</label><div class="val">${r.shot_count}</div></div>
+      <div class="setting"><label>Character Ref</label><div class="val">${r.has_character_ref?'✓ Ready':'✗ Missing'}</div></div>
+      <div class="setting"><label>Environment Ref</label><div class="val">${r.has_environment_ref?'✓ Ready':'✗ Missing'}</div></div>
+      <div class="setting"><label>Approved Takes</label><div class="val">${r.approved_takes}/${r.total_shots}</div></div>
+      <div style="margin-top:12px"><button class="btn btn-primary" style="width:100%;font-size:11px" onclick="enrichProject()">Enrich with LLM</button><div style="font-size:9px;color:var(--text2);margin-top:3px">Optional. Local LLM may need manual correction.</div></div>
+    `;
+  }catch(e){}
+}
 
 init();
 </script>

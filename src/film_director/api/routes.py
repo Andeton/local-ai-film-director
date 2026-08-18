@@ -387,6 +387,144 @@ def create_router(
     # M3 — Generation
     # ------------------------------------------------------------------
 
+    @router.get("/shots/{shot_id}/generation-preview")
+    def get_generation_preview(shot_id: str) -> dict:
+        """Dry-run preview of what generation would submit.
+
+        Uses production resolution logic but does NOT submit to ComfyUI.
+        Returns workflow, prompt, references, duration, seed policy.
+        """
+        if generation_service is None or plan_repo is None or shot_repo is None:
+            raise HTTPException(status_code=501, detail="Generation not available")
+        from film_director.generation.parameter_resolver import _seconds_to_grid_frames
+
+        shot = shot_repo.get_shot(shot_id)
+        if shot is None:
+            raise HTTPException(status_code=404, detail="Shot not found")
+        plan = plan_repo.get_current_plan_by_shot(shot_id)
+        if plan is None:
+            raise HTTPException(status_code=404, detail="No generation plan")
+
+        # Determine project
+        project_id = None
+        with generation_service._db.connection() as conn:
+            row = conn.execute(
+                "SELECT seq.project_id FROM shots s "
+                "JOIN beats b ON s.beat_id = b.id "
+                "JOIN scenes sc ON b.scene_id = sc.id "
+                "JOIN sequences seq ON sc.sequence_id = seq.id "
+                "WHERE s.id = ?", (shot_id,),
+            ).fetchone()
+            if row:
+                project_id = row["project_id"]
+
+        # Determine shot index for continuity
+        all_shots = shot_repo.get_current_shots_by_project(project_id) if project_id else []
+        all_shots.sort(key=lambda s: s.order_index)
+        shot_idx = next((i for i, s in enumerate(all_shots) if s.id == shot_id), 0)
+        is_head = shot_idx == 0
+
+        # Continuity check
+        predecessor_shot = all_shots[shot_idx - 1] if shot_idx > 0 else None
+        predecessor_approved = None
+        predecessor_frame_url = None
+        continuity_blocked = False
+        if predecessor_shot and take_service:
+            pred_take = take_service.get_approved_for_shot(predecessor_shot.id)
+            if pred_take:
+                predecessor_approved = {
+                    "take_id": pred_take.id,
+                    "shot_id": predecessor_shot.id,
+                    "shot_index": shot_idx - 1,
+                }
+                if pred_take.last_frame_path:
+                    predecessor_frame_url = f"/media/{pred_take.last_frame_path}"
+            else:
+                continuity_blocked = True
+
+        # Resolve references
+        refs = ref_asset_repo.list_by_project(project_id) if project_id and ref_asset_repo else []
+        char_ref = next((r for r in refs if r.kind.value == "character_face" and r.status.value == "approved" and r.source_state.value == "current"), None)
+        env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "storyboard"), None)
+
+        # Workflow selection
+        if is_head:
+            workflow_id = "h3_r2v_v2"
+            workflow_version = "2.0.0"
+        else:
+            workflow_id = "h3_r2v_image_pack_v1"
+            workflow_version = "1.0.0"
+
+        # Duration resolution
+        frames = _seconds_to_grid_frames(plan.duration_sec)
+        actual_duration = round(frames / 24.0, 3)
+
+        # Build prompt using existing builder
+        prompt_text = ""
+        existing_prompt = None
+        try:
+            existing_prompt = generation_service._prompt_repo.get_current_prompt(
+                shot.id, shot.version, plan.id, plan.version,
+            )
+        except Exception:
+            pass
+        if existing_prompt:
+            prompt_text = existing_prompt.rendered_prompt_text
+
+        # Pictures
+        pictures = []
+        if char_ref:
+            pictures.append({
+                "picture_index": 1, "role": "CHARACTER IDENTITY",
+                "reference_id": char_ref.id, "kind": char_ref.kind.value,
+                "status": char_ref.status.value, "source_state": char_ref.source_state.value,
+                "thumbnail_url": f"/media/{char_ref.managed_path}",
+            })
+        if env_ref:
+            pictures.append({
+                "picture_index": 2, "role": "ENVIRONMENT",
+                "reference_id": env_ref.id, "kind": env_ref.kind.value,
+                "status": env_ref.status.value, "source_state": env_ref.source_state.value,
+                "thumbnail_url": f"/media/{env_ref.managed_path}",
+            })
+        if not is_head:
+            cont_pic = {
+                "picture_index": 3, "role": "CONTINUITY FRAME",
+                "reference_id": None, "kind": "continuity",
+                "status": "blocked" if continuity_blocked else "available",
+                "source_state": "predecessor",
+                "thumbnail_url": predecessor_frame_url,
+            }
+            if predecessor_approved:
+                cont_pic["reference_id"] = predecessor_approved["take_id"]
+                cont_pic["source_label"] = f"Shot {predecessor_approved['shot_index'] + 1} approved Take"
+            else:
+                cont_pic["source_label"] = f"BLOCKED — approve Shot {shot_idx} first"
+            pictures.append(cont_pic)
+
+        return {
+            "shot_id": shot_id,
+            "shot_index": shot_idx,
+            "is_head": is_head,
+            "workflow_id": workflow_id,
+            "workflow_version": workflow_version,
+            "strategy": plan.strategy,
+            "continuity_mode": plan.continuity_mode,
+            "duration_sec": plan.duration_sec,
+            "resolved_frames": frames,
+            "resolved_duration_sec": actual_duration,
+            "fps": 24,
+            "aspect": "16:9",
+            "resolution": "1376x768",
+            "seed_policy": plan.seed_policy,
+            "seed": plan.seed,
+            "prompt_text": prompt_text,
+            "pictures": pictures,
+            "continuity_blocked": continuity_blocked,
+            "predecessor_shot_index": shot_idx - 1 if shot_idx > 0 else None,
+            "can_generate": not continuity_blocked,
+        }
+
     @router.post("/shots/{shot_id}/generate")
     def generate_shot(shot_id: str) -> dict:
         """Synchronous M3 generation: Shot → H3 R2V → Take.

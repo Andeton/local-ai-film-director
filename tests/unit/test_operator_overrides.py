@@ -150,6 +150,25 @@ class TestGenerateEndpoint:
         assert r.status_code in (422, 500, 502, 503)
 
 
+class TestSeedValidation:
+    def test_overflow_seed_rejected_422(self, client):
+        """Explicit seed > INT64_MAX must be rejected before DB insert."""
+        overflow = (1 << 63)  # 9223372036854775808
+        r = client.post("/shots/s1/generate", json={"seed": overflow})
+        assert r.status_code == 422
+
+    def test_negative_seed_rejected_422(self, client):
+        r = client.post("/shots/s1/generate", json={"seed": -1})
+        assert r.status_code == 422
+
+    def test_max_legal_seed_accepted(self, client):
+        """INT64_MAX should not be rejected by validation."""
+        max_seed = (1 << 63) - 1
+        r = client.post("/shots/s1/generate", json={"seed": max_seed})
+        # Will fail at ComfyUI/ref resolution, but NOT at seed validation
+        assert r.status_code != 422 or "Seed" not in r.json().get("detail", "")
+
+
 class TestMediaSafety:
     def test_path_traversal_rejected(self, client):
         r = client.get("/media/../../../etc/passwd")

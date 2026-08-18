@@ -558,9 +558,15 @@ def create_router(
         """
         if generation_service is None:
             raise HTTPException(status_code=501, detail="M3 generation not available")
+        _SQLITE_INT64_MAX = (1 << 63) - 1
         kwargs: dict = {}
         if body:
             if body.seed is not None:
+                if body.seed < 0 or body.seed > _SQLITE_INT64_MAX:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Seed must be 0..{_SQLITE_INT64_MAX}, got {body.seed}",
+                    )
                 kwargs["seed_override"] = body.seed
             if body.prompt_override is not None:
                 kwargs["prompt_override"] = body.prompt_override

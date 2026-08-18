@@ -99,8 +99,8 @@ class ParameterResolver:
                     detail="seed_policy=fixed, seed=None",
                 )
             return plan.seed
-        # random or vary_per_take: generate a new seed
-        return secrets.randbelow(_SEED_MAX + 1)
+        # random or vary_per_take: generate a new seed within SQLite int64 safe range
+        return secrets.randbelow(_SAFE_SEED_MAX + 1)
 
     def resolve_duration(
         self, duration_sec: float, workflow_def: WorkflowDefinition

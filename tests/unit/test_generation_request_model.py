@@ -206,10 +206,10 @@ def test_db_take_unique_generation_request_id_constraint():
                  "rendered text", "current", 1, "2024-01-01"),
             )
             conn.execute(
-                "INSERT INTO generation_requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO generation_requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 ("req-1", "shot-1", 1, "plan-1", 1, "prompt-1", 1,
                  "wf-h3", "v1", VALID_SHA256, 1, "[]", "[]", 42,
-                 None, "pending", "", "", None),
+                 None, None, "pending", "", "", None),
             )
             conn.execute(
                 "INSERT INTO takes VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -241,10 +241,10 @@ def test_db_multiple_prompts_and_requests_for_same_shot():
                      f"rendered text {i}", "current" if i == 3 else "stale", i, "2024-01-01"),
                 )
                 conn.execute(
-                    "INSERT INTO generation_requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO generation_requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (f"req-{i}", "shot-1", i, "plan-1", 1, f"prompt-{i}", i,
                      "wf-h3", "v1", VALID_SHA256, i, "[]", "[]", 42 + i,
-                     None, "pending", "", "", None),
+                     None, None, "pending", "", "", None),
                 )
 
         with db.connection() as conn:

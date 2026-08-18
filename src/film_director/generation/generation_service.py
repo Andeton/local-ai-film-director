@@ -3,16 +3,23 @@
 M3 baseline: one-shot synchronous pipeline.
 M5.E evolution: ReferenceSelector + ReferenceAsset → count-based workflow
 selection (v1/v2), asset-provenance reference_snapshot.
+M7.C evolution: continuity-aware — chain heads use R2V, downstream shots
+use FLF with predecessor's approved Take's last frame.
 """
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import os
 import uuid
 from datetime import datetime, timezone
 
+from film_director.continuity.continuity_resolver import ContinuityResolver
+from film_director.continuity.continuity_service import ContinuityService
+from film_director.continuity.identity_resolver import IdentityResolver
 from film_director.errors import (
+    ContinuityError,
     GenerationError,
     MediaProcessingError,
     ReferenceResolutionError,
@@ -37,6 +44,7 @@ from film_director.models.reference import ReferenceKind
 from film_director.persistence.database import Database
 from film_director.persistence.repositories import (
     CharacterRepository,
+    ContinuityStateRepository,
     GenerationPlanRepository,
     GenerationRequestRepository,
     H3PromptRepository,
@@ -80,6 +88,10 @@ class GenerationService:
         self._workflow_resolver = WorkflowResolver(project_root=project_root)
         self._param_resolver = ParameterResolver()
 
+        # M7: continuity service + identity resolver
+        self._continuity_service = ContinuityService(db, storage_root)
+        self._identity_resolver = IdentityResolver(db)
+
         self._timeout = generation_timeout
         self._finalize_callback = None  # M6: set by QueueWorker for atomic finalization
 
@@ -122,72 +134,190 @@ class GenerationService:
                 f"Plan shot_version={plan.shot_version} != shot.version={shot.version}"
             )
 
-        if plan.strategy != "REFERENCE_TO_VIDEO":
+        if plan.strategy not in ("REFERENCE_TO_VIDEO", "FIRST_LAST_FRAME"):
             raise UnsupportedStrategyError(
-                f"Strategy {plan.strategy!r} not supported in M3",
+                f"Strategy {plan.strategy!r} not supported",
                 detail=f"shot_id={shot_id}",
             )
 
-        # Step 3: Resolve characters + reference assets
+        # Step 3: Resolve project context
         project_id = self._find_project_id(shot_id)
-        characters = self._char_repo.get_characters_by_project(project_id)
-        all_assets = self._ref_asset_repo.list_by_project(project_id)
 
-        # Step 4: M5 production path — ReferenceSelector + asset-based resolution
-        selected_assets = self._ref_selector.select(
-            shot=shot,
-            project_id=project_id,
-            kind=ReferenceKind.CHARACTER_BODY,
-            characters=characters,
-            assets=all_assets,
-        )
+        # Step 4: M7 continuity resolution — determines chain head vs downstream
+        continuity_input = self._continuity_service.resolve_for_generation(shot_id)
+        is_continuity_shot = continuity_input is not None
 
-        # Step 5: Count-based workflow selection (v1 for 1 ref, v2 for 2)
-        workflow_def = self._workflow_resolver.resolve_for_reference_count(
-            len(selected_assets),
-        )
+        if is_continuity_shot:
+            # ---- DOWNSTREAM CONTINUITY PATH (FLF) ----
+            import dataclasses as _dc
+            from film_director.continuity.continuity_binding import ContinuityBinding
 
-        # Step 6: Build H3ReferenceBindings from selected assets
-        resolved_bindings = self._ref_resolver.resolve_from_assets(
-            shot, selected_assets, characters,
-        )
+            # Select FLF workflow
+            workflow_def = self._workflow_resolver.resolve_for_continuity(
+                has_continuity_frame=True, reference_count=0,
+            )
 
-        # Step 7: Build or reuse H3 prompt
-        prompt = self._prompt_repo.get_current_prompt(
-            shot.id, shot.version, plan.id, plan.version,
-        )
-        if prompt is None:
-            prompt = self._prompt_builder.build(shot, plan, resolved_bindings)
-            self._prompt_repo.save_prompt(prompt)
+            # Resolve identity contexts from approved reference provenance
+            identity_contexts = self._identity_resolver.resolve_for_subjects(
+                shot.subjects or [], project_id,
+            )
 
-        # Step 8: Load and verify workflow template
-        template = self._workflow_resolver.load_template(workflow_def)
+            # Build identity-locked continuity prompt (no <Picture N> tags)
+            prompt = self._prompt_repo.get_current_prompt(
+                shot.id, shot.version, plan.id, plan.version,
+            )
+            if prompt is None:
+                prompt = self._prompt_builder.build_continuity_prompt(
+                    shot, plan, identity_contexts=identity_contexts,
+                )
+                self._prompt_repo.save_prompt(prompt)
 
-        # Step 9: Upload references in binding order
-        uploaded_bindings = self._upload_references(resolved_bindings)
+            # Load and verify FLF workflow template
+            template = self._workflow_resolver.load_template(workflow_def)
 
-        # Step 10-11: Resolve seed, duration, aspect
-        if seed_override is not None:
-            seed = seed_override
+            # Upload the predecessor's last frame
+            frame_ext = os.path.splitext(continuity_input.frame_path)[1]
+            frame_filename = f"cont_{uuid.uuid4().hex[:8]}{frame_ext}"
+            uploaded_frame_name = self._comfyui.upload_image(
+                continuity_input.frame_path, frame_filename,
+            )
+
+            # Build ContinuityBinding with uploaded filename
+            binding = ContinuityBinding(
+                continuity_state_id=continuity_input.continuity_state_id,
+                upstream_shot_id=continuity_input.upstream_shot_id,
+                upstream_take_id=continuity_input.upstream_take_id,
+                upstream_take_number=continuity_input.upstream_take_number,
+                local_path=continuity_input.frame_path,
+                content_sha256=continuity_input.frame_sha256,
+                continuity_revision=continuity_input.continuity_revision,
+                continuity_fingerprint=continuity_input.continuity_fingerprint,
+                uploaded_filename=uploaded_frame_name,
+            )
+
+            # Resolve seed
+            if seed_override is not None:
+                seed = seed_override
+            else:
+                seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+
+            output_prefix = f"flf/{shot_id}/{uuid.uuid4().hex[:8]}"
+
+            # Build FLF injections
+            injections = self._param_resolver.build_continuity_injections(
+                plan=plan,
+                prompt_text=prompt.rendered_prompt_text,
+                workflow_def=workflow_def,
+                continuity_binding=binding,
+                seed=seed,
+                output_prefix=output_prefix,
+            )
+
+            # Build continuity snapshot for immutable request
+            continuity_snapshot = {
+                "continuity_state_id": binding.continuity_state_id,
+                "upstream_shot_id": binding.upstream_shot_id,
+                "upstream_take_id": binding.upstream_take_id,
+                "upstream_take_number": binding.upstream_take_number,
+                "upstream_last_frame_managed_path": os.path.relpath(
+                    binding.local_path, self._storage_root,
+                ),
+                "upstream_last_frame_sha256": binding.content_sha256,
+                "continuity_revision": binding.continuity_revision,
+                "continuity_fingerprint": binding.continuity_fingerprint,
+                "uploaded_filename": binding.uploaded_filename,
+                "workflow_definition_id": workflow_def.id,
+                "workflow_definition_version": workflow_def.version,
+                "workflow_template_fingerprint": workflow_def.template_fingerprint,
+                "first_frame_node_id": workflow_def.parameter_mappings["first_frame"]["node_id"],
+                "first_frame_field": workflow_def.parameter_mappings["first_frame"]["field"],
+                "identity_context": [
+                    {
+                        "character_id": ic.character_id,
+                        "character_name": ic.character_name,
+                        "identity_text_source": ic.identity_text_source,
+                        "reference_asset_id": ic.reference_asset_id,
+                        "reference_kind": ic.reference_kind,
+                        "reference_source": ic.reference_source,
+                        "reference_content_sha256": ic.reference_content_sha256,
+                        "reference_generation_request_id": ic.reference_generation_request_id,
+                        "identity_text": ic.identity_text,
+                        "negative_identity_text": ic.negative_identity_text,
+                    }
+                    for ic in identity_contexts
+                ],
+            }
+
+            # No character reference bindings for FLF
+            uploaded_bindings = []
+
+            # Apply injections
+            submission_workflow = self._param_resolver.apply_injections(template, injections)
+
+            # Persist continuity state
+            scene_id = None
+            with self._db.connection() as conn:
+                scene_id = ContinuityResolver.get_scene_id_for_shot(shot_id, conn)
+            if scene_id:
+                self._continuity_service.persist_state(shot_id, scene_id, continuity_input)
+
         else:
-            seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+            # ---- CHAIN HEAD PATH (R2V) — unchanged from M5.E ----
+            if plan.strategy != "REFERENCE_TO_VIDEO":
+                raise UnsupportedStrategyError(
+                    f"Strategy {plan.strategy!r} not supported for chain head",
+                    detail=f"shot_id={shot_id}",
+                )
 
-        # Step 12: Build output prefix
-        output_prefix = f"m3/{shot_id}/{uuid.uuid4().hex[:8]}"
+            characters = self._char_repo.get_characters_by_project(project_id)
+            all_assets = self._ref_asset_repo.list_by_project(project_id)
 
-        # Build one authoritative injection list
-        injections = self._param_resolver.build_injections(
-            plan=plan,
-            shot=shot,
-            prompt=prompt,
-            workflow_def=workflow_def,
-            uploaded_bindings=uploaded_bindings,
-            seed=seed,
-            output_prefix=output_prefix,
-        )
+            selected_assets = self._ref_selector.select(
+                shot=shot,
+                project_id=project_id,
+                kind=ReferenceKind.CHARACTER_BODY,
+                characters=characters,
+                assets=all_assets,
+            )
 
-        # Step 13: Apply injections to template copy
-        submission_workflow = self._param_resolver.apply_injections(template, injections)
+            workflow_def = self._workflow_resolver.resolve_for_reference_count(
+                len(selected_assets),
+            )
+
+            resolved_bindings = self._ref_resolver.resolve_from_assets(
+                shot, selected_assets, characters,
+            )
+
+            prompt = self._prompt_repo.get_current_prompt(
+                shot.id, shot.version, plan.id, plan.version,
+            )
+            if prompt is None:
+                prompt = self._prompt_builder.build(shot, plan, resolved_bindings)
+                self._prompt_repo.save_prompt(prompt)
+
+            template = self._workflow_resolver.load_template(workflow_def)
+
+            uploaded_bindings = self._upload_references(resolved_bindings)
+
+            if seed_override is not None:
+                seed = seed_override
+            else:
+                seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+
+            output_prefix = f"m3/{shot_id}/{uuid.uuid4().hex[:8]}"
+
+            injections = self._param_resolver.build_injections(
+                plan=plan,
+                shot=shot,
+                prompt=prompt,
+                workflow_def=workflow_def,
+                uploaded_bindings=uploaded_bindings,
+                seed=seed,
+                output_prefix=output_prefix,
+            )
+
+            submission_workflow = self._param_resolver.apply_injections(template, injections)
+            continuity_snapshot = None
 
         # ---------------------------------------------------------------
         # PHASE 2: Request creation + execution (failures persist request)
@@ -228,6 +358,7 @@ class GenerationService:
                 for b in uploaded_bindings
             ],
             seed=seed,
+            continuity_snapshot=continuity_snapshot,
             status="pending",
         )
 
@@ -425,6 +556,220 @@ class GenerationService:
                 cleanup_dir(final_dir)
             raise GenerationError(
                 f"Recovery finalization failed: {e}",
+                detail=f"request_id={request_id}",
+            ) from e
+
+    # -------------------------------------------------------------------
+    # Image-pack generation (M7.G.C)
+    # -------------------------------------------------------------------
+
+    def generate_with_image_pack(
+        self,
+        shot_id: str,
+        character_binding: "H3ReferenceBinding",
+        environment_binding: "H3ReferenceBinding",
+        continuity_binding: "H3ReferenceBinding",
+        prop_binding: "H3ReferenceBinding | None" = None,
+        prompt_text: str = "",
+        take_number: int = 1,
+        seed_override: int | None = None,
+        recipe_snapshot: dict | None = None,
+    ) -> Take:
+        """Generate a shot using the H3 image-pack recipe with 3-4 references.
+
+        Bindings must be in semantic order:
+        1. character_binding — Picture 1 (identity anchor)
+        2. environment_binding — Picture 2 (environment view)
+        3. continuity_binding — Picture 3 (predecessor frame)
+        4. prop_binding — Picture 4 (optional prop)
+
+        This is the authoritative ordered list driving prompt tags, upload
+        order, workflow slots, and GenerationRequest snapshot.
+        """
+        from film_director.generation.h3_types import H3ReferenceBinding
+
+        # Load shot + plan
+        shot = self._shot_repo.get_shot(shot_id)
+        if shot is None:
+            raise GenerationError(f"Shot not found: {shot_id}")
+        plan = self._plan_repo.get_current_plan_by_shot(shot_id)
+        if plan is None:
+            raise GenerationError(f"No current GenerationPlan for shot {shot_id}")
+
+        project_id = self._find_project_id(shot_id)
+
+        # Resolve workflow
+        workflow_def = self._workflow_resolver.resolve_image_pack()
+        template = self._workflow_resolver.load_template(workflow_def)
+
+        # Assemble ordered bindings
+        ordered_bindings = [character_binding, environment_binding, continuity_binding]
+        if prop_binding is not None:
+            ordered_bindings.append(prop_binding)
+
+        # Upload references in semantic order
+        uploaded_bindings = self._upload_references(ordered_bindings)
+
+        # Resolve seed
+        if seed_override is not None:
+            seed = seed_override
+        else:
+            seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+
+        output_prefix = f"imgpack/{shot_id}/{uuid.uuid4().hex[:8]}"
+
+        # Build injections — same pattern as existing R2V
+        injections = self._param_resolver.build_injections(
+            plan=plan,
+            shot=shot,
+            prompt=H3PromptV1(
+                id=f"ip_{uuid.uuid4().hex[:12]}",
+                shot_id=shot_id,
+                generation_plan_id=plan.id,
+                source_shot_version=shot.version,
+                source_generation_plan_version=plan.version,
+                subject_definitions="",
+                summary="",
+                retention_analysis="",
+                detailed_description="",
+                overall_soundscape="",
+                non_diegetic_music="",
+                rendered_prompt_text=prompt_text,
+                status="current",
+                version=1,
+                created_at=datetime.now(timezone.utc).isoformat(),
+            ),
+            workflow_def=workflow_def,
+            uploaded_bindings=uploaded_bindings,
+            seed=seed,
+            output_prefix=output_prefix,
+        )
+
+        submission_workflow = self._param_resolver.apply_injections(template, injections)
+
+        # Build reference snapshot with recipe metadata
+        reference_snapshot = [
+            {
+                "reference_asset_id": b.reference_asset_id,
+                "reference_kind": b.reference_kind,
+                "subject_index": b.subject_index,
+                "character_id": b.character_id,
+                "character_name": b.character_name,
+                "appearance": b.appearance,
+                "picture_index": b.picture_index,
+                "local_path": b.local_path,
+                "content_sha256": b.content_sha256,
+                "uploaded_filename": b.uploaded_filename,
+            }
+            for b in uploaded_bindings
+        ]
+
+        # continuity_snapshot is None for image-pack R2V (no FLF continuity binding).
+        # Recipe provenance is stored as a structured entry in parameters_snapshot.
+        continuity_snapshot = None
+
+        # Create immutable request
+        request_id = f"greq{uuid.uuid4().hex[:12]}"
+        now = datetime.now(timezone.utc).isoformat()
+        gen_request = GenerationRequest(
+            id=request_id,
+            shot_id=shot.id,
+            shot_version=shot.version,
+            generation_plan_id=plan.id,
+            generation_plan_version=plan.version,
+            prompt_artifact_id=f"ip_{uuid.uuid4().hex[:12]}",
+            prompt_artifact_version=1,
+            workflow_definition_id=workflow_def.id,
+            workflow_definition_version=workflow_def.version,
+            workflow_template_fingerprint=workflow_def.template_fingerprint,
+            take_number=take_number,
+            parameters_snapshot=[
+                {"name": i.name, "node_id": i.node_id, "field": i.field, "value": i.value}
+                for i in injections
+            ] + ([{"name": "_recipe_provenance", "node_id": "", "field": "",
+                   "value": json.dumps(recipe_snapshot)}] if recipe_snapshot else []),
+            reference_snapshot=reference_snapshot,
+            seed=seed,
+            continuity_snapshot=continuity_snapshot,
+            status="pending",
+        )
+
+        self._request_repo.create_request(gen_request)
+
+        staging_dir = None
+        final_dir = None
+        try:
+            client_id = uuid.uuid4().hex
+            prompt_id = self._comfyui.submit(submission_workflow, client_id)
+            self._request_repo.update_status(
+                request_id, "queued",
+                comfyui_prompt_id=prompt_id,
+                submitted_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            self._request_repo.update_status(request_id, "running")
+            self._comfyui.monitor(prompt_id, client_id, timeout=self._timeout)
+
+            output_node_id = self._get_output_node_id(workflow_def)
+            result = self._comfyui.get_result(prompt_id, output_node_id)
+
+            staging_dir = create_staging_dir(self._storage_root, request_id)
+            output_ref = result.outputs[0]
+            safe_name = sanitize_filename(output_ref.filename)
+            staged_video = os.path.join(staging_dir, safe_name)
+            self._comfyui.download_output(output_ref, staged_video)
+
+            verify_media(staged_video)
+
+            last_frame_path = os.path.join(staging_dir, "last_frame.png")
+            extract_last_frame(staged_video, last_frame_path)
+
+            final_dir = make_final_dir(self._storage_root, project_id, shot_id, take_number)
+            move_to_final(staging_dir, final_dir)
+
+            final_video = os.path.join(final_dir, safe_name)
+            final_last_frame = os.path.join(final_dir, "last_frame.png")
+
+            take = Take(
+                id=f"take{uuid.uuid4().hex[:12]}",
+                shot_id=shot.id,
+                generation_request_id=request_id,
+                seed=seed,
+                video_path=final_video,
+                last_frame_path=final_last_frame,
+                status="succeeded",
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            with self._db.connection() as conn:
+                self._take_repo.save_take(take, conn=conn)
+                self._request_repo.update_status(
+                    request_id, "succeeded",
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                    conn=conn,
+                )
+
+            if staging_dir:
+                cleanup_dir(staging_dir)
+
+            return take
+
+        except Exception as e:
+            logger.error("Image-pack generation failed for %s: %s", request_id, e)
+            try:
+                self._request_repo.update_status(
+                    request_id, "failed",
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                    error=str(e)[:1000],
+                )
+            except Exception:
+                logger.error("Failed to update request status to failed")
+            if staging_dir:
+                cleanup_dir(staging_dir)
+            if final_dir and os.path.isdir(final_dir):
+                cleanup_dir(final_dir)
+            raise GenerationError(
+                f"Image-pack generation failed: {e}",
                 detail=f"request_id={request_id}",
             ) from e
 

@@ -49,6 +49,15 @@ htmlcov/
 # Worktrees
 .worktrees/
 
+# Preflight evidence (live media, not tracked)
+.preflight/
+
 # Temporary
 *.tmp
 *.log
+
+# Archived milestone evidence
+.evidence/
+
+# M7 live acceptance data
+storage_m7_live/

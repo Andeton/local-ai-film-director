@@ -134,3 +134,7 @@ class TakeLifecycleError(FilmDirectorError):
 
 class TakeConflictError(FilmDirectorError):
     """Another Take already approved for this shot."""
+
+
+class ContinuityError(FilmDirectorError):
+    """Continuity chain resolution, validation, or state transition failure."""

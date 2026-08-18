@@ -16,9 +16,12 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Generator
 
+from film_director.continuity.continuity_models import ContinuityState
 from film_director.errors import PersistenceError
 from film_director.generation.generation_request import GenerationRequest, Take
 from film_director.models.reference import (
+    AssetRole,
+    AssetRoleBinding,
     ReferenceAsset,
     ReferenceGenerationExecution,
     ReferenceGenerationRequest,
@@ -26,6 +29,8 @@ from film_director.models.reference import (
     ReferenceSource,
     ReferenceSourceState,
     ReferenceStatus,
+    VisualAssetPack,
+    compute_pack_fingerprint,
 )
 from film_director.generation.h3_prompt import H3PromptV1
 from film_director.models.canonical import (
@@ -824,9 +829,9 @@ class GenerationRequestRepository:
                  prompt_artifact_version, workflow_definition_id,
                  workflow_definition_version, workflow_template_fingerprint,
                  take_number, parameters_snapshot, reference_snapshot,
-                 seed, comfyui_prompt_id, status, submitted_at,
-                 completed_at, error)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 seed, continuity_snapshot, comfyui_prompt_id, status,
+                 submitted_at, completed_at, error)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         params = (
             request.id, request.shot_id, request.shot_version,
@@ -836,7 +841,9 @@ class GenerationRequestRepository:
             request.workflow_template_fingerprint, request.take_number,
             json.dumps(request.parameters_snapshot),
             json.dumps(request.reference_snapshot),
-            request.seed, request.comfyui_prompt_id,
+            request.seed,
+            json.dumps(request.continuity_snapshot) if request.continuity_snapshot is not None else None,
+            request.comfyui_prompt_id,
             request.status, request.submitted_at, request.completed_at,
             request.error,
         )
@@ -899,6 +906,7 @@ class GenerationRequestRepository:
 
     @staticmethod
     def _row_to_request(row: sqlite3.Row) -> GenerationRequest:
+        raw_cs = row["continuity_snapshot"] if "continuity_snapshot" in row.keys() else None
         return GenerationRequest(
             id=row["id"],
             shot_id=row["shot_id"],
@@ -914,6 +922,7 @@ class GenerationRequestRepository:
             parameters_snapshot=json.loads(row["parameters_snapshot"]),
             reference_snapshot=json.loads(row["reference_snapshot"]),
             seed=row["seed"],
+            continuity_snapshot=json.loads(raw_cs) if raw_cs is not None else None,
             comfyui_prompt_id=row["comfyui_prompt_id"],
             status=row["status"],
             submitted_at=row["submitted_at"],
@@ -1645,5 +1654,467 @@ class QueueBatchRepository:
             takes_count=row["takes_count"],
             base_seed=row["base_seed"],
             priority=row["priority"],
+            created_at=row["created_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# ContinuityStateRepository (M7.A)
+# ---------------------------------------------------------------------------
+
+class ContinuityStateRepository:
+    """UPSERT by shot_id. Tracks per-shot continuity chain membership."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save(self, state: ContinuityState, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO continuity_states
+                (id, shot_id, scene_id, predecessor_shot_id,
+                 upstream_take_id, upstream_take_number,
+                 upstream_last_frame_path, upstream_last_frame_sha256,
+                 state, continuity_revision,
+                 invalidation_reason, invalidation_source_shot_id,
+                 created_at, updated_at, invalidated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(shot_id) DO UPDATE SET
+                scene_id                    = excluded.scene_id,
+                predecessor_shot_id         = excluded.predecessor_shot_id,
+                upstream_take_id            = excluded.upstream_take_id,
+                upstream_take_number        = excluded.upstream_take_number,
+                upstream_last_frame_path    = excluded.upstream_last_frame_path,
+                upstream_last_frame_sha256  = excluded.upstream_last_frame_sha256,
+                state                       = excluded.state,
+                continuity_revision         = excluded.continuity_revision,
+                invalidation_reason         = excluded.invalidation_reason,
+                invalidation_source_shot_id = excluded.invalidation_source_shot_id,
+                updated_at                  = excluded.updated_at,
+                invalidated_at              = excluded.invalidated_at
+        """
+        params = (
+            state.id, state.shot_id, state.scene_id,
+            state.predecessor_shot_id,
+            state.upstream_take_id, state.upstream_take_number,
+            state.upstream_last_frame_path, state.upstream_last_frame_sha256,
+            state.state, state.continuity_revision,
+            state.invalidation_reason, state.invalidation_source_shot_id,
+            state.created_at, state.updated_at, state.invalidated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save continuity state", str(exc)) from exc
+
+    def get_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> ContinuityState | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM continuity_states WHERE shot_id = ?",
+                (shot_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_state(row)
+
+    def get_by_scene(self, scene_id: str, conn: sqlite3.Connection | None = None) -> list[ContinuityState]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM continuity_states WHERE scene_id = ? ORDER BY id",
+                (scene_id,),
+            ).fetchall()
+        return [self._row_to_state(r) for r in rows]
+
+    def mark_outdated(
+        self,
+        shot_id: str,
+        reason: str,
+        source_shot_id: str,
+        invalidated_at: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Mark a shot's continuity state as outdated. Returns rows affected."""
+        sql = """
+            UPDATE continuity_states
+            SET state = 'outdated',
+                invalidation_reason = ?,
+                invalidation_source_shot_id = ?,
+                invalidated_at = ?,
+                updated_at = ?
+            WHERE shot_id = ? AND state != 'outdated'
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (reason, source_shot_id, invalidated_at, invalidated_at, shot_id))
+            return cursor.rowcount
+
+    def resolve_current(
+        self,
+        shot_id: str,
+        upstream_take_id: str,
+        upstream_take_number: int,
+        frame_path: str,
+        frame_sha256: str,
+        updated_at: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Transition a shot's continuity state to current, bumping revision. Returns rows affected."""
+        sql = """
+            UPDATE continuity_states
+            SET state = 'current',
+                upstream_take_id = ?,
+                upstream_take_number = ?,
+                upstream_last_frame_path = ?,
+                upstream_last_frame_sha256 = ?,
+                continuity_revision = continuity_revision + 1,
+                invalidation_reason = NULL,
+                invalidation_source_shot_id = NULL,
+                invalidated_at = NULL,
+                updated_at = ?
+            WHERE shot_id = ?
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (
+                upstream_take_id, upstream_take_number,
+                frame_path, frame_sha256, updated_at, shot_id,
+            ))
+            return cursor.rowcount
+
+    def cas_rebuild_to_current(
+        self,
+        shot_id: str,
+        expected_revision: int,
+        upstream_take_id: str,
+        upstream_take_number: int,
+        upstream_last_frame_path: str,
+        upstream_last_frame_sha256: str,
+        predecessor_shot_id: str,
+        scene_id: str,
+        updated_at: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """CAS: OUTDATED at expected_revision → CURRENT at revision+1.
+
+        Returns rows affected (0 or 1). 0 means the state was not OUTDATED
+        or revision has changed (concurrent rebuild or intervening invalidation).
+        """
+        sql = """
+            UPDATE continuity_states
+            SET state = 'current',
+                upstream_take_id = ?,
+                upstream_take_number = ?,
+                upstream_last_frame_path = ?,
+                upstream_last_frame_sha256 = ?,
+                predecessor_shot_id = ?,
+                continuity_revision = ? + 1,
+                invalidation_reason = NULL,
+                invalidation_source_shot_id = NULL,
+                invalidated_at = NULL,
+                updated_at = ?
+            WHERE shot_id = ?
+              AND state = 'outdated'
+              AND continuity_revision = ?
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (
+                upstream_take_id, upstream_take_number,
+                upstream_last_frame_path, upstream_last_frame_sha256,
+                predecessor_shot_id,
+                expected_revision, updated_at,
+                shot_id, expected_revision,
+            ))
+            return cursor.rowcount
+
+    def cas_persist_if_not_outdated(
+        self,
+        state: ContinuityState,
+        conn: sqlite3.Connection | None = None,
+    ) -> bool:
+        """Atomically persist a CURRENT state only if the existing state is NOT outdated.
+
+        Uses INSERT ... ON CONFLICT for new states, or a guarded UPDATE
+        for existing states. Returns True if the write succeeded, False if
+        an OUTDATED state was found (in-flight race).
+        """
+        with _use_conn(self._db, conn) as c:
+            # Check if row exists
+            existing = c.execute(
+                "SELECT state, upstream_take_id, upstream_last_frame_sha256 "
+                "FROM continuity_states WHERE shot_id = ?",
+                (state.shot_id,),
+            ).fetchone()
+
+            if existing is None:
+                # New state — insert
+                self.save(state, conn=c)
+                return True
+
+            if existing["state"] == "outdated":
+                return False  # Do not reactivate
+
+            if existing["state"] == "current":
+                # Same provenance — idempotent
+                if (
+                    existing["upstream_take_id"] == state.upstream_take_id
+                    and existing["upstream_last_frame_sha256"] == state.upstream_last_frame_sha256
+                ):
+                    return True  # Already current with same provenance
+
+            # New or different UNRESOLVED/CURRENT state — upsert
+            self.save(state, conn=c)
+            return True
+
+    @staticmethod
+    def _row_to_state(row: sqlite3.Row) -> ContinuityState:
+        return ContinuityState(
+            id=row["id"],
+            shot_id=row["shot_id"],
+            scene_id=row["scene_id"],
+            predecessor_shot_id=row["predecessor_shot_id"],
+            upstream_take_id=row["upstream_take_id"],
+            upstream_take_number=row["upstream_take_number"],
+            upstream_last_frame_path=row["upstream_last_frame_path"],
+            upstream_last_frame_sha256=row["upstream_last_frame_sha256"],
+            state=row["state"],
+            continuity_revision=row["continuity_revision"],
+            invalidation_reason=row["invalidation_reason"],
+            invalidation_source_shot_id=row["invalidation_source_shot_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            invalidated_at=row["invalidated_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# VisualAssetPackRepository (M7.G.A)
+# ---------------------------------------------------------------------------
+
+class VisualAssetPackRepository:
+    """UPSERT-based persistence for VisualAssetPack and AssetRoleBindings."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    # -- Pack CRUD --
+
+    def save(self, pack: VisualAssetPack, conn: sqlite3.Connection | None = None) -> None:
+        sql = """
+            INSERT INTO visual_asset_packs
+                (id, project_id, name, description, version, fingerprint,
+                 created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                project_id  = excluded.project_id,
+                name        = excluded.name,
+                description = excluded.description,
+                version     = excluded.version,
+                fingerprint = excluded.fingerprint,
+                created_at  = excluded.created_at,
+                updated_at  = excluded.updated_at
+        """
+        params = (
+            pack.id, pack.project_id, pack.name, pack.description,
+            pack.version, pack.fingerprint, pack.created_at, pack.updated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save visual asset pack", str(exc)) from exc
+
+    def get(self, pack_id: str, conn: sqlite3.Connection | None = None) -> VisualAssetPack | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM visual_asset_packs WHERE id = ?", (pack_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_pack(row)
+
+    def list_by_project(
+        self, project_id: str, conn: sqlite3.Connection | None = None,
+    ) -> list[VisualAssetPack]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM visual_asset_packs WHERE project_id = ? "
+                "ORDER BY created_at, id",
+                (project_id,),
+            ).fetchall()
+        return [self._row_to_pack(r) for r in rows]
+
+    # -- Binding CRUD --
+
+    def add_binding(
+        self, binding: AssetRoleBinding, conn: sqlite3.Connection | None = None,
+    ) -> None:
+        sql = """
+            INSERT INTO asset_role_bindings
+                (id, pack_id, reference_asset_id, role, order_index, created_at)
+            VALUES (?,?,?,?,?,?)
+        """
+        params = (
+            binding.id, binding.pack_id, binding.reference_asset_id,
+            binding.role.value, binding.order_index, binding.created_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.IntegrityError:
+            raise
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to add asset role binding", str(exc)) from exc
+
+    def remove_binding(
+        self, binding_id: str, conn: sqlite3.Connection | None = None,
+    ) -> None:
+        """Remove a binding. Does NOT delete the underlying ReferenceAsset."""
+        with _use_conn(self._db, conn) as c:
+            c.execute("DELETE FROM asset_role_bindings WHERE id = ?", (binding_id,))
+
+    def update_binding(
+        self,
+        binding_id: str,
+        role: AssetRole | None = None,
+        order_index: int | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        sets: list[str] = []
+        params: list = []
+        if role is not None:
+            sets.append("role = ?")
+            params.append(role.value)
+        if order_index is not None:
+            sets.append("order_index = ?")
+            params.append(order_index)
+        if not sets:
+            return
+        params.append(binding_id)
+        sql = f"UPDATE asset_role_bindings SET {', '.join(sets)} WHERE id = ?"
+        with _use_conn(self._db, conn) as c:
+            c.execute(sql, params)
+
+    def list_bindings(
+        self, pack_id: str, conn: sqlite3.Connection | None = None,
+    ) -> list[AssetRoleBinding]:
+        """Return bindings for a pack in deterministic order (role, order_index, id)."""
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM asset_role_bindings WHERE pack_id = ? "
+                "ORDER BY role ASC, order_index ASC, id ASC",
+                (pack_id,),
+            ).fetchall()
+        return [self._row_to_binding(r) for r in rows]
+
+    # -- Eligible asset resolution --
+
+    def resolve_eligible_assets(
+        self,
+        pack_id: str,
+        role: AssetRole | None = None,
+        character_id: str | None = None,
+        shot_id: str | None = None,
+        project_id: str | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> list[ReferenceAsset]:
+        """Resolve production-eligible assets for a pack.
+
+        Eligible = APPROVED status + CURRENT source_state.
+        Pinning does NOT override eligibility.
+
+        Deterministic order: role ASC, order_index ASC, reference_asset_id ASC.
+        """
+        sql = """
+            SELECT ra.* FROM reference_assets ra
+            JOIN asset_role_bindings arb ON arb.reference_asset_id = ra.id
+            WHERE arb.pack_id = ?
+              AND ra.status = 'approved'
+              AND ra.source_state = 'current'
+        """
+        params: list = [pack_id]
+        if role is not None:
+            sql += " AND arb.role = ?"
+            params.append(role.value)
+        if character_id is not None:
+            sql += " AND ra.character_id = ?"
+            params.append(character_id)
+        if shot_id is not None:
+            sql += " AND ra.shot_id = ?"
+            params.append(shot_id)
+        if project_id is not None:
+            sql += " AND ra.project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY arb.role ASC, arb.order_index ASC, ra.id ASC"
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(sql, params).fetchall()
+        return [ReferenceAssetRepository._row_to_asset(r) for r in rows]
+
+    # -- Fingerprint/version --
+
+    def recompute_fingerprint(
+        self, pack_id: str, conn: sqlite3.Connection | None = None,
+    ) -> None:
+        """Recompute pack fingerprint from current bindings.
+
+        Increments version only if the fingerprint actually changed.
+        """
+        with _use_conn(self._db, conn) as c:
+            # Get current pack
+            pack_row = c.execute(
+                "SELECT * FROM visual_asset_packs WHERE id = ?", (pack_id,),
+            ).fetchone()
+            if pack_row is None:
+                return
+
+            # Fetch bindings with content_sha256
+            rows = c.execute(
+                "SELECT arb.reference_asset_id, arb.role, ra.content_sha256, arb.order_index "
+                "FROM asset_role_bindings arb "
+                "JOIN reference_assets ra ON arb.reference_asset_id = ra.id "
+                "WHERE arb.pack_id = ?",
+                (pack_id,),
+            ).fetchall()
+
+            bindings_data = [
+                (r["reference_asset_id"], r["role"], r["content_sha256"], r["order_index"])
+                for r in rows
+            ]
+            new_fp = compute_pack_fingerprint(pack_id, bindings_data)
+
+            old_fp = pack_row["fingerprint"]
+            if new_fp == old_fp:
+                return  # No effective change
+
+            new_version = pack_row["version"] + 1
+            c.execute(
+                "UPDATE visual_asset_packs "
+                "SET fingerprint = ?, version = ?, updated_at = datetime('now') "
+                "WHERE id = ?",
+                (new_fp, new_version, pack_id),
+            )
+
+    # -- Row mappers --
+
+    @staticmethod
+    def _row_to_pack(row: sqlite3.Row) -> VisualAssetPack:
+        return VisualAssetPack(
+            id=row["id"],
+            project_id=row["project_id"],
+            name=row["name"],
+            description=row["description"],
+            version=row["version"],
+            fingerprint=row["fingerprint"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_binding(row: sqlite3.Row) -> AssetRoleBinding:
+        return AssetRoleBinding(
+            id=row["id"],
+            pack_id=row["pack_id"],
+            reference_asset_id=row["reference_asset_id"],
+            role=AssetRole(row["role"]),
+            order_index=row["order_index"],
             created_at=row["created_at"],
         )

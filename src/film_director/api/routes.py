@@ -1,4 +1,4 @@
-"""API routes for Local AI Film Director (M1–M5)."""
+"""API routes for Local AI Film Director (M1–M7)."""
 from __future__ import annotations
 
 import os
@@ -11,6 +11,7 @@ from pydantic import BaseModel, model_validator
 
 from film_director.adapters.wind_comic import WindComicAdapter
 from film_director.errors import (
+    ContinuityError,
     QueueConflictError,
     QueueJobNotFoundError,
     QueueTransitionError,
@@ -133,6 +134,10 @@ class EnqueueShotRequest(BaseModel):
         return self
 
 
+class ReplaceApprovedRequest(BaseModel):
+    take_id: str
+
+
 class EnqueueSceneRequest(BaseModel):
     takes_per_shot: int = 3
     base_seed: int | None = None
@@ -178,6 +183,9 @@ def create_router(
     ref_generation_service=None,  # ReferenceGenerationService | None
     ref_lifecycle_service=None,  # ReferenceLifecycleService | None
     ref_selector=None,  # ReferenceSelector | None
+    # M7 services
+    continuity_service=None,  # ContinuityService | None
+    continuity_state_repo=None,  # ContinuityStateRepository | None
 ) -> APIRouter:
     router = APIRouter()
 
@@ -801,5 +809,108 @@ def create_router(
     @router.post("/takes/{take_id}/unfavorite")
     def unfavorite_take(take_id: str) -> dict:
         return _take_lifecycle(take_id, "unfavorite")
+
+    # ---------------------------------------------------------------
+    # M7 — Continuity
+    # ---------------------------------------------------------------
+
+    @router.get("/shots/{shot_id}/continuity-state")
+    def get_continuity_state(shot_id: str) -> dict:
+        if continuity_state_repo is None:
+            raise HTTPException(status_code=501, detail="M7 continuity not available")
+        state = continuity_state_repo.get_by_shot(shot_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="Continuity state not found")
+        return state.model_dump()
+
+    @router.get("/shots/{shot_id}/predecessor")
+    def get_predecessor(shot_id: str) -> dict:
+        if continuity_service is None:
+            raise HTTPException(status_code=501, detail="M7 continuity not available")
+        from film_director.continuity.continuity_resolver import ContinuityResolver
+        from film_director.persistence.database import Database
+        # Use the service's DB to get a connection
+        db = continuity_service._db
+        with db.connection() as conn:
+            scene_id = ContinuityResolver.get_scene_id_for_shot(shot_id, conn)
+            if scene_id is None:
+                raise HTTPException(status_code=404, detail="Shot not found")
+            pred = ContinuityResolver.resolve_predecessor(shot_id, scene_id, conn)
+        return {"predecessor_shot_id": pred, "scene_id": scene_id}
+
+    @router.post("/shots/{shot_id}/replace-approved")
+    def replace_approved(shot_id: str, body: ReplaceApprovedRequest) -> dict:
+        if take_service is None:
+            raise HTTPException(status_code=501, detail="M6 take management not available")
+        # Verify the replacement Take belongs to this shot
+        if take_repo is not None:
+            candidate = take_repo.get_take(body.take_id)
+            if candidate is None:
+                raise HTTPException(status_code=404, detail="Take not found")
+            if candidate.shot_id != shot_id:
+                raise HTTPException(status_code=409, detail="Take belongs to a different shot")
+        try:
+            result = take_service.replace_approved(body.take_id)
+        except TakeNotFoundError:
+            raise HTTPException(status_code=404, detail="Take not found")
+        except TakeConflictError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        except TakeLifecycleError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        return result.model_dump()
+
+    @router.get("/scenes/{scene_id}/continuity-chain")
+    def get_continuity_chain(scene_id: str) -> list[dict]:
+        if continuity_service is None or continuity_state_repo is None:
+            raise HTTPException(status_code=501, detail="M7 continuity not available")
+        from film_director.continuity.continuity_resolver import ContinuityResolver
+        db = continuity_service._db
+        with db.connection() as conn:
+            ordered_ids = ContinuityResolver.get_scene_shot_order(scene_id, conn)
+        if not ordered_ids:
+            raise HTTPException(status_code=404, detail="Scene not found or has no shots")
+        states = {s.shot_id: s for s in continuity_state_repo.get_by_scene(scene_id)}
+        approved_takes = {}
+        if take_repo is not None:
+            for sid in ordered_ids:
+                t = take_repo.get_approved_for_shot(sid)
+                if t is not None:
+                    approved_takes[sid] = t
+        chain: list[dict] = []
+        for i, sid in enumerate(ordered_ids):
+            pred = ordered_ids[i - 1] if i > 0 else None
+            cs = states.get(sid)
+            at = approved_takes.get(sid)
+            chain.append({
+                "shot_id": sid,
+                "order_position": i,
+                "predecessor_shot_id": pred,
+                "continuity_state": cs.state if cs else None,
+                "continuity_revision": cs.continuity_revision if cs else None,
+                "approved_take_id": at.id if at else None,
+                "has_last_frame": bool(at and at.last_frame_path),
+            })
+        return chain
+
+    @router.get("/scenes/{scene_id}/outdated-shots")
+    def get_outdated_shots(scene_id: str) -> list[dict]:
+        if continuity_state_repo is None:
+            raise HTTPException(status_code=501, detail="M7 continuity not available")
+        states = continuity_state_repo.get_by_scene(scene_id)
+        return [
+            {"shot_id": s.shot_id, "invalidation_reason": s.invalidation_reason,
+             "invalidation_source_shot_id": s.invalidation_source_shot_id}
+            for s in states if s.state == "outdated"
+        ]
+
+    @router.post("/shots/{shot_id}/continuity/rebuild")
+    def rebuild_continuity(shot_id: str) -> dict:
+        if continuity_service is None:
+            raise HTTPException(status_code=501, detail="M7 continuity not available")
+        try:
+            state = continuity_service.rebuild_for_shot(shot_id)
+        except ContinuityError as e:
+            raise HTTPException(status_code=409, detail=e.message)
+        return state.model_dump()
 
     return router

@@ -1,9 +1,13 @@
-"""Canonical reference management models (M5).
+"""Canonical reference management models (M5, M7.G.A).
 
 ReferenceAsset — source-neutral managed image reference.
 ReferenceGenerationRequest — immutable ComfyUI generation input snapshot.
 ReferenceGenerationExecution — mutable generation lifecycle.
+AssetRole — semantic conditioning role (M7.G.A).
+VisualAssetPack — versioned asset collection for conditioning (M7.G.A).
+AssetRoleBinding — pack↔asset↔role binding (M7.G.A).
 compute_appearance_fingerprint — shared helper for appearance hashing.
+compute_pack_fingerprint — deterministic pack membership fingerprint (M7.G.A).
 """
 from __future__ import annotations
 
@@ -235,3 +239,129 @@ class ReferenceGenerationExecution(BaseModel):
             if self.output_reference_asset_id is not None:
                 raise ValueError("failed execution must not have output_reference_asset_id")
         return self
+
+
+# ---------------------------------------------------------------------------
+# AssetRole — semantic conditioning role (M7.G.A)
+# ---------------------------------------------------------------------------
+
+class AssetRole(str, Enum):
+    """Semantic production purpose for visual assets used in conditioning.
+
+    These roles are provider-neutral — no H3, LTX, Wan, SCAIL, Kling,
+    Seedance, ComfyUI, or workflow-specific concepts.
+    """
+    CHARACTER_FACE_CLOSEUP = "character_face_closeup"
+    CHARACTER_BODY_FRONT = "character_body_front"
+    CHARACTER_BODY_SIDE = "character_body_side"
+    CHARACTER_BODY_BACK = "character_body_back"
+    CHARACTER_TURNAROUND = "character_turnaround"
+    CHARACTER_WARDROBE = "character_wardrobe"
+    ENVIRONMENT_MASTER = "environment_master"
+    ENVIRONMENT_VIEW = "environment_view"
+    ENVIRONMENT_PANORAMA_360 = "environment_panorama_360"
+    ENVIRONMENT_DEPTH = "environment_depth"
+    ENVIRONMENT_LAYOUT = "environment_layout"
+    PROP_REFERENCE = "prop_reference"
+    PROP_TURNAROUND = "prop_turnaround"
+    STYLE_REFERENCE = "style_reference"
+    CONTINUITY_FRAME = "continuity_frame"
+    MOTION_REFERENCE = "motion_reference"
+    CONTROL_VIDEO = "control_video"
+    AUDIO_REFERENCE = "audio_reference"
+
+
+# ---------------------------------------------------------------------------
+# VisualAssetPack — versioned asset collection (M7.G.A)
+# ---------------------------------------------------------------------------
+
+class VisualAssetPack(BaseModel):
+    """Project-level versioned collection of visual assets for conditioning.
+
+    Groups existing ReferenceAssets via AssetRoleBindings.
+    Contains no provider/model/workflow-specific fields.
+    """
+
+    id: str
+    project_id: str
+    name: str
+    description: str = ""
+    version: int = 1
+    fingerprint: str
+    created_at: str = ""
+    updated_at: str = ""
+
+    @field_validator("id", "project_id", "name")
+    @classmethod
+    def non_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("fingerprint")
+    @classmethod
+    def valid_fingerprint(cls, v):
+        if not _SHA256_RE.match(v):
+            raise ValueError("fingerprint must be 64 lowercase hex chars")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# AssetRoleBinding — pack↔asset↔role binding (M7.G.A)
+# ---------------------------------------------------------------------------
+
+class AssetRoleBinding(BaseModel):
+    """Normalized binding between a VisualAssetPack, a ReferenceAsset, and a role.
+
+    Contains no provider/model/workflow-specific fields.
+    """
+
+    id: str
+    pack_id: str
+    reference_asset_id: str
+    role: AssetRole
+    order_index: int = 0
+    created_at: str = ""
+
+    @field_validator("id", "pack_id", "reference_asset_id")
+    @classmethod
+    def non_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("order_index")
+    @classmethod
+    def non_negative_order(cls, v):
+        if v < 0:
+            raise ValueError("order_index must be >= 0")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Pack fingerprinting (M7.G.A)
+# ---------------------------------------------------------------------------
+
+def compute_pack_fingerprint(
+    pack_id: str,
+    bindings: list[tuple[str, str, str, int]],
+) -> str:
+    """Deterministic SHA-256 fingerprint of a pack's membership.
+
+    Args:
+        pack_id: Pack stable identity.
+        bindings: List of (reference_asset_id, role_value, content_sha256, order_index).
+                  Sorted internally for determinism — input order does not matter.
+
+    The fingerprint depends on:
+    - pack identity
+    - each binding's (role, order_index, reference_asset_id, content_sha256)
+
+    It does NOT depend on timestamps, absolute paths, or provider fields.
+    """
+    sorted_bindings = sorted(bindings, key=lambda b: (b[1], b[3], b[0]))
+    parts = [pack_id]
+    for asset_id, role, content_sha, order_idx in sorted_bindings:
+        parts.append(f"{role}:{order_idx}:{asset_id}:{content_sha}")
+    canonical = "\n".join(parts)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

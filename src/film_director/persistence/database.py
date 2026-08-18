@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS generation_requests (
     parameters_snapshot TEXT NOT NULL,
     reference_snapshot TEXT NOT NULL,
     seed INTEGER NOT NULL,
+    continuity_snapshot TEXT,
     comfyui_prompt_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     submitted_at TEXT NOT NULL DEFAULT '',
@@ -311,6 +312,72 @@ CREATE INDEX IF NOT EXISTS idx_queue_status ON generation_queue(status);
 CREATE INDEX IF NOT EXISTS idx_queue_shot ON generation_queue(shot_id);
 CREATE INDEX IF NOT EXISTS idx_queue_project ON generation_queue(project_id);
 CREATE INDEX IF NOT EXISTS idx_queue_batch ON generation_queue(batch_id);
+
+-- M7: Per-shot continuity chain state
+CREATE TABLE IF NOT EXISTS continuity_states (
+    id                          TEXT PRIMARY KEY,
+    shot_id                     TEXT NOT NULL UNIQUE,
+    scene_id                    TEXT NOT NULL,
+    predecessor_shot_id         TEXT,
+    upstream_take_id            TEXT,
+    upstream_take_number        INTEGER,
+    upstream_last_frame_path    TEXT,
+    upstream_last_frame_sha256  TEXT,
+    state                       TEXT NOT NULL DEFAULT 'unresolved',
+    continuity_revision         INTEGER NOT NULL DEFAULT 0,
+    invalidation_reason         TEXT,
+    invalidation_source_shot_id TEXT,
+    created_at                  TEXT NOT NULL,
+    updated_at                  TEXT NOT NULL,
+    invalidated_at              TEXT,
+    FOREIGN KEY (shot_id) REFERENCES shots(id),
+    FOREIGN KEY (scene_id) REFERENCES scenes(id),
+    FOREIGN KEY (predecessor_shot_id) REFERENCES shots(id),
+    FOREIGN KEY (upstream_take_id) REFERENCES takes(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_continuity_shot ON continuity_states(shot_id);
+CREATE INDEX IF NOT EXISTS idx_continuity_scene ON continuity_states(scene_id);
+CREATE INDEX IF NOT EXISTS idx_continuity_predecessor ON continuity_states(predecessor_shot_id);
+
+-- M7.G.A: Visual asset packs and role bindings
+CREATE TABLE IF NOT EXISTS visual_asset_packs (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    version     INTEGER NOT NULL DEFAULT 1,
+    fingerprint TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES production_projects(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_visual_asset_packs_project ON visual_asset_packs(project_id);
+
+CREATE TABLE IF NOT EXISTS asset_role_bindings (
+    id                  TEXT PRIMARY KEY,
+    pack_id             TEXT NOT NULL,
+    reference_asset_id  TEXT NOT NULL,
+    role                TEXT NOT NULL,
+    order_index         INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    FOREIGN KEY (pack_id) REFERENCES visual_asset_packs(id),
+    FOREIGN KEY (reference_asset_id) REFERENCES reference_assets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_role_bindings_pack ON asset_role_bindings(pack_id);
+CREATE INDEX IF NOT EXISTS idx_asset_role_bindings_asset ON asset_role_bindings(reference_asset_id);
+
+-- M7.G.B hardening: Durable capability lifecycle state
+CREATE TABLE IF NOT EXISTS capability_registry_states (
+    capability_id           TEXT PRIMARY KEY,
+    capability_fingerprint  TEXT NOT NULL,
+    state                   TEXT NOT NULL DEFAULT 'discovered',
+    revision                INTEGER NOT NULL DEFAULT 1,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL
+);
 """
 
 
@@ -419,6 +486,25 @@ class Database:
                         (batch_id, proj_id),
                     )
                 logger.debug("Migration: added batch_id to generation_queue")
+
+        # M7.A: Add continuity_snapshot column to generation_requests
+        gen_req_tables = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "generation_requests" in gen_req_tables:
+            gen_req_cols = {
+                row[1] for row in conn.execute(
+                    "PRAGMA table_info(generation_requests)"
+                ).fetchall()
+            }
+            if "continuity_snapshot" not in gen_req_cols:
+                conn.execute(
+                    "ALTER TABLE generation_requests "
+                    "ADD COLUMN continuity_snapshot TEXT"
+                )
+                logger.debug("Migration: added continuity_snapshot to generation_requests")
 
     @contextmanager
     def connection(self):

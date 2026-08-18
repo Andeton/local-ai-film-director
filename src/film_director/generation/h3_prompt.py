@@ -52,6 +52,132 @@ class H3PromptBuilder:
     Does NOT re-resolve characters, read the filesystem, or call any LLM.
     """
 
+    def build_continuity_prompt(
+        self,
+        shot: ShotSpecificationV1,
+        plan: GenerationPlan,
+        identity_contexts: list | None = None,
+    ) -> H3PromptV1:
+        """Build an FLF prompt for a continuity shot with identity-locked subjects.
+
+        No <Subject N> or <Picture N> tags — no reference image is uploaded.
+        Identity is anchored by authoritative text from approved reference
+        provenance, reinforcing the first_frame visual signal.
+
+        identity_contexts: list[SubjectIdentityContext] in subject order,
+        or None for backward compatibility (falls back to name-only).
+        """
+        if plan.shot_id != shot.id:
+            raise ReferenceResolutionError(
+                f"Plan/shot ID mismatch: plan.shot_id={plan.shot_id!r} != shot.id={shot.id!r}",
+            )
+
+        subjects = shot.subjects or []
+        id_ctxs = identity_contexts or []
+
+        # Build identity-locked subject definitions
+        subject_lines: list[str] = []
+        negative_lines: list[str] = []
+        for i, s in enumerate(subjects):
+            name = s.name if hasattr(s, "name") else s.get("name", "Unknown")
+            if i < len(id_ctxs) and id_ctxs[i].identity_text_source != "name_only":
+                ctx = id_ctxs[i]
+                subject_lines.append(
+                    f"{ctx.identity_text}. This is the same person as in the supplied first frame. "
+                    f"Preserve the exact same recognizable face, ethnicity, age, hair, clothing, "
+                    f"body proportions, and all distinguishing features. "
+                    f"Do not reinterpret identity from the character name."
+                )
+                if ctx.negative_identity_text:
+                    negative_lines.append(ctx.negative_identity_text)
+            else:
+                subject_lines.append(
+                    f"{name} continues from the supplied first frame. "
+                    f"Preserve the exact same recognizable face and appearance."
+                )
+
+        if not subject_lines:
+            subject_lines.append(
+                "Action continues from the supplied first frame. "
+                "Preserve the exact same person, face, and appearance."
+            )
+
+        subject_definitions = "\n".join(subject_lines)
+
+        # Identity retention
+        retention_lines = [
+            "All subjects fully preserved from the supplied first frame.",
+            "Maintain exact same face, ethnicity, skin tone, hairstyle, clothing, and body type.",
+        ]
+        if negative_lines:
+            retention_lines.append(
+                "AVOID: " + ", ".join(negative_lines)
+            )
+        # Generic negative identity constraints
+        retention_lines.append(
+            "AVOID: different person, identity change, ethnicity change, face morphing, "
+            "clothing change."
+        )
+        retention_analysis = "\n".join(retention_lines)
+
+        # Environment retention from shot source facts
+        env = shot.environment or {}
+        env_location = env.get("location", env.get("description", ""))
+        env_lines = [
+            "Preserve the same room, studio, furniture, table, lighting, camera geography, "
+            "and spatial arrangement from the supplied first frame.",
+        ]
+        if env_location:
+            env_lines.append(f"Setting: {env_location}.")
+        env_lines.append(
+            "AVOID: environment replacement, different furniture, different table, "
+            "different room, scene change."
+        )
+        environment_retention = "\n".join(env_lines)
+
+        summary = self._build_summary_no_bindings(shot)
+        detailed_description = self._build_detailed_description(shot)
+        overall_soundscape = shot.audio_intent.get("ambient", "") if shot.audio_intent else ""
+        non_diegetic_music = shot.audio_intent.get("music", "") if shot.audio_intent else ""
+
+        # Render with environment retention section
+        sections: list[str] = [
+            f"[Subject Definitions]\n{subject_definitions}",
+            f"[Summary]\n{summary}",
+            f"[Retention Analysis]\n{retention_analysis}",
+            f"[Environment Continuity]\n{environment_retention}",
+            f"[Detailed Description]\n{detailed_description}",
+        ]
+        if overall_soundscape:
+            sections.append(f"[Overall Soundscape]\n{overall_soundscape}")
+        if non_diegetic_music:
+            sections.append(f"[Non-Diegetic Music]\n{non_diegetic_music}")
+        rendered_prompt_text = "\n\n".join(sections)
+
+        return H3PromptV1(
+            id=f"h3p{uuid.uuid4().hex[:12]}",
+            shot_id=shot.id,
+            generation_plan_id=plan.id,
+            source_shot_version=shot.version,
+            source_generation_plan_version=plan.version,
+            subject_definitions=subject_definitions,
+            summary=summary,
+            retention_analysis=retention_analysis,
+            detailed_description=detailed_description,
+            overall_soundscape=overall_soundscape,
+            non_diegetic_music=non_diegetic_music,
+            rendered_prompt_text=rendered_prompt_text,
+        )
+
+    @staticmethod
+    def _build_summary_no_bindings(shot: ShotSpecificationV1) -> str:
+        names = ", ".join(
+            (s.name if hasattr(s, "name") else s.get("name", "Character"))
+            for s in (shot.subjects or [])
+        )
+        prefix = f"{names}: " if names else ""
+        return f"{prefix}{shot.action}. {shot.dramatic_purpose}."
+
     def build(
         self,
         shot: ShotSpecificationV1,

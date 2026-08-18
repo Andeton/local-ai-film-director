@@ -94,6 +94,40 @@ class ComfyUIAdapter:
             ) from e
 
     # -----------------------------------------------------------------
+    # Object info — node class discovery (M7.G.B)
+    # -----------------------------------------------------------------
+
+    def get_object_info(self) -> dict[str, Any]:
+        """GET /object_info → dict of node class definitions.
+
+        Returns {class_name: {input: ..., output: ..., ...}, ...}.
+        Used for runtime capability probing (checking required nodes).
+        """
+        client = self._get_client()
+        try:
+            resp = client.get("/object_info")
+        except (httpx.HTTPError, httpx.TransportError) as e:
+            raise ComfyUIUnavailableError(
+                f"ComfyUI object_info unavailable: {e}",
+                detail=f"base_url={self._base_url}",
+            ) from e
+        finally:
+            if self._owns_client():
+                client.close()
+
+        if resp.status_code != 200:
+            raise ComfyUIUnavailableError(
+                f"ComfyUI object_info failed: HTTP {resp.status_code}",
+                detail=resp.text[:500],
+            )
+        try:
+            return resp.json()
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ComfyUIUnavailableError(
+                f"ComfyUI object_info response not valid JSON: {e}",
+            ) from e
+
+    # -----------------------------------------------------------------
     # Upload image
     # -----------------------------------------------------------------
 

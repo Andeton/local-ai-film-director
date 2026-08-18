@@ -2,6 +2,7 @@
 
 M3: initial single-take pipeline.
 M6: extended Take status (approved/rejected) + is_favorite preference flag.
+M7: continuity_snapshot on GenerationRequest (nullable, backward-compatible).
 """
 from typing import Literal
 import re
@@ -26,6 +27,7 @@ class GenerationRequest(BaseModel):
     parameters_snapshot: list[dict] = Field(default_factory=list)
     reference_snapshot: list[dict] = Field(default_factory=list)
     seed: int
+    continuity_snapshot: dict | None = None  # M7: immutable upstream provenance, None for non-continuity shots
     comfyui_prompt_id: str | None = None
     status: Literal["pending", "queued", "running", "succeeded", "failed", "cancelled"] = "pending"
     submitted_at: str = ""
@@ -72,7 +74,7 @@ class Take(BaseModel):
     last_frame_path: str | None = None
     status: Literal[
         "pending", "generating", "succeeded", "failed",
-        "approved", "rejected",
+        "approved", "rejected", "superseded",
     ] = "pending"
     is_favorite: bool = False
     created_at: str = ""

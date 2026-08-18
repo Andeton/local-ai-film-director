@@ -180,6 +180,54 @@ def _build_h3_flf_v1(project_root: str) -> WorkflowDefinition:
 
 
 # ---------------------------------------------------------------------------
+# H3 R2V Image Pack v1 — 4-slot multi-reference (M7.G.C)
+# ---------------------------------------------------------------------------
+
+_H3_R2V_IMAGE_PACK_V1_FINGERPRINT = (
+    "32caca08d5f4bd0b4578efc4f709024a7d222dd933f9224d9e718bc20f4a7351"
+)
+
+_H3_R2V_IMAGE_PACK_V1_MAPPINGS: dict[str, dict[str, str]] = {
+    "prompt": {"node_id": "104", "field": "prompt"},
+    "ref_image_0": {"node_id": "200", "field": "image"},
+    "ref_image_1": {"node_id": "201", "field": "image"},
+    "ref_image_2": {"node_id": "202", "field": "image"},
+    "ref_image_3": {"node_id": "203", "field": "image"},
+    "duration": {"node_id": "111", "field": "value"},
+    "seed": {"node_id": "15", "field": "noise_seed"},
+    "aspect": {"node_id": "115", "field": "aspect_ratio"},
+    "output_prefix": {"node_id": "92", "field": "filename_prefix"},
+}
+
+_H3_R2V_IMAGE_PACK_V1_REQUIRED_NODES = [
+    "104", "200", "201", "202", "203", "111", "15", "115", "92", "107",
+]
+
+
+def _build_h3_r2v_image_pack_v1(project_root: str) -> WorkflowDefinition:
+    return WorkflowDefinition(
+        id="h3_r2v_image_pack_v1",
+        version="1.0.0",
+        strategy="REFERENCE_TO_VIDEO",
+        template_path=os.path.join(project_root, "workflows", "h3", "r2v_image_pack_v1.json"),
+        template_fingerprint=_H3_R2V_IMAGE_PACK_V1_FINGERPRINT,
+        parameter_mappings=dict(_H3_R2V_IMAGE_PACK_V1_MAPPINGS),
+        required_models=list(_H3_R2V_V1_REQUIRED_MODELS),
+        required_nodes=list(_H3_R2V_IMAGE_PACK_V1_REQUIRED_NODES),
+        capabilities=["reference_to_video", "audio_muxed", "multi_reference", "image_pack"],
+        constraints={
+            "max_reference_images": 9,
+            "materialized_reference_slots": 4,
+            "min_duration_sec": 0.21,
+            "max_duration_sec": 15.08,
+            "fps": 24,
+            "frame_grid": "17k+5",
+            "seed_max": 0xFFFFFFFFFFFFFFFF,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # WorkflowResolver
 # ---------------------------------------------------------------------------
 
@@ -191,6 +239,7 @@ class WorkflowResolver:
         self._v1 = _build_h3_r2v_v1(project_root)
         self._v2 = _build_h3_r2v_v2(project_root)
         self._flf_v1 = _build_h3_flf_v1(project_root)
+        self._image_pack_v1 = _build_h3_r2v_image_pack_v1(project_root)
         self._definitions: dict[str, WorkflowDefinition] = {
             "REFERENCE_TO_VIDEO": self._v1,  # default: 1-ref
         }
@@ -221,6 +270,10 @@ class WorkflowResolver:
                 f"Reference count {reference_count} exceeds maximum materialized slots (2)",
                 detail=f"reference_count={reference_count}, max_slots=2",
             )
+
+    def resolve_image_pack(self) -> WorkflowDefinition:
+        """Return the 4-slot image-pack R2V workflow (M7.G.C)."""
+        return self._image_pack_v1
 
     def resolve_for_continuity(
         self, has_continuity_frame: bool, reference_count: int,

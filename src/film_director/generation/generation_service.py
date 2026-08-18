@@ -559,6 +559,218 @@ class GenerationService:
             ) from e
 
     # -------------------------------------------------------------------
+    # Image-pack generation (M7.G.C)
+    # -------------------------------------------------------------------
+
+    def generate_with_image_pack(
+        self,
+        shot_id: str,
+        character_binding: "H3ReferenceBinding",
+        environment_binding: "H3ReferenceBinding",
+        continuity_binding: "H3ReferenceBinding",
+        prop_binding: "H3ReferenceBinding | None" = None,
+        prompt_text: str = "",
+        take_number: int = 1,
+        seed_override: int | None = None,
+        recipe_snapshot: dict | None = None,
+    ) -> Take:
+        """Generate a shot using the H3 image-pack recipe with 3-4 references.
+
+        Bindings must be in semantic order:
+        1. character_binding — Picture 1 (identity anchor)
+        2. environment_binding — Picture 2 (environment view)
+        3. continuity_binding — Picture 3 (predecessor frame)
+        4. prop_binding — Picture 4 (optional prop)
+
+        This is the authoritative ordered list driving prompt tags, upload
+        order, workflow slots, and GenerationRequest snapshot.
+        """
+        from film_director.generation.h3_types import H3ReferenceBinding
+
+        # Load shot + plan
+        shot = self._shot_repo.get_shot(shot_id)
+        if shot is None:
+            raise GenerationError(f"Shot not found: {shot_id}")
+        plan = self._plan_repo.get_current_plan_by_shot(shot_id)
+        if plan is None:
+            raise GenerationError(f"No current GenerationPlan for shot {shot_id}")
+
+        project_id = self._find_project_id(shot_id)
+
+        # Resolve workflow
+        workflow_def = self._workflow_resolver.resolve_image_pack()
+        template = self._workflow_resolver.load_template(workflow_def)
+
+        # Assemble ordered bindings
+        ordered_bindings = [character_binding, environment_binding, continuity_binding]
+        if prop_binding is not None:
+            ordered_bindings.append(prop_binding)
+
+        # Upload references in semantic order
+        uploaded_bindings = self._upload_references(ordered_bindings)
+
+        # Resolve seed
+        if seed_override is not None:
+            seed = seed_override
+        else:
+            seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+
+        output_prefix = f"imgpack/{shot_id}/{uuid.uuid4().hex[:8]}"
+
+        # Build injections — same pattern as existing R2V
+        injections = self._param_resolver.build_injections(
+            plan=plan,
+            shot=shot,
+            prompt=H3PromptV1(
+                id=f"ip_{uuid.uuid4().hex[:12]}",
+                shot_id=shot_id,
+                generation_plan_id=plan.id,
+                source_shot_version=shot.version,
+                source_generation_plan_version=plan.version,
+                subject_definitions="",
+                summary="",
+                retention_analysis="",
+                detailed_description="",
+                overall_soundscape="",
+                non_diegetic_music="",
+                rendered_prompt_text=prompt_text,
+                status="current",
+                version=1,
+                created_at=datetime.now(timezone.utc).isoformat(),
+            ),
+            workflow_def=workflow_def,
+            uploaded_bindings=uploaded_bindings,
+            seed=seed,
+            output_prefix=output_prefix,
+        )
+
+        submission_workflow = self._param_resolver.apply_injections(template, injections)
+
+        # Build reference snapshot with recipe metadata
+        reference_snapshot = [
+            {
+                "reference_asset_id": b.reference_asset_id,
+                "reference_kind": b.reference_kind,
+                "subject_index": b.subject_index,
+                "character_id": b.character_id,
+                "character_name": b.character_name,
+                "appearance": b.appearance,
+                "picture_index": b.picture_index,
+                "local_path": b.local_path,
+                "content_sha256": b.content_sha256,
+                "uploaded_filename": b.uploaded_filename,
+            }
+            for b in uploaded_bindings
+        ]
+
+        # Include recipe provenance in continuity_snapshot field
+        continuity_snapshot = recipe_snapshot
+
+        # Create immutable request
+        request_id = f"greq{uuid.uuid4().hex[:12]}"
+        now = datetime.now(timezone.utc).isoformat()
+        gen_request = GenerationRequest(
+            id=request_id,
+            shot_id=shot.id,
+            shot_version=shot.version,
+            generation_plan_id=plan.id,
+            generation_plan_version=plan.version,
+            prompt_artifact_id=f"ip_{uuid.uuid4().hex[:12]}",
+            prompt_artifact_version=1,
+            workflow_definition_id=workflow_def.id,
+            workflow_definition_version=workflow_def.version,
+            workflow_template_fingerprint=workflow_def.template_fingerprint,
+            take_number=take_number,
+            parameters_snapshot=[
+                {"name": i.name, "node_id": i.node_id, "field": i.field, "value": i.value}
+                for i in injections
+            ],
+            reference_snapshot=reference_snapshot,
+            seed=seed,
+            continuity_snapshot=continuity_snapshot,
+            status="pending",
+        )
+
+        self._request_repo.create_request(gen_request)
+
+        staging_dir = None
+        final_dir = None
+        try:
+            client_id = uuid.uuid4().hex
+            prompt_id = self._comfyui.submit(submission_workflow, client_id)
+            self._request_repo.update_status(
+                request_id, "queued",
+                comfyui_prompt_id=prompt_id,
+                submitted_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            self._request_repo.update_status(request_id, "running")
+            self._comfyui.monitor(prompt_id, client_id, timeout=self._timeout)
+
+            output_node_id = self._get_output_node_id(workflow_def)
+            result = self._comfyui.get_result(prompt_id, output_node_id)
+
+            staging_dir = create_staging_dir(self._storage_root, request_id)
+            output_ref = result.outputs[0]
+            safe_name = sanitize_filename(output_ref.filename)
+            staged_video = os.path.join(staging_dir, safe_name)
+            self._comfyui.download_output(output_ref, staged_video)
+
+            verify_media(staged_video)
+
+            last_frame_path = os.path.join(staging_dir, "last_frame.png")
+            extract_last_frame(staged_video, last_frame_path)
+
+            final_dir = make_final_dir(self._storage_root, project_id, shot_id, take_number)
+            move_to_final(staging_dir, final_dir)
+
+            final_video = os.path.join(final_dir, safe_name)
+            final_last_frame = os.path.join(final_dir, "last_frame.png")
+
+            take = Take(
+                id=f"take{uuid.uuid4().hex[:12]}",
+                shot_id=shot.id,
+                generation_request_id=request_id,
+                seed=seed,
+                video_path=final_video,
+                last_frame_path=final_last_frame,
+                status="succeeded",
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            with self._db.connection() as conn:
+                self._take_repo.save_take(take, conn=conn)
+                self._request_repo.update_status(
+                    request_id, "succeeded",
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                    conn=conn,
+                )
+
+            if staging_dir:
+                cleanup_dir(staging_dir)
+
+            return take
+
+        except Exception as e:
+            logger.error("Image-pack generation failed for %s: %s", request_id, e)
+            try:
+                self._request_repo.update_status(
+                    request_id, "failed",
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                    error=str(e)[:1000],
+                )
+            except Exception:
+                logger.error("Failed to update request status to failed")
+            if staging_dir:
+                cleanup_dir(staging_dir)
+            if final_dir and os.path.isdir(final_dir):
+                cleanup_dir(final_dir)
+            raise GenerationError(
+                f"Image-pack generation failed: {e}",
+                detail=f"request_id={request_id}",
+            ) from e
+
+    # -------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------
 

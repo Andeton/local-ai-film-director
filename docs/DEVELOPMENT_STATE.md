@@ -25,21 +25,19 @@
 | M7.F — Live acceptance (conditional) + identity fix | `9dc24a0` | +20 |
 | M7.G.A — VisualAssetPack, AssetRole, AssetRoleBinding | `a4b06a7` | +67 |
 | M7.G.B — ConditioningRecipe, CapabilityRegistry (FROZEN) | `f5f5b20` | +112 |
+| M7.G.C — H3 image-only multi-reference recipe | pending | +24 |
 
 ### Current State
 
-- M7.G.B infrastructure is FROZEN — no further expansion
-- CapabilityRegistry, runtime probing, capability persistence: available but not wired to production
-- AssetRole (18 values) and ConditioningRecipe available for M7.G.C integration
-- Next action: **M7.G.C — H3 image-only multi-reference recipe**
-
-### M7.G.C Requirements
-
-Minimal H3 image-only multi-reference integration with at least:
-- Picture 1: character identity
-- Picture 2: environment view
-- Picture 3: predecessor continuity frame
-- Picture 4: important prop (optional)
+- M7.G.C: IMPLEMENTED / AWAITING HUMAN VISUAL ACCEPTANCE
+- Workflow: `h3_r2v_image_pack_v1` (4 materialized image slots, derived from proven R2V)
+- Recipe: `h3_r2v_image_pack_v1` — character + environment + continuity + optional prop
+- Technical smoke: PASS — prompt `1f05a478-c406-4d30-8209-750c1c1259e5`, 287s (~4.8 min), 1376x768 H264+AAC
+- Stress test: shot_m7f_04 (back-facing predecessor, identity must come from Picture 1)
+- 3 real image references consumed simultaneously (character, environment, predecessor frame)
+- No ref_video, no ref_audio conditioning
+- CapabilityRegistry remains FROZEN — not wired
+- Next action: **Human visual review of M7.G.C output**
 
 No ref_video. No ref_audio. Derive smallest workflow from proven R2V template.
 
@@ -47,7 +45,7 @@ No ref_video. No ref_audio. Derive smallest workflow from proven R2V template.
 
 ## Deterministic Baseline
 
-**1692 passed, 12 deselected, 0 failed**
+**1716 passed, 12 deselected, 0 failed**
 
 Live tests (deselected): Ollama (5), ComfyUI (4), Wind Comic (3)
 

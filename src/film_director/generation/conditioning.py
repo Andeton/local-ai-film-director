@@ -628,3 +628,79 @@ def validate_recipe_capability(
             )
 
     return errors
+
+
+# ---------------------------------------------------------------------------
+# Production recipe: H3 R2V Image Pack v1 (M7.G.C)
+# ---------------------------------------------------------------------------
+
+_H3_R2V_IMAGE_PACK_V1_FP = (
+    "32caca08d5f4bd0b4578efc4f709024a7d222dd933f9224d9e718bc20f4a7351"
+)
+
+
+def build_h3_image_pack_recipe() -> ConditioningRecipe:
+    """Build the production H3 image-only multi-reference recipe.
+
+    Slot ordering:
+    1. CHARACTER_FACE_CLOSEUP — character identity anchor (required)
+    2. ENVIRONMENT_VIEW — shot-specific environment (required)
+    3. CONTINUITY_FRAME — predecessor last frame (required)
+    4. PROP_REFERENCE — important prop (optional)
+
+    No ref_video. No ref_audio.
+    """
+    role_reqs = (
+        RecipeRoleRequirement(
+            role=AssetRole.CHARACTER_FACE_CLOSEUP,
+            required=True, slot_index=0, modality="image", max_count=1,
+        ),
+        RecipeRoleRequirement(
+            role=AssetRole.ENVIRONMENT_VIEW,
+            required=True, slot_index=1, modality="image", max_count=1,
+        ),
+        RecipeRoleRequirement(
+            role=AssetRole.CONTINUITY_FRAME,
+            required=True, slot_index=2, modality="image", max_count=1,
+        ),
+        RecipeRoleRequirement(
+            role=AssetRole.PROP_REFERENCE,
+            required=False, slot_index=3, modality="image", max_count=1,
+        ),
+    )
+
+    recipe = ConditioningRecipe(
+        id="h3_r2v_image_pack_v1",
+        version="1.0.0",
+        provider="minimax_h3",
+        model_family="h3_ref2va",
+        supported_strategies=("REFERENCE_TO_VIDEO",),
+        workflow_definition_id="h3_r2v_image_pack_v1",
+        workflow_definition_version="1.0.0",
+        workflow_template_fingerprint=_H3_R2V_IMAGE_PACK_V1_FP,
+        role_requirements=role_reqs,
+        supports_image_references=True,
+        supports_video_references=False,
+        supports_audio_references=False,
+        max_references=4,
+        resolution_constraints={"megapixels": 1.0, "aspect": "16:9"},
+        frame_constraints={
+            "fps": 24, "frame_grid": "17k+5",
+            "min_frames": 124, "max_frames": 362,
+        },
+        prompt_tag_convention="<Picture N>",
+        fallback_behavior="omit optional Picture 4 slot when no prop",
+        expected_vram_gb=24.0,
+        expected_runtime_class="4-7 min per shot on RTX 5090",
+        source_url="",
+        source_notes="Derived from proven h3_r2v_v2 with 4 materialized image slots",
+    )
+    fp = compute_recipe_fingerprint(recipe)
+    # Rebuild with computed fingerprint
+    fields = {k: getattr(recipe, k) for k in recipe.__dataclass_fields__}
+    fields["fingerprint"] = fp
+    return ConditioningRecipe(**fields)
+
+
+# Pre-built singleton
+H3_IMAGE_PACK_RECIPE = build_h3_image_pack_recipe()

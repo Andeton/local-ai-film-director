@@ -48,9 +48,9 @@ Full pipeline: idea → Wind Comic → canonical shots → references → genera
 
 No new abstraction unless this scene proves it necessary.
 
-### P3 — Minimal operator UI
+### P3 — Minimal operator UI — PULLED FORWARD INTO P2
 
-Projects, shots, generate, Takes, approve/reject, regenerate, sequence status.
+Operator console: project/shot navigation, reference display, video playback, approve/reject/generate actions. Required for human-testable product workflow.
 
 ### P4 — Assembly/export
 

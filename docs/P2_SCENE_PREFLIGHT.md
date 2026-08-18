@@ -209,4 +209,8 @@ No batch generation. Each shot waits for predecessor approval.
 
 **Product gap confirmed:** LLM enrichment (qwen3:14b) does not reliably follow scene ideas. Human shot design was necessary. This validates the human-edit workflow path.
 
-**NEXT:** Generate Shot 1 using h3_r2v_v2 (character + environment, scene head)
+**Shot 1:** GENERATED (Take `take04fb5e59a78d`, 10.125s, succeeded, awaiting approval)
+
+**Shot 2-5:** NOT GENERATED — paused for operator UI
+
+**NEXT:** Operator UI for visual review, approve Shot 1, then continue sequential generation through UI

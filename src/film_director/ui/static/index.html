@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Film Director — Operator Console</title>
+<style>
+:root {
+  --bg: #1a1a2e; --bg2: #16213e; --bg3: #0f3460;
+  --text: #e0e0e0; --text2: #a0a0b0; --accent: #e94560;
+  --green: #4ecca3; --yellow: #f0c040; --red: #e94560;
+  --blue: #4ea8de; --border: #2a2a4a;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+.app { display: grid; grid-template-columns: 280px 1fr 320px; height: 100vh; }
+
+/* LEFT PANEL */
+.sidebar { background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; }
+.sidebar h2 { font-size: 14px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+.project-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.project-id { font-size: 11px; color: var(--text2); margin-bottom: 16px; }
+.shot-list { list-style: none; }
+.shot-card {
+  padding: 10px 12px; margin-bottom: 6px; border-radius: 6px; cursor: pointer;
+  background: rgba(255,255,255,0.03); border: 1px solid transparent; transition: all 0.15s;
+}
+.shot-card:hover { background: rgba(255,255,255,0.06); }
+.shot-card.selected { border-color: var(--accent); background: rgba(233,69,96,0.08); }
+.shot-card .shot-num { font-size: 11px; color: var(--text2); }
+.shot-card .shot-action { font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px;
+  font-weight: 600; text-transform: uppercase; margin-top: 4px;
+}
+.badge-approved { background: rgba(78,204,163,0.2); color: var(--green); }
+.badge-succeeded { background: rgba(78,168,222,0.2); color: var(--blue); }
+.badge-pending { background: rgba(240,192,64,0.2); color: var(--yellow); }
+.badge-rejected { background: rgba(233,69,96,0.2); color: var(--red); }
+.badge-empty { background: rgba(255,255,255,0.05); color: var(--text2); }
+.badge-blocked { background: rgba(233,69,96,0.15); color: var(--red); }
+
+/* CENTER */
+.main { padding: 24px; overflow-y: auto; }
+.main h1 { font-size: 20px; margin-bottom: 16px; }
+.shot-header { margin-bottom: 20px; }
+.shot-header .label { font-size: 12px; color: var(--text2); margin-bottom: 2px; }
+.shot-header .value { font-size: 14px; margin-bottom: 8px; }
+.video-container { background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 16px; max-width: 800px; }
+.video-container video { width: 100%; display: block; }
+.no-video { padding: 60px; text-align: center; color: var(--text2); font-size: 14px; }
+.takes-section h3 { font-size: 14px; color: var(--text2); text-transform: uppercase; margin-bottom: 10px; }
+.take-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 6px;
+  background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px solid var(--border);
+}
+.take-row .take-info { flex: 1; }
+.take-row .take-num { font-weight: 600; }
+.take-row .take-meta { font-size: 12px; color: var(--text2); }
+.take-actions { display: flex; gap: 6px; }
+
+/* RIGHT PANEL */
+.details { background: var(--bg2); border-left: 1px solid var(--border); overflow-y: auto; padding: 16px; }
+.details h3 { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; margin-top: 16px; }
+.details h3:first-child { margin-top: 0; }
+.ref-card {
+  display: flex; gap: 10px; align-items: center; padding: 8px; margin-bottom: 8px;
+  background: rgba(255,255,255,0.03); border-radius: 6px;
+}
+.ref-card img { width: 56px; height: 56px; object-fit: cover; border-radius: 4px; background: #000; }
+.ref-card .ref-info { flex: 1; }
+.ref-card .ref-role { font-size: 12px; font-weight: 600; }
+.ref-card .ref-id { font-size: 10px; color: var(--text2); }
+.ref-card .ref-status { font-size: 10px; }
+.cont-status { padding: 10px; background: rgba(255,255,255,0.03); border-radius: 6px; font-size: 13px; }
+.cont-status img { width: 100%; border-radius: 4px; margin-top: 8px; }
+.field-group { margin-bottom: 12px; }
+.field-group label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+.field-group .ro { font-size: 13px; padding: 6px 8px; background: rgba(255,255,255,0.03); border-radius: 4px; }
+.field-group input, .field-group textarea {
+  width: 100%; padding: 6px 8px; background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); font-size: 13px; font-family: inherit;
+}
+.field-group textarea { min-height: 60px; resize: vertical; }
+
+/* Buttons */
+.btn {
+  padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: opacity 0.15s;
+}
+.btn:hover { opacity: 0.85; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-approve { background: var(--green); color: #111; }
+.btn-reject { background: var(--red); color: #fff; }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
+.action-bar { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+/* Loading */
+.loading { text-align: center; padding: 40px; color: var(--text2); }
+.toast {
+  position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px;
+  font-size: 13px; z-index: 100; transition: opacity 0.3s;
+}
+.toast-ok { background: var(--green); color: #111; }
+.toast-err { background: var(--red); color: #fff; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- LEFT: Navigation -->
+  <div class="sidebar">
+    <h2>Film Director</h2>
+    <div id="project-info"><div class="loading">Loading...</div></div>
+    <ul class="shot-list" id="shot-list"></ul>
+  </div>
+
+  <!-- CENTER: Shot detail + video -->
+  <div class="main" id="main-panel">
+    <div class="loading">Select a shot</div>
+  </div>
+
+  <!-- RIGHT: Inputs + actions -->
+  <div class="details" id="details-panel">
+    <div class="loading">Select a shot</div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let currentProject = null;
+let currentShots = [];
+let selectedShotId = null;
+
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({error: r.statusText}));
+    throw new Error(err.error || err.detail || r.statusText);
+  }
+  return r.json();
+}
+
+function toast(msg, ok=true) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (ok ? 'toast-ok' : 'toast-err');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
+}
+
+function shotBadge(shot, takes) {
+  const approved = takes.find(t => t.status === 'approved');
+  if (approved) return '<span class="badge badge-approved">Approved</span>';
+  const succeeded = takes.find(t => t.status === 'succeeded');
+  if (succeeded) return '<span class="badge badge-succeeded">Review</span>';
+  if (takes.length > 0) return '<span class="badge badge-pending">Pending</span>';
+  return '<span class="badge badge-empty">Not generated</span>';
+}
+
+async function loadProject() {
+  const projects = await api('/projects');
+  if (!projects.length) { document.getElementById('project-info').innerHTML = 'No projects'; return; }
+  currentProject = projects[0];
+  document.getElementById('project-info').innerHTML = `
+    <div class="project-title">${esc(currentProject.title || currentProject.id)}</div>
+    <div class="project-id">${currentProject.id}</div>
+  `;
+  await loadShots();
+}
+
+async function loadShots() {
+  if (!currentProject) return;
+  const shots = await api(`/projects/${currentProject.id}/shots`);
+  shots.sort((a, b) => a.order_index - b.order_index);
+  currentShots = shots;
+  const list = document.getElementById('shot-list');
+  list.innerHTML = '';
+  for (const shot of shots) {
+    let takes = [];
+    try { takes = await api(`/shots/${shot.id}/takes`); } catch(e) {}
+    const li = document.createElement('li');
+    li.className = 'shot-card' + (shot.id === selectedShotId ? ' selected' : '');
+    li.innerHTML = `
+      <div class="shot-num">Shot ${shot.order_index + 1}</div>
+      <div class="shot-action">${esc((shot.action || '').substring(0, 60))}</div>
+      ${shotBadge(shot, takes)}
+    `;
+    li.onclick = () => selectShot(shot.id);
+    list.appendChild(li);
+  }
+}
+
+async function selectShot(shotId) {
+  selectedShotId = shotId;
+  document.querySelectorAll('.shot-card').forEach(c => c.classList.remove('selected'));
+  const idx = currentShots.findIndex(s => s.id === shotId);
+  document.querySelectorAll('.shot-card')[idx]?.classList.add('selected');
+  await Promise.all([renderMain(shotId), renderDetails(shotId)]);
+}
+
+async function renderMain(shotId) {
+  const panel = document.getElementById('main-panel');
+  const shot = currentShots.find(s => s.id === shotId);
+  if (!shot) { panel.innerHTML = '<div class="loading">Shot not found</div>'; return; }
+
+  let takes = [];
+  try { takes = await api(`/shots/${shotId}/takes`); } catch(e) {}
+
+  const idx = currentShots.indexOf(shot);
+  let cam = {};
+  try { cam = typeof shot.camera === 'string' ? JSON.parse(shot.camera) : (shot.camera || {}); } catch(e) {}
+
+  // Find the best take to show (approved > succeeded > latest)
+  const approved = takes.find(t => t.status === 'approved');
+  const succeeded = takes.filter(t => t.status === 'succeeded');
+  const showTake = approved || succeeded[succeeded.length - 1] || takes[takes.length - 1];
+
+  let videoHtml = '<div class="no-video">No takes generated yet</div>';
+  if (showTake && showTake.video_path) {
+    const mediaUrl = '/media/' + showTake.video_path.replace(/\\\\/g, '/');
+    videoHtml = `<video controls autoplay loop muted><source src="${mediaUrl}" type="video/mp4"></video>`;
+  }
+
+  panel.innerHTML = `
+    <div class="shot-header">
+      <h1>Shot ${idx + 1}</h1>
+      <div class="label">Action</div>
+      <div class="value">${esc(shot.action || '')}</div>
+      <div class="label">Purpose</div>
+      <div class="value">${esc(shot.dramatic_purpose || '')}</div>
+      <div style="display:flex;gap:24px;">
+        <div><div class="label">Duration</div><div class="value">${shot.duration_sec}s</div></div>
+        <div><div class="label">Camera</div><div class="value">${esc(cam.shot_size || '')} ${esc(cam.movement || '')}</div></div>
+      </div>
+    </div>
+    <div class="video-container">${videoHtml}</div>
+    <div class="takes-section">
+      <h3>Takes (${takes.length})</h3>
+      ${takes.length === 0 ? '<div style="color:var(--text2);font-size:13px;">No takes yet</div>' : ''}
+      ${takes.map(t => `
+        <div class="take-row">
+          <div class="take-info">
+            <span class="take-num">Take ${t.take_number || '?'}</span>
+            <span class="badge badge-${t.status}">${t.status}</span>
+            <div class="take-meta">Seed: ${t.seed} &middot; ${t.id.substring(0,12)}</div>
+          </div>
+          <div class="take-actions">
+            ${t.status === 'succeeded' ? `
+              <button class="btn btn-approve btn-sm" onclick="approveTake('${t.id}')">Approve</button>
+              <button class="btn btn-reject btn-sm" onclick="rejectTake('${t.id}')">Reject</button>
+            ` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+async function renderDetails(shotId) {
+  const panel = document.getElementById('details-panel');
+  const shot = currentShots.find(s => s.id === shotId);
+  if (!shot) { panel.innerHTML = ''; return; }
+
+  const idx = currentShots.indexOf(shot);
+
+  // References
+  let refs = [];
+  try { refs = await api(`/projects/${currentProject.id}/references`); } catch(e) {}
+
+  const charRef = refs.find(r => r.kind === 'character_face' && r.status === 'approved');
+  const envRef = refs.find(r => r.status === 'approved' && r.kind === 'storyboard');
+
+  // Continuity
+  let contState = null;
+  try { contState = await api(`/shots/${shotId}/continuity-state`); } catch(e) {}
+
+  let predTake = null;
+  if (idx > 0) {
+    const predShot = currentShots[idx - 1];
+    try { predTake = await api(`/shots/${predShot.id}/approved-take`); } catch(e) {}
+  }
+
+  // Generation plan
+  let plan = null;
+  try { plan = await api(`/shots/${shotId}/generation-plan`); } catch(e) {}
+
+  const isHead = idx === 0;
+  const canGenerate = isHead || predTake != null;
+
+  panel.innerHTML = `
+    <h3>Generation Inputs</h3>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:8px;">
+      ${isHead ? 'Scene head — R2V with 2 references' : 'Image-pack — R2V with 3+ references'}
+    </div>
+
+    <div class="ref-card">
+      ${charRef ? `<img src="/media/${charRef.managed_path.replace(/\\\\/g,'/')}" alt="character">` : '<div style="width:56px;height:56px;background:#222;border-radius:4px;"></div>'}
+      <div class="ref-info">
+        <div class="ref-role">Picture 1 — Character</div>
+        <div class="ref-id">${charRef ? charRef.id : 'None'}</div>
+        <div class="ref-status">${charRef ? `${charRef.status} / ${charRef.source_state}` : ''}</div>
+      </div>
+    </div>
+
+    <div class="ref-card">
+      ${envRef ? `<img src="/media/${envRef.managed_path.replace(/\\\\/g,'/')}" alt="environment">` : '<div style="width:56px;height:56px;background:#222;border-radius:4px;"></div>'}
+      <div class="ref-info">
+        <div class="ref-role">Picture 2 — Environment</div>
+        <div class="ref-id">${envRef ? envRef.id : 'None'}</div>
+        <div class="ref-status">${envRef ? `${envRef.status} / ${envRef.source_state}` : ''}</div>
+      </div>
+    </div>
+
+    ${!isHead ? `
+    <h3>Continuity</h3>
+    <div class="cont-status">
+      <div><strong>Predecessor:</strong> Shot ${idx}</div>
+      <div><strong>Approved Take:</strong> ${predTake ? predTake.id.substring(0,12) : '<span style="color:var(--red)">NONE</span>'}</div>
+      ${!predTake ? '<div class="badge badge-blocked" style="margin-top:6px;">BLOCKED — predecessor not approved</div>' : ''}
+      ${predTake && predTake.last_frame_path ? `<img src="/media/${predTake.last_frame_path.replace(/\\\\/g,'/')}" alt="predecessor frame">` : ''}
+    </div>
+    ` : ''}
+
+    <h3>Settings</h3>
+    <div class="field-group">
+      <label>Duration (seconds)</label>
+      <div class="ro">${shot.duration_sec}s</div>
+    </div>
+    <div class="field-group">
+      <label>Strategy</label>
+      <div class="ro">${plan ? plan.strategy : 'N/A'}</div>
+    </div>
+    <div class="field-group">
+      <label>Continuity Mode</label>
+      <div class="ro">${plan ? plan.continuity_mode : 'none'}</div>
+    </div>
+    <div class="field-group">
+      <label>Shot ID</label>
+      <div class="ro" style="font-size:11px;">${shotId}</div>
+    </div>
+
+    <div class="action-bar">
+      <button class="btn btn-primary" ${canGenerate ? '' : 'disabled'} onclick="generateTake('${shotId}')">
+        Generate Take
+      </button>
+    </div>
+    ${!canGenerate ? '<div style="font-size:11px;color:var(--red);margin-top:6px;">Approve predecessor first</div>' : ''}
+  `;
+}
+
+async function approveTake(takeId) {
+  try {
+    await api(`/takes/${takeId}/approve`, {method: 'POST'});
+    toast('Take approved');
+    await loadShots();
+    if (selectedShotId) await selectShot(selectedShotId);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function rejectTake(takeId) {
+  try {
+    await api(`/takes/${takeId}/reject`, {method: 'POST'});
+    toast('Take rejected');
+    await loadShots();
+    if (selectedShotId) await selectShot(selectedShotId);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function generateTake(shotId) {
+  toast('Generating... this may take several minutes');
+  try {
+    const result = await api(`/shots/${shotId}/generate`, {method: 'POST'});
+    toast('Take generated successfully');
+    await loadShots();
+    await selectShot(shotId);
+  } catch(e) { toast('Generation failed: ' + e.message, false); }
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+loadProject();
+</script>
+</body>
+</html>

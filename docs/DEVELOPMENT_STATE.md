@@ -8,9 +8,7 @@
 
 **M7 — Continuity**
 
-**Status:** COMPLETE / CLOSED — ready for merge review
-
-**Branch:** `m7-continuity`
+**Status:** COMPLETE / CLOSED / MERGED
 
 ### Result
 
@@ -82,7 +80,7 @@ Live tests (deselected): Ollama (5), ComfyUI (4), Wind Comic (3)
 | M4 | `main` | idea→WC SSE→canonical import→enrichment |
 | M5 | `main` at `d4e0fbe` | Reference lifecycle, ingest, generators, r2v_v2, staleness |
 | M6 | `main` at `6b6e6e2` | Take approval, persistent queue, worker recovery |
-| M7 | pending merge | Continuity: chain state, FLF, image-pack multi-ref, human PASS |
+| M7 | `main` at `30aab73` | Continuity: chain state, FLF, image-pack multi-ref, human PASS |
 
 ---
 

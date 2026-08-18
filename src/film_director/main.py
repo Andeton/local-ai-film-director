@@ -290,4 +290,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(router)
 
+    # --- Operator UI ---
+    from film_director.ui.media import _create_media_router
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse as _FR
+
+    media_router = _create_media_router(settings.storage_root)
+    app.include_router(media_router)
+
+    ui_static_dir = os.path.join(os.path.dirname(__file__), "ui", "static")
+
+    @app.get("/")
+    def serve_ui() -> _FR:
+        return _FR(os.path.join(ui_static_dir, "index.html"))
+
     return app

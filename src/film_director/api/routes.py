@@ -6,7 +6,7 @@ import tempfile
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, model_validator
 
 from film_director.adapters.wind_comic import WindComicAdapter
@@ -57,6 +57,13 @@ class FromIdeaRequest(BaseModel):
     style: str | None = None
     aspect: str | None = None
     language: str | None = None
+
+
+class GenerateRequest(BaseModel):
+    """Optional operator overrides for generation."""
+    prompt_override: str | None = None
+    duration_sec: float | None = None
+    seed: int | None = None
 
 
 class BeatEditRequest(BaseModel):
@@ -387,17 +394,185 @@ def create_router(
     # M3 — Generation
     # ------------------------------------------------------------------
 
-    @router.post("/shots/{shot_id}/generate")
-    def generate_shot(shot_id: str) -> dict:
-        """Synchronous M3 generation: Shot → H3 R2V → Take.
+    @router.get("/shots/{shot_id}/generation-preview")
+    def get_generation_preview(
+        shot_id: str,
+        prompt_override: str | None = Query(default=None),
+        duration_sec: float | None = Query(default=None),
+        seed: int | None = Query(default=None),
+    ) -> dict:
+        """Dry-run preview of what generation would submit.
 
-        No queue, no background worker. The request stays open during
-        the entire H3 generation (~3-5 min on RTX 5090). Later milestones
-        will add async job support.
+        Uses production resolution logic but does NOT submit to ComfyUI.
+        Accepts optional operator overrides via query params.
+        """
+        if generation_service is None or plan_repo is None or shot_repo is None:
+            raise HTTPException(status_code=501, detail="Generation not available")
+        from film_director.generation.parameter_resolver import _seconds_to_grid_frames
+
+        shot = shot_repo.get_shot(shot_id)
+        if shot is None:
+            raise HTTPException(status_code=404, detail="Shot not found")
+        plan = plan_repo.get_current_plan_by_shot(shot_id)
+        if plan is None:
+            raise HTTPException(status_code=404, detail="No generation plan")
+
+        # Determine project
+        project_id = None
+        with generation_service._db.connection() as conn:
+            row = conn.execute(
+                "SELECT seq.project_id FROM shots s "
+                "JOIN beats b ON s.beat_id = b.id "
+                "JOIN scenes sc ON b.scene_id = sc.id "
+                "JOIN sequences seq ON sc.sequence_id = seq.id "
+                "WHERE s.id = ?", (shot_id,),
+            ).fetchone()
+            if row:
+                project_id = row["project_id"]
+
+        # Determine shot index for continuity
+        all_shots = shot_repo.get_current_shots_by_project(project_id) if project_id else []
+        all_shots.sort(key=lambda s: s.order_index)
+        shot_idx = next((i for i, s in enumerate(all_shots) if s.id == shot_id), 0)
+        is_head = shot_idx == 0
+
+        # Continuity check
+        predecessor_shot = all_shots[shot_idx - 1] if shot_idx > 0 else None
+        predecessor_approved = None
+        predecessor_frame_url = None
+        continuity_blocked = False
+        if predecessor_shot and take_service:
+            pred_take = take_service.get_approved_for_shot(predecessor_shot.id)
+            if pred_take:
+                predecessor_approved = {
+                    "take_id": pred_take.id,
+                    "shot_id": predecessor_shot.id,
+                    "shot_index": shot_idx - 1,
+                }
+                if pred_take.last_frame_path:
+                    predecessor_frame_url = f"/media/{pred_take.last_frame_path}"
+            else:
+                continuity_blocked = True
+
+        # Resolve references
+        refs = ref_asset_repo.list_by_project(project_id) if project_id and ref_asset_repo else []
+        char_ref = next((r for r in refs if r.kind.value == "character_face" and r.status.value == "approved" and r.source_state.value == "current"), None)
+        env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "storyboard"), None)
+
+        # Workflow selection
+        if is_head:
+            workflow_id = "h3_r2v_v2"
+            workflow_version = "2.0.0"
+        else:
+            workflow_id = "h3_r2v_image_pack_v1"
+            workflow_version = "1.0.0"
+
+        # Duration resolution (operator override or plan default)
+        effective_duration = duration_sec if duration_sec is not None else plan.duration_sec
+        frames = _seconds_to_grid_frames(effective_duration)
+        actual_duration = round(frames / 24.0, 3)
+
+        # Prompt (operator override or existing artifact)
+        prompt_text = ""
+        prompt_source = "generated"
+        existing_prompt = None
+        try:
+            existing_prompt = generation_service._prompt_repo.get_current_prompt(
+                shot.id, shot.version, plan.id, plan.version,
+            )
+        except Exception:
+            pass
+        if prompt_override is not None and prompt_override.strip():
+            prompt_text = prompt_override
+            prompt_source = "operator_override"
+        elif existing_prompt:
+            prompt_text = existing_prompt.rendered_prompt_text
+
+        # Seed resolution
+        effective_seed = seed
+        seed_policy = "explicit" if seed is not None else plan.seed_policy
+        seed_display = seed if seed is not None else plan.seed
+
+        # Pictures
+        pictures = []
+        if char_ref:
+            pictures.append({
+                "picture_index": 1, "role": "CHARACTER IDENTITY",
+                "reference_id": char_ref.id, "kind": char_ref.kind.value,
+                "status": char_ref.status.value, "source_state": char_ref.source_state.value,
+                "thumbnail_url": f"/media/{char_ref.managed_path}",
+            })
+        if env_ref:
+            pictures.append({
+                "picture_index": 2, "role": "ENVIRONMENT",
+                "reference_id": env_ref.id, "kind": env_ref.kind.value,
+                "status": env_ref.status.value, "source_state": env_ref.source_state.value,
+                "thumbnail_url": f"/media/{env_ref.managed_path}",
+            })
+        if not is_head:
+            cont_pic = {
+                "picture_index": 3, "role": "CONTINUITY FRAME",
+                "reference_id": None, "kind": "continuity",
+                "status": "blocked" if continuity_blocked else "available",
+                "source_state": "predecessor",
+                "thumbnail_url": predecessor_frame_url,
+            }
+            if predecessor_approved:
+                cont_pic["reference_id"] = predecessor_approved["take_id"]
+                cont_pic["source_label"] = f"Shot {predecessor_approved['shot_index'] + 1} approved Take"
+            else:
+                cont_pic["source_label"] = f"BLOCKED — approve Shot {shot_idx} first"
+            pictures.append(cont_pic)
+
+        return {
+            "shot_id": shot_id,
+            "shot_index": shot_idx,
+            "is_head": is_head,
+            "workflow_id": workflow_id,
+            "workflow_version": workflow_version,
+            "strategy": plan.strategy,
+            "continuity_mode": plan.continuity_mode,
+            "duration_sec": effective_duration,
+            "plan_duration_sec": plan.duration_sec,
+            "resolved_frames": frames,
+            "resolved_duration_sec": actual_duration,
+            "fps": 24,
+            "aspect": "16:9",
+            "resolution": "1376x768",
+            "seed_policy": seed_policy,
+            "seed": seed_display,
+            "prompt_text": prompt_text,
+            "prompt_source": prompt_source,
+            "pictures": pictures,
+            "continuity_blocked": continuity_blocked,
+            "predecessor_shot_index": shot_idx - 1 if shot_idx > 0 else None,
+            "can_generate": not continuity_blocked,
+        }
+
+    @router.post("/shots/{shot_id}/generate")
+    def generate_shot(shot_id: str, body: GenerateRequest = Body(default=GenerateRequest())) -> dict:
+        """Synchronous generation with optional operator overrides.
+
+        Accepts optional prompt_override, duration_sec, and seed.
+        If omitted, uses plan defaults (backward compatible).
         """
         if generation_service is None:
             raise HTTPException(status_code=501, detail="M3 generation not available")
-        take = generation_service.generate_shot(shot_id)
+        _SQLITE_INT64_MAX = (1 << 63) - 1
+        kwargs: dict = {}
+        if body:
+            if body.seed is not None:
+                if body.seed < 0 or body.seed > _SQLITE_INT64_MAX:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Seed must be 0..{_SQLITE_INT64_MAX}, got {body.seed}",
+                    )
+                kwargs["seed_override"] = body.seed
+            if body.prompt_override is not None:
+                kwargs["prompt_override"] = body.prompt_override
+            if body.duration_sec is not None:
+                kwargs["duration_override"] = body.duration_sec
+        take = generation_service.generate_take(shot_id, **kwargs)
         return {
             "take_id": take.id,
             "shot_id": take.shot_id,
@@ -912,5 +1087,85 @@ def create_router(
         except ContinuityError as e:
             raise HTTPException(status_code=409, detail=e.message)
         return state.model_dump()
+
+    # ------------------------------------------------------------------
+    # P2 — Scene Assembly
+    # ------------------------------------------------------------------
+
+    @router.post("/projects/{project_id}/build-scene")
+    def build_scene(project_id: str, request: Request) -> dict:
+        """Assemble all approved Takes into a single scene export."""
+        if shot_repo is None or take_service is None:
+            raise HTTPException(status_code=501, detail="Scene assembly not available")
+        from film_director.services.scene_assembly import (
+            AssemblyInput, assemble_scene, _sha256,
+        )
+
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        shots = shot_repo.get_current_shots_by_project(project_id)
+        shots.sort(key=lambda s: s.order_index)
+
+        inputs: list[AssemblyInput] = []
+        for shot in shots:
+            approved = take_service.get_approved_for_shot(shot.id)
+            if approved is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Shot {shot.order_index + 1} ({shot.id}) has no approved Take",
+                )
+            inputs.append(AssemblyInput(
+                shot_id=shot.id,
+                shot_index=shot.order_index,
+                take_id=approved.id,
+                video_path=approved.video_path,
+                sha256=_sha256(approved.video_path),
+            ))
+
+        import os as _os
+        _settings = request.app.state.settings
+        output_dir = _os.path.join(_settings.storage_root, "exports", project_id)
+        output_path = _os.path.join(output_dir, "scene_main_v1.mp4")
+
+        result = assemble_scene(
+            inputs=inputs,
+            output_path=output_path,
+            project_id=project_id,
+        )
+
+        return {
+            "output_path": result.output_path,
+            "output_sha256": result.output_sha256,
+            "duration": result.duration,
+            "resolution": result.resolution,
+            "fps": result.fps,
+            "video_codec": result.video_codec,
+            "audio_codec": result.audio_codec,
+            "size_bytes": result.size_bytes,
+            "manifest_path": result.manifest_path,
+            "shots_assembled": len(result.inputs),
+        }
+
+    @router.get("/projects/{project_id}/scene-export")
+    def get_scene_export(project_id: str, request: Request) -> dict:
+        """Return metadata of the current scene export if it exists."""
+        import os as _os
+        _settings = request.app.state.settings
+        output_path = _os.path.join(_settings.storage_root, "exports", project_id, "scene_main_v1.mp4")
+        manifest_path = _os.path.join(_settings.storage_root, "exports", project_id, "scene_main_v1_manifest.json")
+        if not _os.path.isfile(output_path):
+            raise HTTPException(status_code=404, detail="No scene export found")
+        import json as _json
+        manifest = {}
+        if _os.path.isfile(manifest_path):
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = _json.load(f)
+        return {
+            "output_path": output_path,
+            "media_url": f"/media/{output_path.replace(chr(92), '/')}",
+            "manifest": manifest,
+        }
 
     return router

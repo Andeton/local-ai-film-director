@@ -107,11 +107,15 @@ class GenerationService:
         shot_id: str,
         take_number: int = 1,
         seed_override: int | None = None,
+        prompt_override: str | None = None,
+        duration_override: float | None = None,
     ) -> Take:
         """Execute generation pipeline for one take of a shot.
 
-        When seed_override is provided (from QueueJob), it replaces the
-        plan-derived seed. take_number is persisted in GenerationRequest.
+        Optional operator overrides:
+        - seed_override: explicit seed (from QueueJob or operator UI)
+        - prompt_override: explicit final H3 prompt text
+        - duration_override: explicit duration in seconds
 
         Returns the persisted Take on success.
         Raises on any failure — pre-request failures leave NO GenerationRequest.
@@ -133,6 +137,10 @@ class GenerationService:
             raise GenerationError(
                 f"Plan shot_version={plan.shot_version} != shot.version={shot.version}"
             )
+
+        # Apply operator duration override if provided
+        if duration_override is not None:
+            plan = plan.model_copy(update={"duration_sec": duration_override})
 
         if plan.strategy not in ("REFERENCE_TO_VIDEO", "FIRST_LAST_FRAME"):
             raise UnsupportedStrategyError(
@@ -171,6 +179,10 @@ class GenerationService:
                     shot, plan, identity_contexts=identity_contexts,
                 )
                 self._prompt_repo.save_prompt(prompt)
+
+            # Apply operator prompt override if provided
+            if prompt_override is not None:
+                prompt = prompt.model_copy(update={"rendered_prompt_text": prompt_override})
 
             # Load and verify FLF workflow template
             template = self._workflow_resolver.load_template(workflow_def)
@@ -294,6 +306,10 @@ class GenerationService:
             if prompt is None:
                 prompt = self._prompt_builder.build(shot, plan, resolved_bindings)
                 self._prompt_repo.save_prompt(prompt)
+
+            # Apply operator prompt override if provided
+            if prompt_override is not None:
+                prompt = prompt.model_copy(update={"rendered_prompt_text": prompt_override})
 
             template = self._workflow_resolver.load_template(workflow_def)
 

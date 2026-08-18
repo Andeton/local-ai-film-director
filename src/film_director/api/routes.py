@@ -107,6 +107,21 @@ class ShotEditRequest(BaseModel):
         return self
 
 
+class CreateShotRequest(BaseModel):
+    """Create a new shot in a scene."""
+    scene_id: str
+    action: str = ""
+    dramatic_purpose: str = ""
+    duration_sec: float = 5.0
+    camera: CameraIntent = CameraIntent(shot_size="medium", angle="eye_level", movement="static")
+    order_index: int | None = None  # None = append at end
+
+
+class ReorderShotsRequest(BaseModel):
+    """Reorder shots by providing ordered list of shot IDs."""
+    shot_ids: list[str]
+
+
 class GenerateReferenceRequest(BaseModel):
     kind: str = "character_body"
     profile_id: str | None = None
@@ -363,6 +378,97 @@ def create_router(
         if result is None:
             raise HTTPException(status_code=404, detail="Shot not found or outdated")
         return result.model_dump()
+
+    @router.post("/projects/{project_id}/shots")
+    def create_shot(project_id: str, body: CreateShotRequest) -> dict:
+        """Create a new shot in a scene. Auto-creates beat if needed."""
+        if shot_repo is None or beat_repo is None or scene_repo is None:
+            raise HTTPException(status_code=501, detail="Shot management not available")
+        import uuid as _uuid
+        from datetime import datetime as _dt, timezone as _tz
+        # Verify scene belongs to project
+        scene = scene_repo.get_scene(body.scene_id)
+        if scene is None:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        now = _dt.now(_tz.utc).isoformat()
+        # Create a beat for this shot
+        beat_id = f"beat{_uuid.uuid4().hex[:12]}"
+        from film_director.models.canonical import Beat
+        beat = Beat(
+            id=beat_id, scene_id=body.scene_id,
+            dramatic_action=body.action or "New shot",
+            character_intention="", change="",
+            order_index=body.order_index if body.order_index is not None else 999,
+            status="draft", source="human", version=1,
+            created_at=now, updated_at=now,
+        )
+        beat_repo.save_beat(beat)
+        # Determine order_index
+        existing = shot_repo.get_current_shots_by_project(project_id)
+        idx = body.order_index if body.order_index is not None else len(existing)
+        # Create shot
+        shot_id = f"shot{_uuid.uuid4().hex[:12]}"
+        shot = ShotSpecificationV1(
+            id=shot_id, beat_id=beat_id,
+            dramatic_purpose=body.dramatic_purpose, action=body.action,
+            camera=body.camera, duration_sec=body.duration_sec,
+            order_index=idx, status="draft", source="human", version=1,
+            created_at=now, updated_at=now,
+        )
+        shot_repo.save_shot(shot)
+        # Create generation plan
+        plan_id = f"plan{_uuid.uuid4().hex[:12]}"
+        from film_director.models.canonical import GenerationPlan, ReferenceRequirements
+        plan = GenerationPlan(
+            id=plan_id, shot_id=shot_id, shot_version=1,
+            strategy="REFERENCE_TO_VIDEO",
+            reference_requirements=ReferenceRequirements(character_refs=True),
+            duration_sec=body.duration_sec, seed_policy="random",
+            continuity_mode="last_frame" if idx > 0 else "none",
+            selection_reason="Operator-created shot",
+            status="ready", version=1, created_at=now, updated_at=now,
+        )
+        plan_repo.save_plan(plan)
+        return shot.model_dump()
+
+    @router.delete("/shots/{shot_id}")
+    def delete_shot(shot_id: str) -> dict:
+        """Delete a shot that has no Takes."""
+        if shot_repo is None:
+            raise HTTPException(status_code=501, detail="Shot management not available")
+        shot = shot_repo.get_shot(shot_id)
+        if shot is None:
+            raise HTTPException(status_code=404, detail="Shot not found")
+        # Check for Takes
+        if take_repo is not None:
+            takes = take_repo.get_takes_by_shot(shot_id)
+            if takes:
+                raise HTTPException(status_code=409, detail="Cannot delete shot with existing Takes")
+        shot_repo.delete_shot(shot_id)
+        return {"deleted": shot_id}
+
+    @router.post("/projects/{project_id}/reorder-shots")
+    def reorder_shots(project_id: str, body: ReorderShotsRequest) -> list[dict]:
+        """Reorder shots by providing the desired order of shot IDs."""
+        if shot_repo is None:
+            raise HTTPException(status_code=501, detail="Shot management not available")
+        from datetime import datetime as _dt, timezone as _tz
+        now = _dt.now(_tz.utc).isoformat()
+        shots = shot_repo.get_current_shots_by_project(project_id)
+        shot_map = {s.id: s for s in shots}
+        for sid in body.shot_ids:
+            if sid not in shot_map:
+                raise HTTPException(status_code=404, detail=f"Shot {sid} not found in project")
+        # Update order_index
+        with shot_repo._db.connection() as conn:
+            for i, sid in enumerate(body.shot_ids):
+                conn.execute(
+                    "UPDATE shots SET order_index = ?, updated_at = ? WHERE id = ?",
+                    (i, now, sid),
+                )
+        updated = shot_repo.get_current_shots_by_project(project_id)
+        updated.sort(key=lambda s: s.order_index)
+        return [s.model_dump() for s in updated]
 
     @router.post("/beats/{beat_id}/plan-coverage")
     def plan_beat_coverage(beat_id: str, force: bool = Query(False)) -> list[dict]:

@@ -5,224 +5,186 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Film Director — Operator Console</title>
 <style>
-:root {
-  --bg: #1a1a2e; --bg2: #16213e; --bg4: #1e1e3a;
-  --text: #e0e0e0; --text2: #8890a8; --accent: #e94560;
-  --green: #4ecca3; --yellow: #f0c040; --red: #e94560;
-  --blue: #4ea8de; --border: #2a2a4a;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 13px; }
-.app { display: grid; grid-template-columns: 260px 1fr 360px; height: 100vh; }
-.sidebar { background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; }
-.sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
-.sidebar-header h1 { font-size: 15px; font-weight: 700; }
-.sidebar-header .sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
-.shot-list { list-style: none; padding: 8px; }
-.shot-card { padding: 10px 12px; margin-bottom: 4px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
-.shot-card:hover { background: rgba(255,255,255,0.04); }
-.shot-card.selected { border-color: var(--accent); background: rgba(233,69,96,0.06); }
-.shot-num { font-size: 11px; color: var(--text2); font-weight: 600; }
-.shot-action { font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 3px; }
-.badge-approved { background: rgba(78,204,163,0.15); color: var(--green); }
-.badge-succeeded { background: rgba(78,168,222,0.15); color: var(--blue); }
-.badge-pending,.badge-generating { background: rgba(240,192,64,0.15); color: var(--yellow); }
-.badge-rejected { background: rgba(233,69,96,0.15); color: var(--red); }
-.badge-empty { background: rgba(255,255,255,0.04); color: var(--text2); }
-.badge-blocked { background: rgba(233,69,96,0.1); color: var(--red); }
-.badge-available { background: rgba(78,204,163,0.15); color: var(--green); }
-.badge-operator_override { background: rgba(240,192,64,0.15); color: var(--yellow); }
-.badge-generated { background: rgba(255,255,255,0.04); color: var(--text2); }
-.main { padding: 20px 24px; overflow-y: auto; }
-.section { margin-bottom: 16px; }
-.section-title { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-.shot-title { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
-.meta-row { display: flex; gap: 16px; margin-bottom: 10px; flex-wrap: wrap; }
-.meta-label { font-size: 10px; color: var(--text2); text-transform: uppercase; }
-.meta-value { font-size: 13px; margin-top: 1px; }
-.desc-box { background: var(--bg4); padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.5; max-height: 70px; overflow-y: auto; }
-.prompt-area { width: 100%; min-height: 180px; padding: 10px 12px; background: #111828; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; line-height: 1.6; font-family: 'Cascadia Code','Consolas',monospace; color: var(--text); resize: vertical; }
-.video-wrap { background: #000; border-radius: 8px; overflow: hidden; max-width: 700px; margin-bottom: 10px; }
-.video-wrap video { width: 100%; display: block; }
-.no-video { padding: 40px; text-align: center; color: var(--text2); }
-.take-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 4px; background: var(--bg4); border-radius: 6px; }
-.take-info { flex: 1; }
-.take-num { font-weight: 700; }
-.take-meta { font-size: 11px; color: var(--text2); }
-.take-actions { display: flex; gap: 6px; }
-.panel { background: var(--bg2); border-left: 1px solid var(--border); overflow-y: auto; padding: 14px; }
-.panel-title { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 6px; margin-top: 14px; }
-.panel-title:first-child { margin-top: 0; }
-.pic-card { display: flex; gap: 8px; align-items: flex-start; padding: 7px; margin-bottom: 5px; background: var(--bg4); border-radius: 6px; border: 1px solid var(--border); }
-.pic-card img { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; background: #111; }
-.pic-placeholder { width: 48px; height: 48px; border-radius: 4px; background: #222; display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--text2); }
-.pic-info { flex: 1; min-width: 0; }
-.pic-num { font-size: 9px; color: var(--text2); font-weight: 700; }
-.pic-role { font-size: 11px; font-weight: 600; }
-.pic-ref { font-size: 9px; color: var(--text2); }
-.blocked-msg { background: rgba(233,69,96,0.08); border: 1px solid rgba(233,69,96,0.2); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
-.blocked-msg .msg { font-size: 12px; color: var(--red); margin-bottom: 4px; }
-.setting { margin-bottom: 8px; }
-.setting label { display: block; font-size: 10px; color: var(--text2); text-transform: uppercase; margin-bottom: 2px; }
-.setting .val { font-size: 12px; padding: 4px 8px; background: rgba(255,255,255,0.03); border-radius: 4px; }
-.setting input[type=number],.setting input[type=text] { width: 100%; padding: 5px 8px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 12px; }
-.setting select { width: 100%; padding: 5px 8px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 12px; }
-.resolved { font-size: 11px; color: var(--green); margin-top: 2px; }
-.gen-summary { background: var(--bg4); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 11px; line-height: 1.5; }
-.gen-summary strong { color: var(--text); }
-.btn { padding: 7px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
-.btn:hover { opacity: 0.85; }
-.btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-approve { background: var(--green); color: #111; }
-.btn-reject { background: #c0392b; color: #fff; }
-.btn-sm { padding: 4px 10px; font-size: 11px; }
-.btn-link { background: none; border: none; color: var(--blue); cursor: pointer; font-size: 11px; text-decoration: underline; padding: 0; }
-.btn-generate { width: 100%; padding: 12px; font-size: 14px; }
-.loading { text-align: center; padding: 32px; color: var(--text2); }
-.toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; z-index: 100; }
-.toast-ok { background: var(--green); color: #111; }
-.toast-err { background: var(--red); color: #fff; }
+:root{--bg:#1a1a2e;--bg2:#16213e;--bg4:#1e1e3a;--text:#e0e0e0;--text2:#8890a8;--accent:#e94560;--green:#4ecca3;--yellow:#f0c040;--red:#e94560;--blue:#4ea8de;--border:#2a2a4a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:13px}
+.app{display:grid;grid-template-columns:260px 1fr 360px;height:100vh}
+.sidebar{background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto}
+.sidebar-header{padding:14px;border-bottom:1px solid var(--border)}
+.sidebar-header h1{font-size:15px;font-weight:700}
+.sidebar-header .sub{font-size:11px;color:var(--text2);margin-top:2px}
+.project-selector{padding:8px}
+.project-card{padding:8px 10px;margin-bottom:4px;border-radius:6px;cursor:pointer;border:1px solid transparent;font-size:12px}
+.project-card:hover{background:rgba(255,255,255,0.04)}
+.project-card.selected{border-color:var(--accent);background:rgba(233,69,96,0.06)}
+.shot-list{list-style:none;padding:8px}
+.shot-card{padding:8px 10px;margin-bottom:3px;border-radius:6px;cursor:pointer;border:1px solid transparent;display:flex;align-items:center;gap:8px}
+.shot-card:hover{background:rgba(255,255,255,0.04)}
+.shot-card.selected{border-color:var(--accent);background:rgba(233,69,96,0.06)}
+.shot-num{font-size:10px;color:var(--text2);font-weight:700;min-width:36px}
+.shot-action{font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{display:inline-block;padding:1px 6px;border-radius:10px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px}
+.badge-approved{background:rgba(78,204,163,0.15);color:var(--green)}.badge-succeeded{background:rgba(78,168,222,0.15);color:var(--blue)}.badge-pending,.badge-generating{background:rgba(240,192,64,0.15);color:var(--yellow)}.badge-rejected{background:rgba(233,69,96,0.15);color:var(--red)}.badge-empty{background:rgba(255,255,255,0.04);color:var(--text2)}.badge-blocked{background:rgba(233,69,96,0.1);color:var(--red)}.badge-available{background:rgba(78,204,163,0.15);color:var(--green)}.badge-operator_override{background:rgba(240,192,64,0.15);color:var(--yellow)}.badge-generated{background:rgba(255,255,255,0.04);color:var(--text2)}
+.main{padding:16px 20px;overflow-y:auto}
+.section{margin-bottom:14px}
+.section-title{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.shot-title{font-size:16px;font-weight:700;margin-bottom:8px}
+.meta-row{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap}
+.meta-label{font-size:9px;color:var(--text2);text-transform:uppercase}.meta-value{font-size:12px;margin-top:1px}
+.desc-box{background:var(--bg4);padding:6px 8px;border-radius:6px;font-size:11px;line-height:1.4;max-height:60px;overflow-y:auto}
+.prompt-area{width:100%;min-height:140px;padding:8px 10px;background:#111828;border:1px solid var(--border);border-radius:6px;font-size:11px;line-height:1.5;font-family:'Cascadia Code','Consolas',monospace;color:var(--text);resize:vertical}
+.video-wrap{background:#000;border-radius:8px;overflow:hidden;max-width:680px;margin-bottom:8px}
+.video-wrap video{width:100%;display:block}
+.no-video{padding:32px;text-align:center;color:var(--text2);font-size:12px}
+.take-row{display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;background:var(--bg4);border-radius:6px}
+.take-info{flex:1}.take-num{font-weight:700;font-size:12px}.take-meta{font-size:10px;color:var(--text2)}.take-actions{display:flex;gap:4px}
+.panel{background:var(--bg2);border-left:1px solid var(--border);overflow-y:auto;padding:12px}
+.panel-title{font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:5px;margin-top:12px}.panel-title:first-child{margin-top:0}
+.pic-card{display:flex;gap:6px;align-items:flex-start;padding:5px;margin-bottom:4px;background:var(--bg4);border-radius:6px;border:1px solid var(--border)}
+.pic-card img{width:40px;height:40px;object-fit:cover;border-radius:3px;background:#111}
+.pic-placeholder{width:40px;height:40px;border-radius:3px;background:#222;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--text2)}
+.pic-info{flex:1;min-width:0}.pic-num{font-size:8px;color:var(--text2);font-weight:700}.pic-role{font-size:10px;font-weight:600}.pic-ref{font-size:8px;color:var(--text2)}
+.blocked-msg{background:rgba(233,69,96,0.08);border:1px solid rgba(233,69,96,0.2);border-radius:6px;padding:6px 8px;margin-bottom:6px}
+.blocked-msg .msg{font-size:11px;color:var(--red);margin-bottom:3px}
+.setting{margin-bottom:6px}
+.setting label{display:block;font-size:9px;color:var(--text2);text-transform:uppercase;margin-bottom:1px}
+.setting .val{font-size:11px;padding:3px 6px;background:rgba(255,255,255,0.03);border-radius:4px}
+.setting input[type=number],.setting input[type=text],.setting textarea{width:100%;padding:4px 6px;background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;font-family:inherit}
+.setting select{width:100%;padding:4px 6px;background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px}
+.resolved{font-size:10px;color:var(--green);margin-top:1px}
+.gen-summary{background:var(--bg4);border-radius:6px;padding:6px 8px;margin-bottom:6px;font-size:10px;line-height:1.4}
+.gen-summary strong{color:var(--text)}
+.btn{padding:6px 12px;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer}.btn:hover{opacity:0.85}.btn:disabled{opacity:0.35;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}.btn-approve{background:var(--green);color:#111}.btn-reject{background:#c0392b;color:#fff}.btn-sm{padding:3px 8px;font-size:10px}.btn-link{background:none;border:none;color:var(--blue);cursor:pointer;font-size:10px;text-decoration:underline;padding:0}
+.btn-generate{width:100%;padding:10px;font-size:13px}
+.loading{text-align:center;padding:24px;color:var(--text2)}
+.toast{position:fixed;bottom:16px;right:16px;padding:8px 14px;border-radius:8px;font-size:11px;font-weight:600;z-index:100}.toast-ok{background:var(--green);color:#111}.toast-err{background:var(--red);color:#fff}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:50;display:flex;align-items:center;justify-content:center}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;width:420px;max-width:90vw}
+.modal h2{font-size:16px;margin-bottom:12px}
+.modal .field{margin-bottom:10px}
+.modal .field label{display:block;font-size:11px;color:var(--text2);margin-bottom:3px}
+.modal .field input,.modal .field textarea{width:100%;padding:6px 8px;background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;font-family:inherit}
+.modal .field textarea{min-height:80px;resize:vertical}
+.modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.shot-edit-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
+.shot-edit-row textarea{flex:1;min-height:36px;padding:4px 6px;background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;resize:vertical}
+.shot-edit-actions{display:flex;gap:3px;flex-shrink:0;padding-top:2px}
 </style>
 </head>
 <body>
 <div class="app">
   <div class="sidebar">
     <div class="sidebar-header"><h1>Film Director</h1><div class="sub" id="project-sub">Loading...</div></div>
+    <div class="project-selector" id="project-selector"></div>
     <ul class="shot-list" id="shot-list"></ul>
-    <div id="scene-assembly" style="padding:8px;border-top:1px solid var(--border);margin-top:8px;"></div>
+    <div id="scene-assembly" style="padding:8px;border-top:1px solid var(--border);margin-top:4px;"></div>
   </div>
-  <div class="main" id="main-panel"><div class="loading">Select a shot</div></div>
+  <div class="main" id="main-panel"><div class="loading">Select a project</div></div>
   <div class="panel" id="panel"><div class="loading">Select a shot</div></div>
 </div>
+<div id="modal-container"></div>
+
 <script>
-let currentProject=null,currentShots=[],selectedShotId=null,shotTakesCache={};
-let draftPrompt=null,draftDuration=null,draftSeedMode='random',draftSeedValue=null,generatedPrompt='';
+let projects=[],currentProject=null,currentShots=[],selectedShotId=null,shotTakesCache={};
+let draftPrompt=null,draftDuration=null,draftSeedMode='random',draftSeedValue=null;
 
 async function api(p,o){const r=await fetch(p,o);if(!r.ok){const e=await r.json().catch(()=>({error:r.statusText}));throw new Error(e.error||e.detail||r.statusText)}return r.json()}
 function toast(m,ok=true){const e=document.createElement('div');e.className='toast '+(ok?'toast-ok':'toast-err');e.textContent=m;document.body.appendChild(e);setTimeout(()=>{e.style.opacity='0';setTimeout(()=>e.remove(),300)},3000)}
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 
-async function loadProject(){
-  const projects=await api('/projects');
-  if(!projects.length)return;
-  currentProject=projects[0];
+async function init(){
+  projects=await api('/projects');
+  renderProjects();
+  if(projects.length)selectProject(projects[0].id);
+}
+
+function renderProjects(){
+  const el=document.getElementById('project-selector');
+  el.innerHTML=`<button class="btn btn-primary" style="width:100%;margin-bottom:6px;font-size:11px;padding:7px" onclick="showNewProject()">+ New Project</button>`
+    +projects.map(p=>`<div class="project-card${currentProject&&currentProject.id===p.id?' selected':''}" onclick="selectProject('${p.id}')">${esc((p.title||p.id).substring(0,35))}</div>`).join('');
+}
+
+async function selectProject(pid){
+  currentProject=projects.find(p=>p.id===pid)||await api(`/projects/${pid}`);
   document.getElementById('project-sub').textContent=currentProject.id;
+  renderProjects();
   await loadShots();
+  if(currentShots.length){selectShot(currentShots[0].id)}
+  else{document.getElementById('main-panel').innerHTML='<div class="loading">No shots yet. Use shot plan editor.</div>';showShotPlanEditor()}
 }
 
 async function loadShots(){
   if(!currentProject)return;
   const shots=await api(`/projects/${currentProject.id}/shots`);
   shots.sort((a,b)=>a.order_index-b.order_index);
-  currentShots=shots;
-  shotTakesCache={};
+  currentShots=shots;shotTakesCache={};
   for(const s of shots){try{shotTakesCache[s.id]=await api(`/shots/${s.id}/takes`)}catch(e){shotTakesCache[s.id]=[]}}
-  renderShotList();
-  renderSceneAssembly();
+  renderShotList();renderSceneAssembly();
 }
 
 function renderShotList(){
   const list=document.getElementById('shot-list');
-  list.innerHTML='';
+  list.innerHTML='<div style="padding:4px 8px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:9px;color:var(--text2);text-transform:uppercase;font-weight:700">Shots</span><button class="btn-link" onclick="showShotPlanEditor()">Edit Plan</button></div>';
   for(const shot of currentShots){
     const takes=shotTakesCache[shot.id]||[];
-    const ap=takes.find(t=>t.status==='approved');
-    const rv=takes.find(t=>t.status==='succeeded');
-    let badge='<span class="badge badge-empty">No takes</span>';
-    if(ap)badge='<span class="badge badge-approved">Approved</span>';
+    const ap=takes.find(t=>t.status==='approved');const rv=takes.find(t=>t.status==='succeeded');
+    let badge='<span class="badge badge-empty">—</span>';
+    if(ap)badge='<span class="badge badge-approved">✓</span>';
     else if(rv)badge='<span class="badge badge-succeeded">Review</span>';
-    else if(takes.length)badge='<span class="badge badge-pending">Pending</span>';
     const li=document.createElement('li');
     li.className='shot-card'+(shot.id===selectedShotId?' selected':'');
-    li.innerHTML=`<div class="shot-num">Shot ${shot.order_index+1}</div><div class="shot-action">${esc((shot.action||'').substring(0,55))}</div>${badge}`;
+    li.innerHTML=`<span class="shot-num">Shot ${shot.order_index+1}</span><span class="shot-action">${esc((shot.action||'').substring(0,40))}</span>${badge}`;
     li.onclick=()=>selectShot(shot.id);
     list.appendChild(li);
   }
 }
 
 async function selectShot(shotId){
-  selectedShotId=shotId;
-  draftPrompt=null;draftDuration=null;draftSeedMode='random';draftSeedValue=null;
-  renderShotList();
-  await refreshPreview();
+  selectedShotId=shotId;draftPrompt=null;draftDuration=null;draftSeedMode='random';draftSeedValue=null;
+  renderShotList();await refreshPreview();
 }
 
 async function refreshPreview(){
   if(!selectedShotId)return;
-  const shot=currentShots.find(s=>s.id===selectedShotId);
-  if(!shot)return;
+  const shot=currentShots.find(s=>s.id===selectedShotId);if(!shot)return;
   const params=new URLSearchParams();
   if(draftPrompt!==null)params.set('prompt_override',draftPrompt);
   if(draftDuration!==null)params.set('duration_sec',draftDuration);
   if(draftSeedMode==='explicit'&&draftSeedValue!==null)params.set('seed',draftSeedValue);
   let preview=null;
-  try{preview=await api(`/shots/${selectedShotId}/generation-preview?${params}`)}catch(e){console.warn(e)}
-  if(preview&&draftPrompt===null)generatedPrompt=preview.prompt_text;
-  renderMain(shot,preview);
-  renderPanel(shot,preview);
+  try{preview=await api(`/shots/${selectedShotId}/generation-preview?${params}`)}catch(e){}
+  renderMain(shot,preview);renderPanel(shot,preview);
 }
 
 function renderMain(shot,preview){
   const panel=document.getElementById('main-panel');
-  const takes=shotTakesCache[shot.id]||[];
-  const idx=currentShots.indexOf(shot);
+  const takes=shotTakesCache[shot.id]||[];const idx=currentShots.indexOf(shot);
   let cam={};try{cam=typeof shot.camera==='string'?JSON.parse(shot.camera):(shot.camera||{})}catch(e){}
-  const ap=takes.find(t=>t.status==='approved');
-  const rv=takes.filter(t=>t.status==='succeeded');
+  const ap=takes.find(t=>t.status==='approved');const rv=takes.filter(t=>t.status==='succeeded');
   const showTake=ap||rv[rv.length-1]||takes[takes.length-1];
   let videoHtml='<div class="no-video">No takes generated</div>';
-  if(showTake&&showTake.video_path){
-    videoHtml=`<video controls autoplay loop muted><source src="/media/${showTake.video_path.replace(/\\\\/g,'/')}" type="video/mp4"></video>`;
-  }
+  if(showTake&&showTake.video_path)videoHtml=`<video controls autoplay loop muted><source src="/media/${showTake.video_path.replace(/\\\\/g,'/')}" type="video/mp4"></video>`;
   const promptVal=draftPrompt!==null?draftPrompt:(preview?preview.prompt_text:'');
   const isOverride=draftPrompt!==null;
   const src=isOverride?'operator_override':(preview?preview.prompt_source:'generated');
-
   panel.innerHTML=`
     <div class="shot-title">Shot ${idx+1}</div>
     <div class="meta-row">
-      <div><div class="meta-label">Duration</div><div class="meta-value">${preview?preview.duration_sec+'s → '+preview.resolved_frames+' frames ('+preview.resolved_duration_sec+'s)':shot.duration_sec+'s'}</div></div>
+      <div><div class="meta-label">Duration</div><div class="meta-value">${preview?preview.duration_sec+'s → '+preview.resolved_frames+' frames':shot.duration_sec+'s'}</div></div>
       <div><div class="meta-label">Camera</div><div class="meta-value">${esc(cam.shot_size||'')} ${esc(cam.movement||'')}</div></div>
       <div><div class="meta-label">Workflow</div><div class="meta-value">${preview?preview.workflow_id:''}</div></div>
     </div>
-    <div class="section">
-      <div class="section-title">Shot Description</div>
-      <div class="desc-box">${esc(shot.action||'')}</div>
-    </div>
-    <div class="section">
-      <div class="section-title">
-        Generation Prompt
-        <span class="badge badge-${src}">${src==='operator_override'?'Override':'Generated'}</span>
-      </div>
+    <div class="section"><div class="section-title">Shot Description</div><div class="desc-box">${esc(shot.action||'')}</div></div>
+    ${promptVal?`<div class="section"><div class="section-title">Generation Prompt <span class="badge badge-${src}">${src==='operator_override'?'Override':'Generated'}</span></div>
       <textarea class="prompt-area" id="prompt-edit" oninput="onPromptEdit(this.value)">${esc(promptVal)}</textarea>
-      ${isOverride?'<button class="btn-link" style="margin-top:4px" onclick="resetPrompt()">Reset to generated prompt</button>':''}
-    </div>
-    <div class="section">
-      <div class="section-title">Video</div>
-      <div class="video-wrap">${videoHtml}</div>
-    </div>
-    <div class="section">
-      <div class="section-title">Takes (${takes.length})</div>
-      ${takes.length===0?'<div style="color:var(--text2)">No takes yet</div>':''}
-      ${takes.map(t=>`
-        <div class="take-row">
-          <div class="take-info">
-            <span class="take-num">Take</span>
-            <span class="badge badge-${t.status}">${t.status}</span>
-            <div class="take-meta">Seed: ${t.seed} · ${t.id.substring(0,12)}</div>
-          </div>
-          <div class="take-actions">
-            ${t.status==='succeeded'?`
-              <button class="btn btn-approve btn-sm" onclick="approveTake('${t.id}')">Approve</button>
-              <button class="btn btn-reject btn-sm" onclick="rejectTake('${t.id}')">Reject</button>
-            `:''}
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  `;
+      ${isOverride?'<button class="btn-link" style="margin-top:3px" onclick="resetPrompt()">Reset to generated</button>':''}
+    </div>`:''}
+    <div class="section"><div class="section-title">Video</div><div class="video-wrap">${videoHtml}</div></div>
+    <div class="section"><div class="section-title">Takes (${takes.length})</div>
+      ${takes.length===0?'<div style="color:var(--text2);font-size:11px">No takes</div>':''}
+      ${takes.map(t=>`<div class="take-row"><div class="take-info"><span class="take-num">Take</span> <span class="badge badge-${t.status}">${t.status}</span><div class="take-meta">Seed: ${t.seed} · ${t.id.substring(0,12)}</div></div><div class="take-actions">${t.status==='succeeded'?`<button class="btn btn-approve btn-sm" onclick="approveTake('${t.id}')">Approve</button><button class="btn btn-reject btn-sm" onclick="rejectTake('${t.id}')">Reject</button>`:''}</div></div>`).join('')}
+    </div>`;
 }
 
 function renderPanel(shot,preview){
@@ -232,179 +194,166 @@ function renderPanel(shot,preview){
   let picsHtml='';
   for(const pic of preview.pictures){
     const hasImg=pic.thumbnail_url&&pic.status!=='blocked';
-    picsHtml+=`<div class="pic-card">
-      ${hasImg?`<img src="${pic.thumbnail_url}" alt="${pic.role}">`:`<div class="pic-placeholder">${pic.status==='blocked'?'⊘':'?'}</div>`}
-      <div class="pic-info">
-        <div class="pic-num">Picture ${pic.picture_index}</div>
-        <div class="pic-role">${pic.role}</div>
-        <div class="pic-ref">${pic.reference_id?pic.reference_id.substring(0,16):(pic.source_label||'')}</div>
-        <span class="badge badge-${pic.status}">${pic.status}</span>
-      </div>
-    </div>`;
+    picsHtml+=`<div class="pic-card">${hasImg?`<img src="${pic.thumbnail_url}">`:`<div class="pic-placeholder">${pic.status==='blocked'?'⊘':'?'}</div>`}<div class="pic-info"><div class="pic-num">Picture ${pic.picture_index}</div><div class="pic-role">${pic.role}</div><div class="pic-ref">${pic.reference_id?pic.reference_id.substring(0,16):(pic.source_label||'')}</div><span class="badge badge-${pic.status}">${pic.status}</span></div></div>`;
   }
   let blockedHtml='';
-  if(preview.continuity_blocked){
-    const pi=preview.predecessor_shot_index;
-    blockedHtml=`<div class="blocked-msg">
-      <div class="msg">Shot ${idx+1} is blocked because Shot ${pi+1} has no approved Take.</div>
-      <button class="btn-link" onclick="selectShot('${currentShots[pi].id}')">Open Shot ${pi+1} for Review →</button>
-    </div>`;
-  }
-  const canGen=preview.can_generate;
-  const durVal=draftDuration!==null?draftDuration:preview.plan_duration_sec;
-  const seedMode=draftSeedMode;
-  const seedVal=draftSeedValue!==null?draftSeedValue:'';
-  const promptSrc=draftPrompt!==null?'Override':'Generated';
-
+  if(preview.continuity_blocked){const pi=preview.predecessor_shot_index;blockedHtml=`<div class="blocked-msg"><div class="msg">Blocked: Shot ${pi+1} has no approved Take.</div><button class="btn-link" onclick="selectShot('${currentShots[pi].id}')">Review Shot ${pi+1} →</button></div>`}
+  const canGen=preview.can_generate;const durVal=draftDuration!==null?draftDuration:preview.plan_duration_sec;
   panel.innerHTML=`
-    <div class="panel-title">Generation Inputs</div>
-    ${picsHtml}
-    ${blockedHtml}
-
-    <div class="panel-title">Duration</div>
-    <div class="setting">
-      <input type="number" id="dur-input" value="${durVal}" step="0.5" min="1" max="15" onchange="onDurationChange(this.value)">
-      <div class="resolved">${preview.resolved_frames} frames · ${preview.resolved_duration_sec}s actual · ${preview.fps} fps</div>
-    </div>
-
-    <div class="panel-title">Seed</div>
-    <div class="setting">
-      <select id="seed-mode" onchange="onSeedModeChange(this.value)">
-        <option value="random" ${seedMode==='random'?'selected':''}>Random</option>
-        <option value="explicit" ${seedMode==='explicit'?'selected':''}>Explicit</option>
-      </select>
-      <div id="seed-explicit-wrap" style="margin-top:4px;${seedMode==='explicit'?'':'display:none'}">
-        <input type="text" id="seed-input" value="${seedVal}" placeholder="Enter seed integer" onchange="onSeedChange(this.value)">
-      </div>
-      <div class="resolved">${preview.seed_policy==='explicit'?'Seed: '+preview.seed:'Random on submission'}</div>
-    </div>
-
+    <div class="panel-title">Inputs</div>${picsHtml}${blockedHtml}
+    <div class="panel-title">Duration</div><div class="setting"><input type="number" value="${durVal}" step="0.5" min="1" max="15" onchange="onDurationChange(this.value)"><div class="resolved">${preview.resolved_frames} frames · ${preview.resolved_duration_sec}s · ${preview.fps}fps</div></div>
+    <div class="panel-title">Seed</div><div class="setting"><select onchange="onSeedModeChange(this.value)"><option value="random" ${draftSeedMode==='random'?'selected':''}>Random</option><option value="explicit" ${draftSeedMode==='explicit'?'selected':''}>Explicit</option></select><div id="seed-wrap" style="margin-top:3px;${draftSeedMode==='explicit'?'':'display:none'}"><input type="text" value="${draftSeedValue||''}" placeholder="Seed integer" onchange="onSeedChange(this.value)"></div><div class="resolved">${preview.seed_policy==='explicit'?'Seed: '+preview.seed:'Random'}</div></div>
     <div class="panel-title">Settings</div>
     <div class="setting"><label>Workflow</label><div class="val">${preview.workflow_id} v${preview.workflow_version}</div></div>
-    <div class="setting"><label>Strategy</label><div class="val">${preview.strategy}</div></div>
-    <div class="setting"><label>Resolution</label><div class="val">${preview.resolution} @ ${preview.fps} fps</div></div>
-    <div class="setting"><label>Continuity</label><div class="val">${preview.continuity_mode}</div></div>
-
-    <div class="panel-title">Ready to Generate</div>
-    <div class="gen-summary">
-      <strong>Workflow:</strong> ${preview.workflow_id}<br>
-      <strong>Prompt:</strong> ${promptSrc}<br>
-      <strong>Duration:</strong> ${preview.duration_sec}s → ${preview.resolved_frames} frames → ${preview.resolved_duration_sec}s<br>
-      <strong>Seed:</strong> ${preview.seed_policy==='explicit'?preview.seed:'Random'}<br>
-      <strong>Inputs:</strong> ${preview.pictures.filter(p=>p.status!=='blocked').length}/${preview.pictures.length} ready
-    </div>
-    <button class="btn btn-primary btn-generate" ${canGen?'':'disabled'} onclick="doGenerate('${shot.id}')">
-      ${canGen?'Generate Take':'Blocked'}
-    </button>
-    ${!canGen&&preview.predecessor_shot_index!==null?`<div style="font-size:11px;color:var(--red);margin-top:5px;text-align:center">Approve Shot ${preview.predecessor_shot_index+1} to unlock</div>`:''}
-  `;
+    <div class="setting"><label>Resolution</label><div class="val">${preview.resolution} @ ${preview.fps}fps</div></div>
+    <div class="panel-title">Generate</div>
+    <div class="gen-summary"><strong>Workflow:</strong> ${preview.workflow_id}<br><strong>Duration:</strong> ${preview.resolved_duration_sec}s (${preview.resolved_frames}f)<br><strong>Inputs:</strong> ${preview.pictures.filter(p=>p.status!=='blocked').length}/${preview.pictures.length}<br><strong>Seed:</strong> ${preview.seed_policy==='explicit'?preview.seed:'Random'}</div>
+    <button class="btn btn-primary btn-generate" ${canGen?'':'disabled'} onclick="doGenerate('${shot.id}')">${canGen?'Generate Take':'Blocked'}</button>
+    ${!canGen&&preview.predecessor_shot_index!==null?`<div style="font-size:10px;color:var(--red);margin-top:4px;text-align:center">Approve Shot ${preview.predecessor_shot_index+1}</div>`:''}`;
 }
 
-let promptTimer=null;
-function onPromptEdit(val){
-  draftPrompt=val;
-  // Debounce preview refresh
-  clearTimeout(promptTimer);
-  promptTimer=setTimeout(()=>refreshPreview(),500);
-}
-function resetPrompt(){
-  draftPrompt=null;
-  refreshPreview();
-}
-function onDurationChange(val){
-  draftDuration=parseFloat(val)||null;
-  refreshPreview();
-}
-function onSeedModeChange(mode){
-  draftSeedMode=mode;
-  if(mode==='random')draftSeedValue=null;
-  refreshPreview();
-}
-function onSeedChange(val){
-  const n=parseInt(val);
-  draftSeedValue=isNaN(n)?null:n;
-  refreshPreview();
+// Shot plan editor
+function showShotPlanEditor(){
+  if(!currentProject)return;
+  const panel=document.getElementById('main-panel');
+  let html=`<div class="shot-title">Shot Plan Editor</div><div style="margin-bottom:8px"><button class="btn btn-primary btn-sm" onclick="addShot()">+ Add Shot</button></div>`;
+  for(const shot of currentShots){
+    const idx=currentShots.indexOf(shot);
+    const cam=typeof shot.camera==='string'?JSON.parse(shot.camera):(shot.camera||{});
+    html+=`<div class="shot-edit-row">
+      <span style="font-size:10px;color:var(--text2);min-width:30px;padding-top:6px">Shot ${idx+1}</span>
+      <textarea onchange="editShot('${shot.id}','action',this.value)">${esc(shot.action||'')}</textarea>
+      <div class="shot-edit-actions">
+        <button class="btn btn-sm" ${idx===0?'disabled':''} onclick="moveShot('${shot.id}',-1)" title="Move up">↑</button>
+        <button class="btn btn-sm" ${idx===currentShots.length-1?'disabled':''} onclick="moveShot('${shot.id}',1)" title="Move down">↓</button>
+        <button class="btn btn-reject btn-sm" onclick="deleteShot('${shot.id}')" title="Delete">×</button>
+      </div>
+    </div>`;
+  }
+  if(!currentShots.length)html+='<div style="color:var(--text2);font-size:12px;padding:16px">No shots yet. Click + Add Shot or run enrichment.</div>';
+  panel.innerHTML=html;
+  document.getElementById('panel').innerHTML=`
+    <div class="panel-title">Pre-Production</div>
+    <div class="setting"><label>Project</label><div class="val">${currentProject.id}</div></div>
+    <div class="setting"><label>Shots</label><div class="val">${currentShots.length}</div></div>
+    <div style="margin-top:12px"><button class="btn btn-primary" style="width:100%;font-size:11px" onclick="enrichProject()">Enrich with LLM</button><div style="font-size:9px;color:var(--text2);margin-top:3px">Runs qwen3:14b beat/shot generation. Results may need manual correction.</div></div>`;
+  selectedShotId=null;renderShotList();
 }
 
-async function approveTake(id){
-  try{await api(`/takes/${id}/approve`,{method:'POST'});toast('Take approved');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}
-}
-async function rejectTake(id){
-  try{await api(`/takes/${id}/reject`,{method:'POST'});toast('Take rejected');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}
-}
-async function doGenerate(shotId){
-  const body={};
-  if(draftPrompt!==null)body.prompt_override=draftPrompt;
-  if(draftDuration!==null)body.duration_sec=draftDuration;
-  if(draftSeedMode==='explicit'&&draftSeedValue!==null)body.seed=draftSeedValue;
-  toast('Generating... this may take 5-30 minutes');
+async function addShot(){
+  if(!currentProject)return;
+  const scenes=await api(`/projects/${currentProject.id}/scenes`);
+  if(!scenes.length){toast('No scenes in project',false);return}
   try{
-    await api(`/shots/${shotId}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    toast('Take generated');await loadShots();await selectShot(shotId);
-  }catch(e){toast('Generation failed: '+e.message,false)}
+    await api(`/projects/${currentProject.id}/shots`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_id:scenes[0].id,action:'New shot',duration_sec:5.0})});
+    toast('Shot added');await loadShots();showShotPlanEditor();
+  }catch(e){toast(e.message,false)}
 }
 
+async function editShot(shotId,field,value){
+  try{
+    const body={};body[field]=value;
+    await api(`/shots/${shotId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    await loadShots();
+  }catch(e){toast('Edit failed: '+e.message,false)}
+}
+
+async function moveShot(shotId,dir){
+  const idx=currentShots.findIndex(s=>s.id===shotId);
+  if(idx<0)return;
+  const ids=[...currentShots.map(s=>s.id)];
+  const swap=idx+dir;if(swap<0||swap>=ids.length)return;
+  [ids[idx],ids[swap]]=[ids[swap],ids[idx]];
+  try{
+    await api(`/projects/${currentProject.id}/reorder-shots`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shot_ids:ids})});
+    await loadShots();showShotPlanEditor();
+  }catch(e){toast(e.message,false)}
+}
+
+async function deleteShot(shotId){
+  if(!confirm('Delete this shot?'))return;
+  try{
+    await api(`/shots/${shotId}`,{method:'DELETE'});
+    toast('Shot deleted');await loadShots();showShotPlanEditor();
+  }catch(e){toast(e.message,false)}
+}
+
+async function enrichProject(){
+  if(!currentProject)return;
+  toast('Enriching... this may take a minute');
+  try{
+    const r=await api(`/projects/${currentProject.id}/enrich`,{method:'POST'});
+    toast(`Enriched: ${r.beats_created} beats, ${r.shots_created} shots`);
+    await loadShots();showShotPlanEditor();
+  }catch(e){toast('Enrichment failed: '+e.message,false)}
+}
+
+// New project modal
+function showNewProject(){
+  document.getElementById('modal-container').innerHTML=`
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h2>New Project</h2>
+        <div class="field"><label>Scene Idea</label><textarea id="np-idea" placeholder="Describe your scene..."></textarea></div>
+        <div class="field"><label>Style (optional)</label><input id="np-style" value="cinematic"></div>
+        <div class="actions">
+          <button class="btn" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="createProject()">Create with Wind Comic</button>
+        </div>
+      </div>
+    </div>`;
+}
+function closeModal(){document.getElementById('modal-container').innerHTML=''}
+
+async function createProject(){
+  const idea=document.getElementById('np-idea').value.trim();
+  if(!idea){toast('Enter a scene idea',false);return}
+  const style=document.getElementById('np-style').value.trim()||undefined;
+  closeModal();
+  toast('Creating project via Wind Comic... this may take 1-2 minutes');
+  try{
+    const r=await api('/projects/from-idea',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idea,style})});
+    toast(`Project created: ${r.shots_created} shots`);
+    projects=await api('/projects');
+    renderProjects();
+    selectProject(r.project_id);
+  }catch(e){toast('Failed: '+e.message,false)}
+}
+
+// Scene assembly
 function renderSceneAssembly(){
   const el=document.getElementById('scene-assembly');
   if(!currentProject||!currentShots.length){el.innerHTML='';return}
-  const allApproved=currentShots.every(s=>(shotTakesCache[s.id]||[]).some(t=>t.status==='approved'));
-  const shotCount=currentShots.length;
-  const approvedCount=currentShots.filter(s=>(shotTakesCache[s.id]||[]).some(t=>t.status==='approved')).length;
-  el.innerHTML=`
-    <div class="panel-title" style="margin-top:0">Scene</div>
-    <div style="font-size:11px;color:var(--text2);margin-bottom:6px">${approvedCount}/${shotCount} shots approved</div>
-    <button class="btn btn-primary" style="width:100%;font-size:12px;padding:8px" ${allApproved?'':'disabled'} onclick="buildScene()">
-      ${allApproved?'Build Scene':'Waiting for approvals'}
-    </button>
-    <div id="scene-result"></div>
-  `;
-  // Check if export exists
-  api(`/projects/${currentProject.id}/scene-export`).then(data=>{
+  const allAp=currentShots.every(s=>(shotTakesCache[s.id]||[]).some(t=>t.status==='approved'));
+  const apCnt=currentShots.filter(s=>(shotTakesCache[s.id]||[]).some(t=>t.status==='approved')).length;
+  el.innerHTML=`<div class="panel-title" style="margin-top:0">Scene</div><div style="font-size:10px;color:var(--text2);margin-bottom:4px">${apCnt}/${currentShots.length} approved</div>
+    <button class="btn btn-primary" style="width:100%;font-size:11px;padding:6px" ${allAp?'':'disabled'} onclick="buildScene()">${allAp?'Build Scene':'Waiting'}</button><div id="scene-result"></div>`;
+  api(`/projects/${currentProject.id}/scene-export`).then(d=>{
     const r=document.getElementById('scene-result');
-    if(r)r.innerHTML=`<div style="margin-top:6px;font-size:11px;color:var(--green)">Scene exported<br><button class="btn-link" onclick="viewScene()">Watch scene →</button></div>`;
+    if(r)r.innerHTML=`<div style="margin-top:4px;font-size:10px;color:var(--green)"><button class="btn-link" onclick="viewScene()">Watch scene →</button></div>`;
   }).catch(()=>{});
 }
 
-async function buildScene(){
-  toast('Assembling scene...');
-  try{
-    const r=await api(`/projects/${currentProject.id}/build-scene`,{method:'POST'});
-    toast('Scene assembled: '+r.duration+'s');
-    renderSceneAssembly();
-    viewScene();
-  }catch(e){toast('Assembly failed: '+e.message,false)}
-}
-
+async function buildScene(){toast('Assembling...');try{await api(`/projects/${currentProject.id}/build-scene`,{method:'POST'});toast('Scene built');renderSceneAssembly();viewScene()}catch(e){toast(e.message,false)}}
 async function viewScene(){
-  try{
-    const data=await api(`/projects/${currentProject.id}/scene-export`);
-    const panel=document.getElementById('main-panel');
-    const m=data.manifest||{};
-    const out=m.output||{};
-    panel.innerHTML=`
-      <div class="shot-title">Complete Scene</div>
-      <div class="meta-row">
-        <div><div class="meta-label">Duration</div><div class="meta-value">${out.duration||'?'}s</div></div>
-        <div><div class="meta-label">Resolution</div><div class="meta-value">${out.resolution||'?'}</div></div>
-        <div><div class="meta-label">Shots</div><div class="meta-value">${(m.inputs||[]).length}</div></div>
-      </div>
-      <div class="section">
-        <div class="section-title">Scene Video</div>
-        <div class="video-wrap"><video controls autoplay muted style="max-height:500px"><source src="${data.media_url}" type="video/mp4"></video></div>
-      </div>
-      <div class="section">
-        <div class="section-title">Assembly Manifest</div>
-        <div style="font-size:11px;color:var(--text2)">
-          ${(m.inputs||[]).map(i=>'Shot '+(i.shot_index+1)+': '+i.take_id.substring(0,12)).join('<br>')}
-        </div>
-      </div>
-    `;
-    selectedShotId=null;
-    renderShotList();
-  }catch(e){toast('Scene not found',false)}
+  try{const d=await api(`/projects/${currentProject.id}/scene-export`);const m=d.manifest||{};const o=m.output||{};
+    document.getElementById('main-panel').innerHTML=`<div class="shot-title">Complete Scene</div><div class="meta-row"><div><div class="meta-label">Duration</div><div class="meta-value">${o.duration||'?'}s</div></div><div><div class="meta-label">Resolution</div><div class="meta-value">${o.resolution||'?'}</div></div><div><div class="meta-label">Shots</div><div class="meta-value">${(m.inputs||[]).length}</div></div></div><div class="video-wrap"><video controls autoplay muted><source src="${d.media_url}" type="video/mp4"></video></div>`;
+    selectedShotId=null;renderShotList();
+  }catch(e){toast('No scene',false)}
 }
 
-loadProject();
+let promptTimer=null;
+function onPromptEdit(v){draftPrompt=v;clearTimeout(promptTimer);promptTimer=setTimeout(()=>refreshPreview(),500)}
+function resetPrompt(){draftPrompt=null;refreshPreview()}
+function onDurationChange(v){draftDuration=parseFloat(v)||null;refreshPreview()}
+function onSeedModeChange(m){draftSeedMode=m;if(m==='random')draftSeedValue=null;const w=document.getElementById('seed-wrap');if(w)w.style.display=m==='explicit'?'':'none';refreshPreview()}
+function onSeedChange(v){const n=parseInt(v);draftSeedValue=isNaN(n)?null:n;refreshPreview()}
+
+async function approveTake(id){try{await api(`/takes/${id}/approve`,{method:'POST'});toast('Approved');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
+async function rejectTake(id){try{await api(`/takes/${id}/reject`,{method:'POST'});toast('Rejected');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
+async function doGenerate(sid){const body={};if(draftPrompt!==null)body.prompt_override=draftPrompt;if(draftDuration!==null)body.duration_sec=draftDuration;if(draftSeedMode==='explicit'&&draftSeedValue!==null)body.seed=draftSeedValue;toast('Generating...');try{await api(`/shots/${sid}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast('Done');await loadShots();await selectShot(sid)}catch(e){toast('Failed: '+e.message,false)}}
+
+init();
 </script>
 </body>
 </html>

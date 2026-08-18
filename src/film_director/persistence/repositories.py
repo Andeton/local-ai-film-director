@@ -575,6 +575,12 @@ class ShotRepository:
             rows = c.execute(sql, (project_id,)).fetchall()
         return [self._row_to_shot(r) for r in rows]
 
+    def delete_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> None:
+        """Delete a shot. Only safe for shots with no Takes or GenerationRequests."""
+        with _use_conn(self._db, conn) as c:
+            c.execute("DELETE FROM generation_plans WHERE shot_id = ?", (shot_id,))
+            c.execute("DELETE FROM shots WHERE id = ?", (shot_id,))
+
     def mark_outdated(self, shot_id: str, conn: sqlite3.Connection | None = None) -> None:
         with _use_conn(self._db, conn) as c:
             c.execute("UPDATE shots SET status = 'outdated' WHERE id = ?", (shot_id,))

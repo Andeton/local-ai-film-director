@@ -104,9 +104,9 @@ class TestSuccess:
         body = r.json()
         assert body["scenes_imported"] == 2
         assert body["characters_imported"] == 3
-        assert body["beats_created"] == 2
-        assert body["shots_created"] == 4
-        assert body["plans_created"] == 4
+        assert body["beats_created"] == 0  # enrichment now explicit
+        assert body["shots_created"] == 0
+        assert body["plans_created"] == 0
 
     def test_idea_forwarded_to_service(self, m4_client):
         with patch(

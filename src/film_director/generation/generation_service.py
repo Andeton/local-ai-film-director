@@ -465,6 +465,7 @@ class GenerationService:
             if staging_dir:
                 cleanup_dir(staging_dir)
 
+            self._release_idle_gpu()
             return take
 
         except GenerationError:
@@ -563,6 +564,7 @@ class GenerationService:
                     self._finalize_callback(take, conn)
 
             cleanup_dir(staging_dir)
+            self._release_idle_gpu()
             return take
 
         except Exception as e:
@@ -768,6 +770,7 @@ class GenerationService:
             if staging_dir:
                 cleanup_dir(staging_dir)
 
+            self._release_idle_gpu()
             return take
 
         except Exception as e:
@@ -792,6 +795,22 @@ class GenerationService:
     # -------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------
+
+    def _release_idle_gpu(self) -> None:
+        """Release idle ComfyUI model memory after successful generation.
+
+        Only frees if ComfyUI queue is empty. Failure is logged but
+        never invalidates a completed Take.
+        """
+        try:
+            from film_director.services.resource_cleanup import free_comfyui_memory
+            result = free_comfyui_memory()
+            if result.get("freed"):
+                logger.info("Post-generation GPU cleanup: freed")
+            elif result.get("error"):
+                logger.debug("Post-generation GPU cleanup skipped: %s", result["error"])
+        except Exception as e:
+            logger.debug("Post-generation GPU cleanup failed: %s", e)
 
     def _upload_references(self, resolved_bindings):
         uploaded = []

@@ -263,6 +263,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         enrichment_service=enrichment_service,
     )
 
+    from film_director.services.activity import ActivityMonitor
+    activity_monitor = ActivityMonitor()
+
     router = create_router(
         adapter=adapter,
         import_service=import_service,
@@ -287,6 +290,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         queue_service=queue_service,
         take_service=take_service,
         take_repo=take_repo,
+        activity_monitor=activity_monitor,
     )
     app.include_router(router)
 

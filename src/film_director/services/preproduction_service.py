@@ -105,23 +105,12 @@ class PreproductionService:
             import_result.characters_imported,
         )
 
-        # 6. Enrich with source-fact precedence (M4.D)
-        enrichment_result = self._enrichment_service.enrich_project(
-            import_result.project_id,
-        )
-        logger.info(
-            "Enrichment complete: beats=%d, shots=%d, plans=%d",
-            enrichment_result.beats_created,
-            enrichment_result.shots_created,
-            enrichment_result.plans_created,
-        )
-
-        # 7. Return
+        # 6. Return — enrichment is now an explicit operator action, not automatic
         return PreproductionResult(
             project_id=import_result.project_id,
             wc_project_id=wc_project_id,
             import_result=import_result,
-            enrichment_result=enrichment_result,
+            enrichment_result=None,
         )
 
     @staticmethod

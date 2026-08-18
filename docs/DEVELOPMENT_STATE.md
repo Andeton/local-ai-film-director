@@ -8,9 +8,39 @@
 
 **Production loop: PROVEN**
 
-P2 completed the first real end-to-end scene: idea → Wind Comic → canonical shots → references → H3 generation → Takes → approval → continuity → scene assembly → playable MP4 export. Human acceptance: PASS.
-
 **Active branch:** `main`
+
+---
+
+## P3 — Pre-Production UI
+
+**Status:** IN PROGRESS — latest checkpoint merged to main
+
+### Implemented Capabilities
+
+- New Project UI (Wind Comic creation through product path)
+- Canonical import (WC → LFDirector project)
+- Shot plan editor (add / edit / delete / reorder via API)
+- Explicit enrichment only (auto-enrichment removed)
+- Project readiness (missing refs disable generation)
+- Activity Monitor (operation tracking, duplicate protection)
+- Automatic idle model cleanup after expensive stages
+- Manual GPU memory release
+- System/resource status visibility
+
+### Current P3 Test Project
+
+- **LFDirector:** `proj_b885a403ecac`
+- **Wind Comic:** `OOBJ2pik0F5frZWWhaTFe`
+- **Scenes:** 1 · **Characters:** 2
+- **Shots:** 16 (old auto-enrichment, needs human review)
+- **Character reference:** MISSING
+- **Environment reference:** MISSING
+- **Generation ready:** NO
+
+### Next Action
+
+Open `proj_b885a403ecac` in operator UI → review/correct 16-shot plan → prepare references through UI.
 
 ---
 
@@ -18,32 +48,17 @@ P2 completed the first real end-to-end scene: idea → Wind Comic → canonical 
 
 **Status:** COMPLETE / HUMAN PASS / MERGED
 
-**Project:** `proj_5339656ad20f`  
-**Scene:** 5 shots, all approved  
-**Output:** `storage/exports/proj_5339656ad20f/scene_main_v1.mp4`  
-**Duration:** 30.825s · 1376x768 · 24fps · H264+AAC
-
-**Operator UI:** Minimal production console at `http://127.0.0.1:8000/`
-- Project/shot navigation, video playback, approve/reject
-- Generation preview with prompt/duration/seed controls
-- Continuity visualization, blocked-shot messaging
-- Scene assembly with one-click build
-
-**Known P2 Gaps:**
-
-| Gap | Description |
-|---|---|
-| Enrichment quality | qwen3:14b did not reliably convert scene idea into correct shots. Human correction was required. |
-| Shot editing path | Corrected shots were inserted via direct SQLite, not through operator UI. |
-| Pre-production UI | No UI for new project creation, WC launch, shot-plan inspection, or reference preparation. |
+- **Project:** `proj_5339656ad20f`
+- **Scene:** 5 shots, all approved, 30.825s, 1376x768, 24fps
+- **Output:** `storage/exports/proj_5339656ad20f/scene_main_v1.mp4`
 
 ---
 
 ## M7 — Continuity
 
-**Status:** COMPLETE / CLOSED / MERGED at `30aab73`
+**Status:** COMPLETE / CLOSED / MERGED
 
-Selected strategy: H3 R2V image-pack (character + environment + predecessor frame). Human PASS.
+Selected strategy: H3 R2V image-pack (character + environment + predecessor frame).
 
 ---
 
@@ -66,49 +81,20 @@ Selected strategy: H3 R2V image-pack (character + environment + predecessor fram
 
 ## Closed Milestones
 
-| Milestone | Merged | Key Outcome |
-|---|---|---|
-| M1 | `main` | FastAPI, WC adapter, canonical models, import pipeline |
-| M2 | `main` | Beats, shots, plans, strategy selection, enrichment |
-| M3 | `main` | Shot→R2V→ComfyUI→Take vertical slice |
-| M4 | `main` | idea→WC SSE→canonical import→enrichment |
-| M5 | `main` | Reference lifecycle, ingest, generators, r2v_v2, staleness |
-| M6 | `main` | Take approval, persistent queue, worker recovery |
-| M7 | `main` | Continuity: chain state, FLF, image-pack multi-ref |
-| P2 | `main` | First complete scene: 5 shots, operator UI, assembly, human PASS |
-
----
-
-## Architecture Decisions (Frozen)
-
-| ADR | Decision |
+| Milestone | Key Outcome |
 |---|---|
-| ADR-001 | Hybrid Wind Comic Sidecar |
-| ADR-002 | Canonical Production Specification |
-| ADR-003 | ComfyUI runtime via REST/WebSocket only |
-| ADR-004 | ComfyUI MCP as development tool only |
-| ADR-005 | Provider-specific artifacts separated from canonical model |
+| M1-M6 | Integration, specification, H3 bridge, WC handoff, references, takes/queue |
+| M7 | Continuity chain, FLF, image-pack multi-ref |
+| P2 | First complete 5-shot scene, operator UI, assembly |
 
 ---
 
-## Frozen Infrastructure
+## Known Gaps
 
-- CapabilityRegistry: FROZEN — no expansion
-- VisualAssetPack: available, not required by current path
-- LTX Ingredients: DEFERRED FALLBACK
-
----
-
-## Next Product Target
-
-**P3 — Second project entirely through the operator UI**
-
-Acceptance: Tony starts with a new idea and reaches generation-ready shots WITHOUT direct SQLite mutation or Claude manual data creation.
-
-Required new UI capabilities:
-- New project creation (Wind Comic launch)
-- Imported shot-plan inspection
-- Shot editing/correction in UI
-- Reference preparation in UI
-
-Then reuse proven: Generate → Review → Approve → Continuity → Assembly
+| Gap | Severity |
+|---|---|
+| qwen3:14b enrichment quality | PRODUCT_GAP |
+| P3 16-shot plan needs correction | PRODUCT_GAP |
+| Reference prep not full UI flow | PRODUCT_GAP |
+| LTX deferred | DEFERRED |
+| CapabilityRegistry frozen | FROZEN |

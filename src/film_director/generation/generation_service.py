@@ -9,6 +9,7 @@ use FLF with predecessor's approved Take's last frame.
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import os
 import uuid
@@ -663,8 +664,9 @@ class GenerationService:
             for b in uploaded_bindings
         ]
 
-        # Include recipe provenance in continuity_snapshot field
-        continuity_snapshot = recipe_snapshot
+        # continuity_snapshot is None for image-pack R2V (no FLF continuity binding).
+        # Recipe provenance is stored as a structured entry in parameters_snapshot.
+        continuity_snapshot = None
 
         # Create immutable request
         request_id = f"greq{uuid.uuid4().hex[:12]}"
@@ -684,7 +686,8 @@ class GenerationService:
             parameters_snapshot=[
                 {"name": i.name, "node_id": i.node_id, "field": i.field, "value": i.value}
                 for i in injections
-            ],
+            ] + ([{"name": "_recipe_provenance", "node_id": "", "field": "",
+                   "value": json.dumps(recipe_snapshot)}] if recipe_snapshot else []),
             reference_snapshot=reference_snapshot,
             seed=seed,
             continuity_snapshot=continuity_snapshot,

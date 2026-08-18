@@ -18,7 +18,8 @@
 | M7.A-E | 2026-08-17 | Continuity: chain state, FLF workflow, frame validation, replace-approved, invalidation, rebuild. 1493 tests |
 | M7.F | 2026-08-17 | Live acceptance: FLF identity conditional acceptance. A/B preflight. 1513 tests |
 | M7.G.A | 2026-08-17 | VisualAssetPack, AssetRole (18 roles), AssetRoleBinding. 1580 tests |
-| M7.G.B | 2026-08-17 | ConditioningRecipe, CapabilityRegistry (FROZEN — no further expansion). 1692 tests |
+| M7.G.B | 2026-08-17 | ConditioningRecipe, CapabilityRegistry (FROZEN). 1692 tests |
+| M7.G.C | 2026-08-18 | H3 image-pack multi-reference: HUMAN PASS. 1716 tests |
 
 ---
 
@@ -37,11 +38,9 @@ Minimal recipe using proven H3 R2V with at least 3 simultaneous references:
 
 Create smallest workflow derived from proven R2V template. One live acceptance run.
 
-**P1B: LTX-2.3 Ingredients** (M7.G.D)
+**P1B: LTX-2.3 Ingredients** — DEFERRED FALLBACK
 
-Import official Lightricks workflow. Minimal adapter. One live acceptance run. Compare actual visual result with H3.
-
-Pick the solution that works. Do not force both into a universal abstraction.
+Not needed while H3 image-pack works. Evaluate only if H3 later fails a concrete production requirement.
 
 ### P2 — One complete real multi-shot scene
 

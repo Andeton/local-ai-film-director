@@ -66,23 +66,30 @@ Verified workflows, model capabilities, and candidate solutions.
 | Model | Krea 2 Turbo |
 | Live acceptance | M5 — reference influence confirmed |
 
+### H3 R2V Image Pack v1 (3-4 reference, identity+environment+continuity)
+
+| Property | Value |
+|---|---|
+| Workflow ID | h3_r2v_image_pack_v1 |
+| Version | 1.0.0 |
+| Fingerprint | `32caca08d5f4bd0b4578efc4f709024a7d222dd933f9224d9e718bc20f4a7351` |
+| Strategy | REFERENCE_TO_VIDEO |
+| UNET | minimax_h3_ref2va_pruned_int8_convrot.safetensors |
+| Materialized ref slots | 4 |
+| Picture 1 | Character identity (required) |
+| Picture 2 | Environment view (required) |
+| Picture 3 | Predecessor continuity frame (required) |
+| Picture 4 | Prop reference (optional) |
+| ref_video | None |
+| ref_audio | None |
+| Live acceptance | M7.G.C — prompt `1f05a478`, 287s, HUMAN PASS |
+| Output | 1376x768, 124 frames, 5.167s, H264+AAC |
+
+**Selected current production continuity strategy.** Solves M7.F identity/environment drift by providing explicit visual anchors via Pictures 1-3 while maintaining the proven R2V execution profile (~4-7 min per shot).
+
 ---
 
-## Technically Verified (Not Yet Production)
-
-### H3 R2V Image-Only Multi-Reference (Planned: h3_r2v_image_pack_v1)
-
-Proposed recipe for M7.G.C:
-- Picture 1: character identity (approved ReferenceAsset)
-- Picture 2: shot-specific environment view
-- Picture 3: predecessor continuity frame
-- Picture 4: important prop (optional)
-- No ref_video, no ref_audio
-- Uses ref2va UNET (proven ~4-7 min per shot)
-
-This addresses FLF's identity limitation by combining R2V reference anchoring with continuity frames.
-
-**Status:** Infrastructure ready (M7.G.A+B). Workflow and live acceptance pending (M7.G.C).
+## Technically Verified (Not Selected for Production)
 
 ### H3 R2V Full-Video Hybrid
 
@@ -94,7 +101,7 @@ Full-video reference (124-frame ref_video + ref_image + audio) exceeded 120 minu
 
 | Solution | Source | Capability | Status |
 |---|---|---|---|
-| **LTX-2.3 Ingredients** | Lightricks official IC-LoRA | Multi-reference sheet, 768x448, 121 frames | CANDIDATE — official workflow available |
+| **LTX-2.3 Ingredients** | Lightricks official IC-LoRA | Multi-reference sheet, 768x448, 121 frames | DEFERRED FALLBACK |
 | **SkyReels V3** | SkyworkAI (official, local) | 1-4 ref images, character/object/background | CANDIDATE |
 | **Wan VACE** | Official ComfyUI workflow | Structural/motion guidance | CANDIDATE |
 | **SCAIL-2** | zai-org (official, local) | Character replacement, front/back/close-up refs | CANDIDATE |

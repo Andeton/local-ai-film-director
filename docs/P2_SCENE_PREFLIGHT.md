@@ -172,6 +172,7 @@ No batch generation. Each shot waits for predecessor approval.
 | Shot 1 needs r2v_v2 not image-pack | PRODUCT_GAP | Use existing r2v_v2 for scene heads |
 | No environment reference generation prompt | NICE_TO_HAVE | Use character ref workflow with env prompt |
 | No automated scene assembly/export | NICE_TO_HAVE | Manual file ordering (P4 scope) |
+| Shot creation via direct SQL | PRODUCT_GAP | 5 shots created by raw SQLite INSERT, not via LFDirector operator API. Structurally valid rows. |
 
 ---
 

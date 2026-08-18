@@ -56,5 +56,8 @@ htmlcov/
 *.tmp
 *.log
 
+# Archived milestone evidence
+.evidence/
+
 # M7 live acceptance data
 storage_m7_live/

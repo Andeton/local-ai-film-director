@@ -10,7 +10,7 @@ Prerequisites:
 
 These tests verify the production reference generation path. They do NOT
 perform automatic human approval — human visual verdicts are documented
-separately in docs/M5_LIVE_ACCEPTANCE.md.
+separately (see git history for M5 live acceptance evidence).
 """
 from __future__ import annotations
 

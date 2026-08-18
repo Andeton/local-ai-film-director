@@ -312,6 +312,12 @@ def create_router(
         if enrichment_service is None:
             raise HTTPException(status_code=501, detail="M2 not available")
         result = enrichment_service.enrich_project(project_id)
+        # Release LLM model after enrichment
+        try:
+            from film_director.services.resource_cleanup import unload_ollama_models
+            unload_ollama_models()
+        except Exception:
+            pass
         return asdict(result)
 
     @router.get("/projects/{project_id}/beats")

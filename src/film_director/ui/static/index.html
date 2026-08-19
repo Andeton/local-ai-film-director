@@ -430,16 +430,16 @@ function renderReferenceManager(chars,refs,proj){
     const faceRefs=charRefs.filter(r=>r.kind==='character_face');
     const hasApprovedBody=bodyRefs.some(r=>r.status==='approved'&&r.source_state==='current');
     html+=`<div class="ref-char-section">`;
-    html+=`<div class="ref-char-name">${esc(ch.name)} ${hasApprovedBody?'<span class="badge badge-approved">Ready</span>':'<span class="badge badge-empty">Needs ref</span>'}</div>`;
-    html+=`<div class="ref-char-appearance">${esc((ch.appearance||'').substring(0,120))}</div>`;
+    html+=`<div style="display:flex;gap:4px;align-items:center;margin-bottom:3px">${hasApprovedBody?'<span class="badge badge-approved">Ready</span>':'<span class="badge badge-empty">Needs ref</span>'}</div>`;
+    html+=`<div class="setting"><label>Display Name</label><input type="text" id="char-name-${ch.id}" value="${esc(ch.name)}" style="font-weight:700"></div>`;
+    html+=`<div class="setting"><label>Appearance</label><textarea id="char-app-${ch.id}" style="min-height:48px;font-size:10px">${esc(ch.appearance||'')}</textarea></div>`;
     html+=`<div class="ref-char-actions">`;
-    html+=`<button class="btn btn-primary btn-sm" ${refGenerating?'disabled':''} onclick="generateRef('${ch.id}','character_body')">Generate Body</button>`;
-    html+=`<button class="btn btn-sm" ${refGenerating?'disabled':''} onclick="generateRef('${ch.id}','character_face')">Generate Face</button>`;
+    html+=`<button class="btn btn-sm" onclick="saveCharDef('${ch.id}')">Save</button>`;
+    html+=`<button class="btn btn-primary btn-sm" ${refGenerating||!ch.appearance?'disabled':''} onclick="generateRef('${ch.id}','character_body')">Generate Body</button>`;
+    html+=`<button class="btn btn-sm" ${refGenerating||!ch.appearance?'disabled':''} onclick="generateRef('${ch.id}','character_face')">Generate Face</button>`;
     html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadRef('${ch.id}','character_body',this)">Upload Body</label>`;
-    html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadRef('${ch.id}','character_face',this)">Upload Face</label>`;
     html+=`</div>`;
 
-    // Show body refs first (production-critical), then face refs
     const allCharRefs=[...bodyRefs,...faceRefs];
     for(const ref of allCharRefs){
       html+=renderRefCard(ref);
@@ -456,12 +456,12 @@ function renderReferenceManager(chars,refs,proj){
   const hasApprovedEnv=envRefs.some(r=>r.status==='approved'&&r.source_state==='current');
   const envDesc=(proj&&proj.director_context&&proj.director_context.environment_description)||'';
   html+=`<div class="section"><div class="section-title">Environment Reference ${hasApprovedEnv?'<span class="badge badge-approved">Ready</span>':'<span class="badge badge-empty">Required</span>'}</div>`;
-  if(envDesc){
-    html+=`<div class="desc-box" style="margin-bottom:6px;font-size:10px">${esc(envDesc)}</div>`;
-  }else{
-    html+=`<div style="font-size:10px;color:var(--yellow);margin-bottom:6px">No environment description. Click "Enrich Missing Data" in the readiness panel first.</div>`;
+  html+=`<div class="setting"><label>Environment Description</label><textarea id="env-desc-edit" style="min-height:60px;font-size:10px">${esc(envDesc)}</textarea></div>`;
+  if(!envDesc){
+    html+=`<div style="font-size:10px;color:var(--yellow);margin-bottom:4px">No environment description. Click "Enrich Missing Data" or write one manually.</div>`;
   }
   html+=`<div class="ref-char-actions" style="margin-bottom:6px">`;
+  html+=`<button class="btn btn-sm" onclick="saveEnvDesc()">Save</button>`;
   html+=`<button class="btn btn-primary btn-sm" ${refGenerating||!envDesc?'disabled':''} onclick="generateEnvRef()">Generate Environment</button>`;
   html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadEnvRef(this)">Upload Image</label>`;
   html+=`</div>`;
@@ -557,6 +557,32 @@ async function uploadRef(characterId,kind,input){
     toast('Upload failed: '+e.message,false);
   }
   input.value='';
+}
+
+async function saveCharDef(charId){
+  const nameEl=document.getElementById('char-name-'+charId);
+  const appEl=document.getElementById('char-app-'+charId);
+  if(!nameEl||!appEl)return;
+  const name=nameEl.value.trim();
+  const appearance=appEl.value.trim();
+  if(!name){toast('Name cannot be empty',false);return}
+  try{
+    await api(`/characters/${charId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,appearance})});
+    logEvent('char_edit','success',`Saved ${charId.substring(0,12)}`);
+    await showReferenceManager();
+  }catch(e){logEvent('char_edit','error',e.message)}
+}
+
+async function saveEnvDesc(){
+  if(!currentProject)return;
+  const el=document.getElementById('env-desc-edit');
+  if(!el)return;
+  const desc=el.value.trim();
+  try{
+    await api(`/projects/${currentProject.id}/environment-description`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({environment_description:desc})});
+    logEvent('env_edit','success','Environment description saved');
+    await showReferenceManager();
+  }catch(e){logEvent('env_edit','error',e.message)}
 }
 
 async function generateEnvRef(){

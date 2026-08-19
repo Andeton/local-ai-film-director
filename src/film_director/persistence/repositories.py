@@ -1205,6 +1205,31 @@ class ReferenceAssetRepository:
             cursor = c.execute(sql, (project_id, character_id, current_fingerprint))
             return cursor.rowcount
 
+    def mark_generated_stale_for_environment(
+        self,
+        project_id: str,
+        current_fingerprint: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Mark GENERATED + CURRENT environment refs as STALE on fingerprint mismatch.
+
+        Same semantics as mark_generated_stale_for_character but scoped to
+        kind=environment + character_id IS NULL + shot_id IS NULL.
+        USER_UPLOAD refs are not touched.
+        """
+        sql = """
+            UPDATE reference_assets
+            SET source_state = 'stale', updated_at = datetime('now')
+            WHERE project_id = ?
+              AND kind = 'environment'
+              AND source = 'generated'
+              AND source_state = 'current'
+              AND (source_fingerprint IS NULL OR source_fingerprint != ?)
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (project_id, current_fingerprint))
+            return cursor.rowcount
+
     @staticmethod
     def _row_to_asset(row: sqlite3.Row) -> ReferenceAsset:
         return ReferenceAsset(

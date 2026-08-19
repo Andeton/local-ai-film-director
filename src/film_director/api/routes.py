@@ -66,6 +66,23 @@ class GenerateRequest(BaseModel):
     seed: int | None = None
 
 
+class CharacterEditRequest(BaseModel):
+    """Edit a character's production definition."""
+    name: str | None = None
+    appearance: str | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one(self):
+        if self.name is None and self.appearance is None:
+            raise ValueError("At least one of name or appearance must be provided")
+        return self
+
+
+class EnvironmentDescriptionRequest(BaseModel):
+    """Edit the project's environment description."""
+    environment_description: str
+
+
 class BeatEditRequest(BaseModel):
     dramatic_action: str | None = None
     character_intention: str | None = None
@@ -800,6 +817,36 @@ def create_router(
         assets = ref_asset_repo.list_by_character(character_id)
         return [a.model_dump() for a in assets]
 
+    @router.put("/characters/{character_id}")
+    def edit_character(character_id: str, body: CharacterEditRequest) -> dict:
+        """Edit a character's production definition (name, appearance)."""
+        char = _resolve_character(character_id)
+
+        updates = {}
+        if body.name is not None:
+            updates["name"] = body.name.strip()
+        if body.appearance is not None:
+            updates["appearance"] = body.appearance.strip()
+
+        if not updates:
+            return char.model_dump()
+
+        updated = char.model_copy(update=updates)
+        char_repo.save_character(updated)
+
+        # Stale propagation: if appearance changed, mark generated refs stale
+        if body.appearance is not None and body.appearance.strip() != (char.appearance or ""):
+            if ref_asset_repo is not None:
+                from film_director.models.reference import compute_appearance_fingerprint
+                new_fp = compute_appearance_fingerprint(updated.appearance)
+                ref_asset_repo.mark_generated_stale_for_character(
+                    project_id=char.project_id,
+                    character_id=character_id,
+                    current_fingerprint=new_fp,
+                )
+
+        return updated.model_dump()
+
     @router.post("/characters/{character_id}/references/register")
     async def register_reference(
         character_id: str,
@@ -942,6 +989,32 @@ def create_router(
         assets = ref_asset_repo.list_by_project(project_id)
         env_assets = [a for a in assets if a.kind == ReferenceKind.ENVIRONMENT]
         return [a.model_dump() for a in env_assets]
+
+    @router.put("/projects/{project_id}/environment-description")
+    def edit_environment_description(project_id: str, body: EnvironmentDescriptionRequest) -> dict:
+        """Edit the project's canonical environment description."""
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        old_desc = p.director_context.get("environment_description", "")
+        new_desc = body.environment_description.strip()
+
+        new_ctx = dict(p.director_context)
+        new_ctx["environment_description"] = new_desc
+        updated = p.model_copy(update={"director_context": new_ctx})
+        project_repo.save_project(updated)
+
+        # Stale propagation: if env description changed, mark generated env refs stale
+        if new_desc != old_desc and ref_asset_repo is not None:
+            import hashlib
+            new_fp = hashlib.sha256(new_desc.encode()).hexdigest()
+            ref_asset_repo.mark_generated_stale_for_environment(
+                project_id=project_id,
+                current_fingerprint=new_fp,
+            )
+
+        return {"environment_description": new_desc}
 
     @router.post("/projects/{project_id}/environment-references/register")
     async def register_environment_reference(

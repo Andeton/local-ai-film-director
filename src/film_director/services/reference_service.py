@@ -314,7 +314,7 @@ class ReferenceIngestService:
         # 4. Create asset ID and managed path
         asset_id = f"ref_{uuid.uuid4().hex[:12]}"
         ext = _format_extension(fmt)
-        relative_path = os.path.join("references", project_id, asset_id, f"original{ext}")
+        relative_path = f"references/{project_id}/{asset_id}/original{ext}"
         absolute_path = os.path.join(self._storage_root, relative_path)
 
         # 5. Path confinement check (pathlib-based)

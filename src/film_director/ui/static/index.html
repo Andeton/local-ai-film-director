@@ -475,7 +475,8 @@ function renderRefCard(ref){
   const isPinned=ref.pinned;
   let html=`<div class="ref-card ${isSelected?'ref-selected':''}">`;
   html+=`<div class="ref-card-inner">`;
-  html+=`<img src="/media/${ref.managed_path}" onclick="previewRef('/media/${ref.managed_path}')" onerror="this.style.background='#333';this.alt='?'">`;
+  const refUrl='/media/'+ref.managed_path.replace(/\\\\/g,'/').replace(/\\/g,'/');
+  html+=`<img src="${refUrl}" onclick="previewRef('${refUrl}')" onerror="this.style.background='#333';this.alt='?'">`;
   html+=`<div class="ref-card-info">`;
   const kindLabel=ref.kind==='character_body'?'Body':ref.kind==='character_face'?'Face':ref.kind==='environment'?'Environment':ref.kind;
   const kindBadge=ref.kind==='character_body'?'available':ref.kind==='environment'?'available':'generated';

@@ -348,7 +348,7 @@ class ReferenceGenerationService:
 
         # 8. Download output to managed storage
         asset_id = f"ref_{uuid.uuid4().hex[:12]}"
-        managed_relative = os.path.join("references", project_id, asset_id, "original.png")
+        managed_relative = f"references/{project_id}/{asset_id}/original.png"
         managed_absolute = os.path.join(self._storage_root, managed_relative)
 
         # Path confinement

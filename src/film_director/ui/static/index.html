@@ -309,6 +309,18 @@ async function deleteShot(shotId){
   }catch(e){toast(e.message,false)}
 }
 
+async function replanProject(){
+  if(!currentProject)return;
+  if(!confirm('Replace the current shot plan? This cannot be undone if Takes exist.'))return;
+  const pid=currentProject.id;
+  logEvent('replan','running',`Replanning ${pid}...`);
+  try{
+    const r=await api(`/projects/${pid}/replan`,{method:'POST'});
+    logEvent('replan','success',`${pid}: ${r.beats_created} beats, ${r.shots_created} shots, ${r.plans_created} plans`);
+    await loadShots();showShotPlanEditor();
+  }catch(e){logEvent('replan','error',`${pid}: ${e.message}`)}
+}
+
 async function enrichProject(){
   if(!currentProject)return;
   const pid=currentProject.id;
@@ -608,8 +620,8 @@ async function showReadiness(){
       <div class="setting"><label>Approved Takes</label><div class="val">${r.approved_takes}/${r.total_shots}</div></div>
       <div style="margin-top:12px">
         <button class="btn btn-primary" style="width:100%;font-size:11px;margin-bottom:4px" onclick="showReferenceManager()">Manage References</button>
-        <button class="btn" style="width:100%;font-size:11px" onclick="enrichProject()">Enrich with LLM</button>
-        <div style="font-size:9px;color:var(--text2);margin-top:3px">Optional. Local LLM may need manual correction.</div>
+        <button class="btn" style="width:100%;font-size:11px;margin-bottom:4px" onclick="enrichProject()">Enrich Missing Data</button>
+        ${r.shot_count>0?`<button class="btn" style="width:100%;font-size:10px;color:var(--text2)" onclick="replanProject()">Regenerate Shot Plan</button>`:`<div style="font-size:9px;color:var(--text2);margin-top:2px">Click Enrich to create shot plan + character definitions.</div>`}
       </div>
     `;
   }catch(e){}

@@ -128,93 +128,79 @@ class EnrichmentService:
         new_shots: list[ShotSpecificationV1] = []
         new_plans: list[GenerationPlan] = []
 
-        # Check which scenes need planning
-        scenes_needing_planning = []
-        for scene in scenes:
-            current_beats = self._beat_repo.get_current_beats_by_scene(scene.id)
-            if current_beats:
-                # Existing beats — use legacy coverage for any missing shots
-                for beat in current_beats:
-                    current_shots = self._shot_repo.get_current_shots_by_beat(beat.id)
-                    if not current_shots:
+        # --- Shot planning: only if the project has NO current shots at all ---
+        existing_shots = self._shot_repo.get_current_shots_by_project(project_id)
+        if not existing_shots:
+            # No shots anywhere — plan from scratch
+            primary_scene = scenes[0] if scenes else None
+            if primary_scene and self._shot_planner is not None:
+                sb_notes = [
+                    str(sb.data.get("description", ""))
+                    for sb in storyboard_shots
+                    if sb.data.get("description")
+                ]
+                project_description = project.director_context.get("description", "")
+                wc_context = self._get_wc_scene_context(
+                    primary_scene, project.wc_project_id,
+                )
+                planned_beats, planned_shots = self._shot_planner.plan_scene(
+                    scene=primary_scene,
+                    characters=characters,
+                    storyboard_notes=sb_notes,
+                    script_context=wc_context,
+                    project_description=project_description,
+                )
+                new_beats.extend(planned_beats)
+                new_shots.extend(planned_shots)
+                for shot in planned_shots:
+                    ctx = build_selection_context(shot)
+                    plan = self._strategy_selector.select_strategy(
+                        ctx, shot, project.aspect,
+                    )
+                    new_plans.append(plan)
+            elif primary_scene:
+                # Legacy beat→coverage chain (M2 path)
+                for scene in scenes:
+                    current_beats = self._beat_repo.get_current_beats_by_scene(scene.id)
+                    if current_beats:
+                        # Existing beats — plan coverage for beats missing shots
+                        beats_for_scene = current_beats
+                    else:
+                        wc_context = self._get_wc_scene_context(
+                            scene, project.wc_project_id,
+                        )
+                        beats_for_scene = self._beat_enricher.enrich_scene(
+                            scene, script_context=wc_context,
+                        )
+                        new_beats.extend(beats_for_scene)
+                    for beat in beats_for_scene:
+                        beat_shots = self._shot_repo.get_current_shots_by_beat(beat.id)
+                        if beat_shots:
+                            continue
                         coverage = self._coverage_planner.plan_coverage(beat, scene)
-                        current_shots = self._shot_spec_builder.build_shots(
+                        shots_for_beat = self._shot_spec_builder.build_shots(
                             beat=beat, coverage=coverage,
                             storyboard_shots=storyboard_shots,
                             characters=characters, scene=scene,
                             source_facts=source_facts,
                         )
-                        new_shots.extend(current_shots)
-                    for shot in current_shots:
-                        current_plan = self._plan_repo.get_current_plan_by_shot(shot.id)
-                        if current_plan is None:
+                        new_shots.extend(shots_for_beat)
+                        for shot in shots_for_beat:
                             ctx = build_selection_context(shot)
                             plan = self._strategy_selector.select_strategy(
                                 ctx, shot, project.aspect,
                             )
                             new_plans.append(plan)
-            else:
-                scenes_needing_planning.append(scene)
-
-        # --- Plan scenes from scratch ---
-        if scenes_needing_planning and self._shot_planner is not None:
-            # Direct planning: ONE call for the whole project
-            # Use first scene as the primary scene for the planner
-            primary_scene = scenes_needing_planning[0]
-            sb_notes = [
-                str(sb.data.get("description", ""))
-                for sb in storyboard_shots
-                if sb.data.get("description")
-            ]
-            # Pass the project description as the primary creative context
-            project_description = project.director_context.get("description", "")
-            wc_context = self._get_wc_scene_context(
-                primary_scene, project.wc_project_id,
-            )
-            planned_beats, planned_shots = self._shot_planner.plan_scene(
-                scene=primary_scene,
-                characters=characters,
-                storyboard_notes=sb_notes,
-                script_context=wc_context,
-                project_description=project_description,
-            )
-            new_beats.extend(planned_beats)
-            new_shots.extend(planned_shots)
-            for shot in planned_shots:
-                ctx = build_selection_context(shot)
-                plan = self._strategy_selector.select_strategy(
-                    ctx, shot, project.aspect,
-                )
-                new_plans.append(plan)
-        elif scenes_needing_planning:
-            # Legacy beat→coverage chain (M2 path) — per scene
-            for scene in scenes_needing_planning:
-                wc_context = self._get_wc_scene_context(
-                    scene, project.wc_project_id,
-                )
-                beats_for_scene = self._beat_enricher.enrich_scene(
-                    scene, script_context=wc_context,
-                )
-                new_beats.extend(beats_for_scene)
-
-                for beat in beats_for_scene:
-                    coverage = self._coverage_planner.plan_coverage(beat, scene)
-                    shots_for_beat = self._shot_spec_builder.build_shots(
-                        beat=beat,
-                        coverage=coverage,
-                        storyboard_shots=storyboard_shots,
-                        characters=characters,
-                        scene=scene,
-                        source_facts=source_facts,
+        else:
+            # Shots exist — ensure generation plans exist for any shots missing them
+            for shot in existing_shots:
+                current_plan = self._plan_repo.get_current_plan_by_shot(shot.id)
+                if current_plan is None:
+                    ctx = build_selection_context(shot)
+                    plan = self._strategy_selector.select_strategy(
+                        ctx, shot, project.aspect,
                     )
-                    new_shots.extend(shots_for_beat)
-
-                    for shot in shots_for_beat:
-                        ctx = build_selection_context(shot)
-                        plan = self._strategy_selector.select_strategy(
-                            ctx, shot, project.aspect,
-                        )
-                        new_plans.append(plan)
+                    new_plans.append(plan)
 
         # --- Character enrichment (deficient characters only) ---
         enriched_chars: list = []
@@ -243,6 +229,95 @@ class EnrichmentService:
             shots_created=len(new_shots),
             plans_created=len(new_plans),
             characters_enriched=len(enriched_chars),
+        )
+
+    # ------------------------------------------------------------------
+    # replan_project — explicit shot plan replacement
+    # ------------------------------------------------------------------
+
+    def replan_project(self, project_id: str) -> EnrichmentResult:
+        """Replace the existing unapproved shot plan with a fresh one.
+
+        Marks all current beats/shots/plans as outdated, then creates a new
+        5-7 shot plan from scratch. Refuses if any Takes exist (production
+        work would be lost).
+
+        Requires ShotPlanner (OpenRouter). Falls back to no-op if unavailable.
+        """
+        project = self._project_repo.get_project(project_id)
+        if project is None:
+            return EnrichmentResult(project_id=project_id, beats_created=0,
+                                    shots_created=0, plans_created=0)
+
+        # Guard: refuse if any Takes exist
+        existing_shots = self._shot_repo.get_current_shots_by_project(project_id)
+        if existing_shots:
+            from film_director.persistence.repositories import TakeRepository
+            take_repo = TakeRepository(self._db)
+            for shot in existing_shots:
+                takes = take_repo.get_takes_by_shot(shot.id)
+                if takes:
+                    raise HumanEditConflictError(
+                        "Cannot replan: production Takes exist",
+                        detail=f"shot_id={shot.id} has {len(takes)} take(s)",
+                    )
+
+        if self._shot_planner is None:
+            return EnrichmentResult(project_id=project_id, beats_created=0,
+                                    shots_created=0, plans_created=0)
+
+        sequences = self._sequence_repo.get_sequences_by_project(project_id)
+        characters = self._character_repo.get_characters_by_project(project_id)
+        scenes = []
+        for seq in sequences:
+            scenes.extend(self._scene_repo.get_scenes_by_sequence(seq.id))
+        if not scenes:
+            return EnrichmentResult(project_id=project_id, beats_created=0,
+                                    shots_created=0, plans_created=0)
+
+        source_facts, storyboard_shots = self._load_source_facts(project.wc_project_id)
+
+        # Plan new shots
+        primary_scene = scenes[0]
+        sb_notes = [str(sb.data.get("description", "")) for sb in storyboard_shots if sb.data.get("description")]
+        project_description = project.director_context.get("description", "")
+        wc_context = self._get_wc_scene_context(primary_scene, project.wc_project_id)
+
+        new_beats, new_shots = self._shot_planner.plan_scene(
+            scene=primary_scene, characters=characters,
+            storyboard_notes=sb_notes, script_context=wc_context,
+            project_description=project_description,
+        )
+
+        new_plans = []
+        for shot in new_shots:
+            ctx = build_selection_context(shot)
+            plan = self._strategy_selector.select_strategy(ctx, shot, project.aspect)
+            new_plans.append(plan)
+
+        # ONE transaction: mark old outdated, save new
+        with self._db.connection() as conn:
+            for shot in existing_shots:
+                self._shot_repo.mark_outdated(shot.id, conn=conn)
+                self._plan_repo.mark_plan_outdated_by_shot(shot.id, conn=conn)
+            # Mark old beats outdated
+            for scene in scenes:
+                old_beats = self._beat_repo.get_current_beats_by_scene(scene.id, conn=conn)
+                for beat in old_beats:
+                    self._beat_repo.mark_outdated(beat.id, conn=conn)
+            # Save new
+            for beat in new_beats:
+                self._beat_repo.save_beat(beat, conn=conn)
+            for shot in new_shots:
+                self._shot_repo.save_shot(shot, conn=conn)
+            for plan in new_plans:
+                self._plan_repo.save_plan(plan, conn=conn)
+
+        return EnrichmentResult(
+            project_id=project_id,
+            beats_created=len(new_beats),
+            shots_created=len(new_shots),
+            plans_created=len(new_plans),
         )
 
     # ------------------------------------------------------------------

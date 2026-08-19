@@ -105,17 +105,18 @@ class StrategySelector:
             )
 
         # Priority 4 — identity-consistent generation
-        if ctx.has_character_refs and ctx.has_recurring_cast:
+        # Subjects with character IDs → REFERENCE_TO_VIDEO (refs resolved at generation time)
+        if ctx.has_recurring_cast:
             return (
                 "REFERENCE_TO_VIDEO",
-                "Character references available for identity-consistent generation",
+                "Character subjects present — references resolved at generation time",
                 "none",
             )
 
-        # Default — text only
+        # Default — text only (no subjects at all)
         return (
             "TEXT_TO_VIDEO",
-            "No character references or storyboard — text-only generation",
+            "No character subjects or storyboard — text-only generation",
             "none",
         )
 

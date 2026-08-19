@@ -320,6 +320,19 @@ def create_router(
             pass
         return asdict(result)
 
+    @router.post("/projects/{project_id}/replan")
+    def replan_project(project_id: str) -> dict:
+        """Replace the current unapproved shot plan with a fresh one."""
+        if enrichment_service is None:
+            raise HTTPException(status_code=501, detail="M2 not available")
+        result = enrichment_service.replan_project(project_id)
+        try:
+            from film_director.services.resource_cleanup import unload_ollama_models
+            unload_ollama_models()
+        except Exception:
+            pass
+        return asdict(result)
+
     @router.get("/projects/{project_id}/beats")
     def get_project_beats(project_id: str) -> list[dict]:
         if beat_repo is None:

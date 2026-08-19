@@ -454,9 +454,10 @@ function renderReferenceManager(chars,refs){
   const envRefs=refs.filter(r=>r.kind==='environment');
   const hasApprovedEnv=envRefs.some(r=>r.status==='approved'&&r.source_state==='current');
   html+=`<div class="section"><div class="section-title">Environment Reference ${hasApprovedEnv?'<span class="badge badge-approved">Ready</span>':'<span class="badge badge-empty">Required</span>'}</div>`;
-  html+=`<div style="font-size:10px;color:var(--text2);margin-bottom:4px">Upload an image representing the scene environment (location, setting, mood).</div>`;
+  html+=`<div style="font-size:10px;color:var(--text2);margin-bottom:4px">Generate or upload a location/set reference for the scene environment.</div>`;
   html+=`<div class="ref-char-actions" style="margin-bottom:6px">`;
-  html+=`<label class="btn btn-primary btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadEnvRef(this)">Upload Environment Image</label>`;
+  html+=`<button class="btn btn-primary btn-sm" ${refGenerating?'disabled':''} onclick="generateEnvRef()">Generate Environment</button>`;
+  html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadEnvRef(this)">Upload Image</label>`;
   html+=`</div>`;
   for(const ref of envRefs){
     html+=renderRefCard(ref);
@@ -550,6 +551,24 @@ async function uploadRef(characterId,kind,input){
     toast('Upload failed: '+e.message,false);
   }
   input.value='';
+}
+
+async function generateEnvRef(){
+  if(!currentProject)return;
+  if(refGenerating){toast('Generation already in progress',false);return}
+  refGenerating=true;
+  logEvent('ref_generate','running','Generating environment reference...');
+  document.querySelectorAll('.ref-char-actions button,.ref-char-actions label').forEach(b=>b.disabled=true);
+  try{
+    await api(`/projects/${currentProject.id}/environment-references/generate`,{method:'POST'});
+    logEvent('ref_generate','success','Environment reference generated (candidate)');
+    try{await api('/system/free-memory',{method:'POST'})}catch(e){}
+    await showReferenceManager();
+  }catch(e){
+    logEvent('ref_generate','error',e.message);
+  }finally{
+    refGenerating=false;
+  }
 }
 
 async function uploadEnvRef(input){

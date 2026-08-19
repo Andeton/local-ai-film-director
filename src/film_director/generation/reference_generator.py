@@ -41,6 +41,17 @@ logger = logging.getLogger(__name__)
 
 _SHA256_BUF = 65_536
 _DEFAULT_NEGATIVE = "text, labels, watermark, blurry, low quality, deformed, split panels, grid, multiple views, character sheet"
+_ENV_NEGATIVE = "text, labels, watermark, blurry, low quality, people, person, human, character, figure, hand, face, action, motion blur"
+
+
+def _build_environment_prompt(description: str) -> str:
+    """Build a location/set reference prompt from an environment description."""
+    return (
+        f"A cinematic production design reference photo of a location: {description}. "
+        f"Empty interior establishing shot, no people, no characters, no action. "
+        f"Architectural detail, practical lighting, photorealistic, "
+        f"high detail, cinematic quality, no text, no labels"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +510,126 @@ class ReferenceGenerationService:
             asset=asset,
             request_id=request_id,
             execution_id=execution_id,
+        )
+
+    def generate_environment_reference(
+        self,
+        project_id: str,
+        environment_description: str,
+        profile_id: str | None = None,
+        seed: int | None = None,
+        prompt_override: str | None = None,
+    ) -> ReferenceGenerationResult:
+        """Generate an environment/location reference image via ComfyUI.
+
+        Uses the same image-generation profiles as character references.
+        The environment_description is derived from project context by the caller.
+
+        Returns ReferenceGenerationResult with CANDIDATE ENVIRONMENT asset.
+        """
+        if profile_id:
+            profile = _PROFILES.get(profile_id)
+            if profile is None:
+                raise ReferenceGenerationError(
+                    f"Unknown generator profile: {profile_id}",
+                    detail=f"available={list(_PROFILES.keys())}",
+                )
+        else:
+            profile = _get_default_profile()
+
+        if prompt_override is not None and not prompt_override.strip():
+            raise ReferenceGenerationError("prompt_override must not be empty")
+
+        prompt_text = prompt_override if prompt_override else _build_environment_prompt(environment_description)
+        negative_text = _ENV_NEGATIVE
+        actual_seed = seed if seed is not None else int.from_bytes(os.urandom(4), "big")
+
+        # Load and inject workflow
+        template_path = os.path.join(
+            self._project_root, "workflows", "reference", profile.template_filename,
+        )
+        try:
+            with open(template_path) as f:
+                workflow = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            raise ReferenceGenerationError(
+                f"Failed to load workflow template: {e}",
+            ) from e
+
+        workflow = copy.deepcopy(workflow)
+        workflow[profile.prompt_node_id]["inputs"][profile.prompt_field] = prompt_text
+        workflow[profile.negative_node_id]["inputs"][profile.negative_field] = negative_text
+        workflow[profile.seed_node_id]["inputs"][profile.seed_field] = actual_seed
+
+        output_prefix = f"ref_gen/{project_id}/env/{uuid.uuid4().hex[:8]}"
+        workflow[profile.output_node_id]["inputs"][profile.output_prefix_field] = output_prefix
+
+        # Submit to ComfyUI
+        client_id = uuid.uuid4().hex
+        try:
+            comfyui_prompt_id = self._comfyui.submit(workflow, client_id)
+        except Exception as e:
+            raise ReferenceGenerationError(f"ComfyUI submission failed: {e}") from e
+
+        try:
+            self._comfyui.monitor(comfyui_prompt_id, client_id, timeout=600.0)
+            gen_result = self._comfyui.get_result(comfyui_prompt_id, profile.output_node_id)
+        except Exception as e:
+            raise ReferenceGenerationError(f"ComfyUI execution failed: {e}") from e
+
+        if not gen_result.outputs:
+            raise ReferenceGenerationError("ComfyUI produced no output images")
+
+        # Download to managed storage
+        asset_id = f"ref_{uuid.uuid4().hex[:12]}"
+        managed_relative = f"references/{project_id}/{asset_id}/original.png"
+        managed_absolute = os.path.join(self._storage_root, managed_relative)
+
+        if not Path(managed_absolute).resolve().is_relative_to(Path(self._storage_root).resolve()):
+            raise ReferenceGenerationError("Path confinement violation")
+
+        os.makedirs(os.path.dirname(managed_absolute), exist_ok=True)
+        try:
+            self._comfyui.download_output(gen_result.outputs[0], managed_absolute)
+        except Exception as e:
+            raise ReferenceGenerationError(f"Failed to download generated image: {e}") from e
+
+        # Validate image
+        img_info = _validate_image(managed_absolute)
+        if img_info is None:
+            try:
+                os.remove(managed_absolute)
+            except OSError:
+                pass
+            raise ReferenceGenerationError("Generated file is not a valid image")
+
+        width, height, fmt = img_info
+        content_sha256 = _compute_sha256(managed_absolute)
+
+        now = _now_iso()
+        asset = ReferenceAsset(
+            id=asset_id,
+            project_id=project_id,
+            kind=ReferenceKind.ENVIRONMENT,
+            source=ReferenceSource.GENERATED,
+            managed_path=managed_relative,
+            content_sha256=content_sha256,
+            source_provenance=f"env_gen_{uuid.uuid4().hex[:8]}",
+            source_fingerprint=hashlib.sha256(environment_description.encode()).hexdigest(),
+            status=ReferenceStatus.CANDIDATE,
+            source_state=ReferenceSourceState.CURRENT,
+            pinned=False,
+            width=width,
+            height=height,
+            created_at=now,
+            updated_at=now,
+        )
+        self._asset_repo.save(asset)
+
+        return ReferenceGenerationResult(
+            asset=asset,
+            request_id=f"env_{asset_id}",
+            execution_id=f"env_exec_{asset_id}",
         )
 
     def _fail_execution(self, execution_id: str, error: str) -> None:

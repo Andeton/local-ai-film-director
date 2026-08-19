@@ -569,7 +569,7 @@ def create_router(
 
         # Resolve references
         refs = ref_asset_repo.list_by_project(project_id) if project_id and ref_asset_repo else []
-        char_ref = next((r for r in refs if r.kind.value == "character_face" and r.status.value == "approved" and r.source_state.value == "current"), None)
+        char_ref = next((r for r in refs if r.kind.value == "character_body" and r.status.value == "approved" and r.source_state.value == "current"), None)
         env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "storyboard"), None)
 
         # Workflow selection
@@ -1261,8 +1261,13 @@ def create_router(
             raise HTTPException(status_code=404, detail="Project not found")
         shots = shot_repo.get_current_shots_by_project(project_id)
         refs = ref_asset_repo.list_by_project(project_id) if ref_asset_repo else []
-        has_char = any(r.kind.value == "character_face" and r.status.value == "approved" and r.source_state.value == "current" for r in refs)
-        has_env = any(r.status.value == "approved" and r.source_state.value == "current" and r.kind.value in ("storyboard",) for r in refs)
+        # Generation uses CHARACTER_BODY refs (via ReferenceSelector)
+        has_char = any(
+            r.kind.value == "character_body"
+            and r.status.value == "approved"
+            and r.source_state.value == "current"
+            for r in refs
+        )
         has_shots = len(shots) > 0
         approved_takes = 0
         if take_repo:
@@ -1274,19 +1279,16 @@ def create_router(
         if not has_shots:
             missing.append("Shot plan (no shots)")
         if not has_char:
-            missing.append("Character reference")
-        if not has_env:
-            missing.append("Environment reference")
-        ready = has_shots and has_char and has_env
+            missing.append("Character reference (character_body, approved)")
+        ready = has_shots and has_char
         next_action = "Review and correct the shot plan." if not has_shots else \
-                      "Prepare character and environment references." if not ready else \
+                      "Prepare character references." if not ready else \
                       "Generate Shot 1." if approved_takes == 0 else \
                       f"Review/approve Takes ({approved_takes}/{len(shots)} approved)."
         return {
             "ready": ready,
             "shot_count": len(shots),
             "has_character_ref": has_char,
-            "has_environment_ref": has_env,
             "approved_takes": approved_takes,
             "total_shots": len(shots),
             "missing": missing,

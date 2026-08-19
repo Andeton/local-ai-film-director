@@ -24,7 +24,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .shot-num{font-size:10px;color:var(--text2);font-weight:700;min-width:36px}
 .shot-action{font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{display:inline-block;padding:1px 6px;border-radius:10px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px}
-.badge-approved{background:rgba(78,204,163,0.15);color:var(--green)}.badge-succeeded{background:rgba(78,168,222,0.15);color:var(--blue)}.badge-pending,.badge-generating{background:rgba(240,192,64,0.15);color:var(--yellow)}.badge-rejected{background:rgba(233,69,96,0.15);color:var(--red)}.badge-empty{background:rgba(255,255,255,0.04);color:var(--text2)}.badge-blocked{background:rgba(233,69,96,0.1);color:var(--red)}.badge-available{background:rgba(78,204,163,0.15);color:var(--green)}.badge-operator_override{background:rgba(240,192,64,0.15);color:var(--yellow)}.badge-generated{background:rgba(255,255,255,0.04);color:var(--text2)}
+.badge-approved{background:rgba(78,204,163,0.15);color:var(--green)}.badge-succeeded{background:rgba(78,168,222,0.15);color:var(--blue)}.badge-pending,.badge-generating{background:rgba(240,192,64,0.15);color:var(--yellow)}.badge-rejected{background:rgba(233,69,96,0.15);color:var(--red)}.badge-empty{background:rgba(255,255,255,0.04);color:var(--text2)}.badge-blocked{background:rgba(233,69,96,0.1);color:var(--red)}.badge-available{background:rgba(78,204,163,0.15);color:var(--green)}.badge-operator_override{background:rgba(240,192,64,0.15);color:var(--yellow)}.badge-generated{background:rgba(255,255,255,0.04);color:var(--text2)}.badge-candidate{background:rgba(240,192,64,0.15);color:var(--yellow)}.badge-archived{background:rgba(255,255,255,0.04);color:var(--text2)}.badge-current{background:rgba(78,204,163,0.15);color:var(--green)}.badge-stale{background:rgba(233,69,96,0.15);color:var(--red)}
 .main{padding:16px 20px;overflow-y:auto}
 .section{margin-bottom:14px}
 .section-title{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
@@ -70,6 +70,17 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .shot-edit-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
 .shot-edit-row textarea{flex:1;min-height:36px;padding:4px 6px;background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;resize:vertical}
 .shot-edit-actions{display:flex;gap:3px;flex-shrink:0;padding-top:2px}
+.ref-card{background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:6px;margin-bottom:4px}
+.ref-card.ref-selected{border-color:var(--green)}
+.ref-card-inner{display:flex;gap:6px;align-items:flex-start}
+.ref-card img{width:56px;height:56px;object-fit:cover;border-radius:4px;background:#111;cursor:pointer}
+.ref-card-info{flex:1;min-width:0}
+.ref-card-meta{font-size:9px;color:var(--text2);margin-top:2px}
+.ref-card-actions{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
+.ref-char-section{margin-bottom:10px}
+.ref-char-name{font-size:11px;font-weight:700;margin-bottom:2px}
+.ref-char-appearance{font-size:9px;color:var(--text2);margin-bottom:4px;max-height:28px;overflow:hidden}
+.ref-char-actions{display:flex;gap:4px;margin-bottom:4px}
 </style>
 </head>
 <body>
@@ -89,6 +100,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 <script>
 let projects=[],currentProject=null,currentShots=[],selectedShotId=null,shotTakesCache={};
 let draftPrompt=null,draftDuration=null,draftSeedMode='random',draftSeedValue=null;
+let refGenerating=false; // prevents duplicate ref generation
 
 async function api(p,o){const r=await fetch(p,o);if(!r.ok){const e=await r.json().catch(()=>({error:r.statusText}));throw new Error(e.error||e.detail||r.statusText)}return r.json()}
 function toast(m,ok=true){const e=document.createElement('div');e.className='toast '+(ok?'toast-ok':'toast-err');e.textContent=m;document.body.appendChild(e);setTimeout(()=>{e.style.opacity='0';setTimeout(()=>e.remove(),300)},3000)}
@@ -310,7 +322,7 @@ async function createProject(){
   toast('Creating project via Wind Comic... this may take 1-2 minutes');
   try{
     const r=await api('/projects/from-idea',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idea,style})});
-    toast(`Project created: ${r.shots_created} shots`);
+    toast(`Project created: ${r.scenes_imported} scenes, ${r.characters_imported} characters`);
     projects=await api('/projects');
     renderProjects();
     selectProject(r.project_id);
@@ -350,7 +362,155 @@ async function approveTake(id){try{await api(`/takes/${id}/approve`,{method:'POS
 async function rejectTake(id){try{await api(`/takes/${id}/reject`,{method:'POST'});toast('Rejected');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
 async function doGenerate(sid){const body={};if(draftPrompt!==null)body.prompt_override=draftPrompt;if(draftDuration!==null)body.duration_sec=draftDuration;if(draftSeedMode==='explicit'&&draftSeedValue!==null)body.seed=draftSeedValue;toast('Generating...');try{await api(`/shots/${sid}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast('Done');await loadShots();await selectShot(sid)}catch(e){toast('Failed: '+e.message,false)}}
 
+// ===================================================================
+// Reference Management
+// ===================================================================
+
+async function showReferenceManager(){
+  if(!currentProject)return;
+  const panel=document.getElementById('main-panel');
+  panel.innerHTML='<div class="loading">Loading references...</div>';
+  try{
+    const [chars,refs]=await Promise.all([
+      api(`/projects/${currentProject.id}/characters`),
+      api(`/projects/${currentProject.id}/references`),
+    ]);
+    renderReferenceManager(chars,refs);
+  }catch(e){panel.innerHTML=`<div class="loading">Error: ${esc(e.message)}</div>`}
+}
+
+function renderReferenceManager(chars,refs){
+  const panel=document.getElementById('main-panel');
+  let html=`<div class="shot-title">Reference Manager</div>`;
+
+  // Character references section
+  html+=`<div class="section"><div class="section-title">Character References</div>`;
+  if(!chars.length){
+    html+=`<div style="color:var(--text2);font-size:11px;padding:8px">No characters in project.</div>`;
+  }
+  for(const ch of chars){
+    const charRefs=refs.filter(r=>r.character_id===ch.id);
+    const bodyRefs=charRefs.filter(r=>r.kind==='character_body');
+    const faceRefs=charRefs.filter(r=>r.kind==='character_face');
+    const hasApprovedBody=bodyRefs.some(r=>r.status==='approved'&&r.source_state==='current');
+    html+=`<div class="ref-char-section">`;
+    html+=`<div class="ref-char-name">${esc(ch.name)} ${hasApprovedBody?'<span class="badge badge-approved">Ready</span>':'<span class="badge badge-empty">Needs ref</span>'}</div>`;
+    html+=`<div class="ref-char-appearance">${esc((ch.appearance||'').substring(0,120))}</div>`;
+    html+=`<div class="ref-char-actions">`;
+    html+=`<button class="btn btn-primary btn-sm" ${refGenerating?'disabled':''} onclick="generateRef('${ch.id}','character_body')">Generate Body</button>`;
+    html+=`<button class="btn btn-sm" ${refGenerating?'disabled':''} onclick="generateRef('${ch.id}','character_face')">Generate Face</button>`;
+    html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadRef('${ch.id}','character_body',this)">Upload Body</label>`;
+    html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadRef('${ch.id}','character_face',this)">Upload Face</label>`;
+    html+=`</div>`;
+
+    // Show body refs first (production-critical), then face refs
+    const allCharRefs=[...bodyRefs,...faceRefs];
+    for(const ref of allCharRefs){
+      html+=renderRefCard(ref);
+    }
+    if(!allCharRefs.length){
+      html+=`<div style="color:var(--text2);font-size:10px;padding:4px 0">No references yet.</div>`;
+    }
+    html+=`</div>`;
+  }
+  html+=`</div>`;
+
+  panel.innerHTML=html;
+  showReadiness();
+}
+
+function renderRefCard(ref){
+  const isSelected=ref.status==='approved'&&ref.source_state==='current';
+  const isPinned=ref.pinned;
+  let html=`<div class="ref-card ${isSelected?'ref-selected':''}">`;
+  html+=`<div class="ref-card-inner">`;
+  html+=`<img src="/media/${ref.managed_path}" onclick="previewRef('/media/${ref.managed_path}')" onerror="this.style.background='#333';this.alt='?'">`;
+  html+=`<div class="ref-card-info">`;
+  html+=`<div><span class="badge badge-${ref.kind==='character_body'?'available':'generated'}">${ref.kind==='character_body'?'Body':'Face'}</span> `;
+  html+=`<span class="badge badge-${ref.status}">${ref.status}</span> `;
+  html+=`<span class="badge badge-${ref.source_state}">${ref.source_state}</span>`;
+  if(isPinned)html+=` <span class="badge badge-approved">Pinned</span>`;
+  html+=`</div>`;
+  html+=`<div class="ref-card-meta">${ref.source} · ${ref.width}x${ref.height} · ${ref.id.substring(0,12)}</div>`;
+  html+=`<div class="ref-card-actions">`;
+  // Lifecycle actions based on current status
+  if(ref.status==='candidate'){
+    html+=`<button class="btn btn-approve btn-sm" onclick="refAction('${ref.id}','approve')">Approve</button>`;
+    html+=`<button class="btn btn-reject btn-sm" onclick="refAction('${ref.id}','reject')">Reject</button>`;
+  }
+  if(ref.status==='approved'){
+    if(!isPinned)html+=`<button class="btn btn-sm" onclick="refAction('${ref.id}','pin')">Pin</button>`;
+    if(isPinned)html+=`<button class="btn btn-sm" onclick="refAction('${ref.id}','unpin')">Unpin</button>`;
+    html+=`<button class="btn btn-sm" onclick="refAction('${ref.id}','archive')">Archive</button>`;
+  }
+  if(ref.status==='rejected'){
+    html+=`<button class="btn btn-sm" onclick="refAction('${ref.id}','approve')">Re-approve</button>`;
+    html+=`<button class="btn btn-sm" onclick="refAction('${ref.id}','archive')">Archive</button>`;
+  }
+  html+=`</div></div></div></div>`;
+  return html;
+}
+
+function previewRef(url){
+  document.getElementById('modal-container').innerHTML=`
+    <div class="modal-overlay" onclick="closeModal()">
+      <div style="max-width:80vw;max-height:80vh"><img src="${url}" style="max-width:100%;max-height:80vh;border-radius:8px"></div>
+    </div>`;
+}
+
+async function generateRef(characterId,kind){
+  if(refGenerating){toast('Generation already in progress',false);return}
+  refGenerating=true;
+  toast(`Generating ${kind} reference...`);
+  // Disable buttons during generation
+  document.querySelectorAll('.ref-char-actions button,.ref-char-actions label').forEach(b=>b.disabled=true);
+  try{
+    await api(`/characters/${characterId}/references/generate`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind}),
+    });
+    toast('Reference generated (candidate)');
+    // Release GPU after ref generation
+    try{await api('/system/free-memory',{method:'POST'})}catch(e){}
+    await showReferenceManager();
+  }catch(e){
+    toast('Generation failed: '+e.message,false);
+  }finally{
+    refGenerating=false;
+  }
+}
+
+async function uploadRef(characterId,kind,input){
+  if(!input.files||!input.files[0])return;
+  const file=input.files[0];
+  if(file.size>50*1024*1024){toast('File too large (max 50MB)',false);return}
+  const formData=new FormData();
+  formData.append('kind',kind);
+  formData.append('file',file);
+  toast('Uploading...');
+  try{
+    await fetch(`/characters/${characterId}/references/register`,{method:'POST',body:formData})
+      .then(async r=>{if(!r.ok){const e=await r.json().catch(()=>({error:r.statusText}));throw new Error(e.error||e.detail||r.statusText)}return r.json()});
+    toast('Reference uploaded (candidate)');
+    await showReferenceManager();
+  }catch(e){
+    toast('Upload failed: '+e.message,false);
+  }
+  input.value='';
+}
+
+async function refAction(refId,action){
+  try{
+    await api(`/references/${refId}/${action}`,{method:'POST'});
+    toast(`Reference ${action}d`);
+    await showReferenceManager();
+  }catch(e){toast(e.message,false)}
+}
+
+// ===================================================================
 // Activity + System polling
+// ===================================================================
 async function pollSystem(){
   try{
     const [act,sys]=await Promise.all([api('/activity'),api('/system/status')]);
@@ -387,9 +547,12 @@ async function showReadiness(){
       <div class="panel-title" style="margin-top:12px">Project</div>
       <div class="setting"><label>Shots</label><div class="val">${r.shot_count}</div></div>
       <div class="setting"><label>Character Ref</label><div class="val">${r.has_character_ref?'✓ Ready':'✗ Missing'}</div></div>
-      <div class="setting"><label>Environment Ref</label><div class="val">${r.has_environment_ref?'✓ Ready':'✗ Missing'}</div></div>
       <div class="setting"><label>Approved Takes</label><div class="val">${r.approved_takes}/${r.total_shots}</div></div>
-      <div style="margin-top:12px"><button class="btn btn-primary" style="width:100%;font-size:11px" onclick="enrichProject()">Enrich with LLM</button><div style="font-size:9px;color:var(--text2);margin-top:3px">Optional. Local LLM may need manual correction.</div></div>
+      <div style="margin-top:12px">
+        <button class="btn btn-primary" style="width:100%;font-size:11px;margin-bottom:4px" onclick="showReferenceManager()">Manage References</button>
+        <button class="btn" style="width:100%;font-size:11px" onclick="enrichProject()">Enrich with LLM</button>
+        <div style="font-size:9px;color:var(--text2);margin-top:3px">Optional. Local LLM may need manual correction.</div>
+      </div>
     `;
   }catch(e){}
 }

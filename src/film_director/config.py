@@ -1,4 +1,7 @@
 """Application configuration via environment variables."""
+import os
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +26,14 @@ class Settings(BaseSettings):
     lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str | None = None
+    openrouter_model: str = "google/gemini-2.5-flash"
+
+    @model_validator(mode="after")
+    def _load_openrouter_key_from_env(self):
+        """Support bare OPENROUTER_API_KEY in addition to FILM_OPENROUTER_API_KEY."""
+        if not self.openrouter_api_key:
+            self.openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
+        return self
 
     comfyui_base_url: str = "http://127.0.0.1:8188"
     comfyui_generation_timeout: int = 600

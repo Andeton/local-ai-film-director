@@ -166,6 +166,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     llm_provider = create_llm_provider(settings)
 
+    # Planning LLM — use OpenRouter when available for better shot planning
+    shot_planner = None
+    if settings.openrouter_api_key:
+        from film_director.llm.openrouter import OpenRouterProvider
+        from film_director.enrichment.shot_planner import ShotPlanner
+        planning_llm = OpenRouterProvider(
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            model=settings.openrouter_model,
+            timeout=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+        )
+        shot_planner = ShotPlanner(planning_llm)
+        logger.info("Shot planner: OpenRouter (%s)", settings.openrouter_model)
+    else:
+        logger.info("Shot planner: none (OpenRouter key not set, using legacy beat→coverage)")
+
     # M2 services
     stale_propagator = StalePropagator(
         db=db,
@@ -192,6 +209,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         shot_spec_builder=ShotSpecBuilder(),
         strategy_selector=StrategySelector(),
         stale_propagator=stale_propagator,
+        shot_planner=shot_planner,
     )
 
     # M3 services

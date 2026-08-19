@@ -73,6 +73,7 @@ class EnrichmentService:
         shot_spec_builder: ShotSpecBuilder,
         strategy_selector: StrategySelector,
         stale_propagator: StalePropagator,
+        shot_planner=None,  # ShotPlanner | None — direct planning path
     ) -> None:
         self._db = db
         self._project_repo = project_repo
@@ -89,6 +90,7 @@ class EnrichmentService:
         self._shot_spec_builder = shot_spec_builder
         self._strategy_selector = strategy_selector
         self._stale_propagator = stale_propagator
+        self._shot_planner = shot_planner
 
     # ------------------------------------------------------------------
     # enrich_project — idempotent full-project enrichment
@@ -97,15 +99,14 @@ class EnrichmentService:
     def enrich_project(self, project_id: str) -> EnrichmentResult:
         """Idempotent enrichment orchestrator.
 
-        Phase 1 (reads + LLM, NO transaction):
-          - For each scene: reuse current beats or generate new via LLM
-          - For each beat: reuse current shots or plan coverage + build shots
-          - For each shot: reuse current plan or select strategy
+        When a ShotPlanner is available (stronger LLM), uses direct shot
+        planning: one LLM call per scene producing 5-7 shots directly.
 
-        Phase 2 (ONE write transaction):
-          - Persist all new beats, shots, plans atomically
+        Otherwise falls back to the beat→coverage chain (M2 legacy path).
+
+        Phase 1: LLM work in memory (NO transaction)
+        Phase 2: ONE write transaction for all new entities
         """
-        # --- Read project state ---
         project = self._project_repo.get_project(project_id)
         if project is None:
             return EnrichmentResult(project_id=project_id, beats_created=0,
@@ -114,42 +115,77 @@ class EnrichmentService:
         sequences = self._sequence_repo.get_sequences_by_project(project_id)
         characters = self._character_repo.get_characters_by_project(project_id)
 
-        # Collect all scenes
         scenes = []
         for seq in sequences:
             scenes.extend(self._scene_repo.get_scenes_by_sequence(seq.id))
 
-        # --- M4.D: recompute source facts from authoritative WC bundle ---
         source_facts, storyboard_shots = self._load_source_facts(
             project.wc_project_id,
         )
 
-        # --- Phase 1: LLM work in memory ---
         new_beats: list[Beat] = []
         new_shots: list[ShotSpecificationV1] = []
         new_plans: list[GenerationPlan] = []
 
         for scene in scenes:
-            # Reuse current beats if they exist
             current_beats = self._beat_repo.get_current_beats_by_scene(scene.id)
             if current_beats:
-                beats_for_scene = current_beats
+                # Existing beats — use legacy coverage for any missing shots
+                for beat in current_beats:
+                    current_shots = self._shot_repo.get_current_shots_by_beat(beat.id)
+                    if not current_shots:
+                        coverage = self._coverage_planner.plan_coverage(beat, scene)
+                        current_shots = self._shot_spec_builder.build_shots(
+                            beat=beat, coverage=coverage,
+                            storyboard_shots=storyboard_shots,
+                            characters=characters, scene=scene,
+                            source_facts=source_facts,
+                        )
+                        new_shots.extend(current_shots)
+                    for shot in current_shots:
+                        current_plan = self._plan_repo.get_current_plan_by_shot(shot.id)
+                        if current_plan is None:
+                            ctx = build_selection_context(shot)
+                            plan = self._strategy_selector.select_strategy(
+                                ctx, shot, project.aspect,
+                            )
+                            new_plans.append(plan)
+                continue
+
+            # --- No existing beats: plan from scratch ---
+            wc_context = self._get_wc_scene_context(scene, project.wc_project_id)
+
+            if self._shot_planner is not None:
+                # Direct planning path: one LLM call → beats + shots
+                sb_notes = [
+                    str(sb.data.get("description", ""))
+                    for sb in storyboard_shots
+                    if sb.data.get("description")
+                ]
+                scene_beats, scene_shots = self._shot_planner.plan_scene(
+                    scene=scene,
+                    characters=characters,
+                    storyboard_notes=sb_notes,
+                    script_context=wc_context,
+                )
+                new_beats.extend(scene_beats)
+                new_shots.extend(scene_shots)
+
+                # Assign generation plans for each shot
+                for shot in scene_shots:
+                    ctx = build_selection_context(shot)
+                    plan = self._strategy_selector.select_strategy(
+                        ctx, shot, project.aspect,
+                    )
+                    new_plans.append(plan)
             else:
-                # Read WC context BEFORE LLM call, outside any transaction
-                wc_context = self._get_wc_scene_context(scene, project.wc_project_id)
-                # LLM call — outside any transaction
+                # Legacy beat→coverage chain (M2 path)
                 beats_for_scene = self._beat_enricher.enrich_scene(
                     scene, script_context=wc_context,
                 )
                 new_beats.extend(beats_for_scene)
 
-            for beat in beats_for_scene:
-                # Reuse current shots if they exist
-                current_shots = self._shot_repo.get_current_shots_by_beat(beat.id)
-                if current_shots:
-                    shots_for_beat = current_shots
-                else:
-                    # LLM call — outside any transaction
+                for beat in beats_for_scene:
                     coverage = self._coverage_planner.plan_coverage(beat, scene)
                     shots_for_beat = self._shot_spec_builder.build_shots(
                         beat=beat,
@@ -161,17 +197,12 @@ class EnrichmentService:
                     )
                     new_shots.extend(shots_for_beat)
 
-                for shot in shots_for_beat:
-                    # Reuse current plan if version matches
-                    current_plan = self._plan_repo.get_current_plan_by_shot(shot.id)
-                    if current_plan is not None:
-                        continue
-                    # Deterministic — no LLM
-                    ctx = build_selection_context(shot)
-                    plan = self._strategy_selector.select_strategy(
-                        ctx, shot, project.aspect,
-                    )
-                    new_plans.append(plan)
+                    for shot in shots_for_beat:
+                        ctx = build_selection_context(shot)
+                        plan = self._strategy_selector.select_strategy(
+                            ctx, shot, project.aspect,
+                        )
+                        new_plans.append(plan)
 
         # --- Phase 2: ONE write transaction ---
         if new_beats or new_shots or new_plans:

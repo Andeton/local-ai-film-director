@@ -89,12 +89,11 @@ class TestCreateLlmProvider:
         assert "lm_studio" in str(exc_info.value)
         assert "M1" in str(exc_info.value)
 
-    def test_openrouter_raises_configuration_error(self):
+    def test_openrouter_without_key_raises_configuration_error(self):
         settings = self._make_settings("openrouter")
         with pytest.raises(ConfigurationError) as exc_info:
             create_llm_provider(settings)
-        assert "openrouter" in str(exc_info.value)
-        assert "M1" in str(exc_info.value)
+        assert "OPENROUTER_API_KEY" in str(exc_info.value)
 
     def test_unknown_provider_raises_configuration_error(self):
         settings = self._make_settings("some_unknown_provider")

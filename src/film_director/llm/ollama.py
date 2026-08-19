@@ -104,9 +104,18 @@ def create_llm_provider(settings: Settings) -> OllamaProvider:
             detail="lm_studio support is planned for a future milestone.",
         )
     elif provider == "openrouter":
-        raise ConfigurationError(
-            "LLM provider 'openrouter' is not implemented in M1. Use 'ollama'.",
-            detail="openrouter support is planned for a future milestone.",
+        if not settings.openrouter_api_key:
+            raise ConfigurationError(
+                "LLM provider 'openrouter' requires OPENROUTER_API_KEY or FILM_OPENROUTER_API_KEY.",
+                detail="Set OPENROUTER_API_KEY in your .env file.",
+            )
+        from film_director.llm.openrouter import OpenRouterProvider
+        return OpenRouterProvider(
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            model=settings.openrouter_model,
+            timeout=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
         )
     else:
         raise ConfigurationError(

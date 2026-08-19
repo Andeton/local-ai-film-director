@@ -152,26 +152,155 @@ class GenerationService:
         # Step 3: Resolve project context
         project_id = self._find_project_id(shot_id)
 
-        # Step 4: M7 continuity resolution — determines chain head vs downstream
+        # Step 4: Gather all production inputs
         continuity_input = self._continuity_service.resolve_for_generation(shot_id)
-        is_continuity_shot = continuity_input is not None
+        characters = self._char_repo.get_characters_by_project(project_id)
+        all_assets = self._ref_asset_repo.list_by_project(project_id)
 
-        if is_continuity_shot:
-            # ---- DOWNSTREAM CONTINUITY PATH (FLF) ----
+        # Select character refs for this shot's subjects
+        selected_char_assets = self._ref_selector.select(
+            shot=shot, project_id=project_id,
+            kind=ReferenceKind.CHARACTER_BODY,
+            characters=characters, assets=all_assets,
+        )
+
+        # Check for approved+current environment ref
+        env_asset = next(
+            (a for a in all_assets
+             if a.kind == ReferenceKind.ENVIRONMENT
+             and a.status.value == "approved"
+             and a.source_state.value == "current"),
+            None,
+        )
+
+        # Step 5: Select workflow and build bindings
+        if env_asset is not None:
+            # ---- IMAGE-PACK PATH (production) ----
+            workflow_def = self._workflow_resolver.resolve_image_pack()
+            max_slots = workflow_def.constraints.get("materialized_reference_slots", 4)
+
+            # Picture 1: primary character identity
+            char_asset = selected_char_assets[0]
+            char = next(c for c in characters if c.id == char_asset.character_id)
+            ordered_bindings = [
+                H3ReferenceBinding(
+                    reference_asset_id=char_asset.id,
+                    reference_kind=char_asset.kind.value,
+                    subject_index=1,
+                    character_id=char.id,
+                    character_name=char.name,
+                    appearance=char.appearance,
+                    picture_index=1,
+                    local_path=os.path.join(self._storage_root, char_asset.managed_path),
+                    content_sha256=char_asset.content_sha256,
+                ),
+            ]
+
+            # Picture 2: environment
+            ordered_bindings.append(
+                H3ReferenceBinding(
+                    reference_asset_id=env_asset.id,
+                    reference_kind=env_asset.kind.value,
+                    picture_index=2,
+                    local_path=os.path.join(self._storage_root, env_asset.managed_path),
+                    content_sha256=env_asset.content_sha256,
+                ),
+            )
+
+            # Picture 3: predecessor continuity frame (if downstream)
+            continuity_snapshot = None
+            if continuity_input is not None:
+                ordered_bindings.append(
+                    H3ReferenceBinding(
+                        reference_asset_id=continuity_input.upstream_take_id,
+                        reference_kind="continuity_frame",
+                        picture_index=3,
+                        local_path=continuity_input.frame_path,
+                        content_sha256=continuity_input.frame_sha256,
+                    ),
+                )
+                continuity_snapshot = {
+                    "continuity_state_id": continuity_input.continuity_state_id,
+                    "upstream_shot_id": continuity_input.upstream_shot_id,
+                    "upstream_take_id": continuity_input.upstream_take_id,
+                    "upstream_take_number": continuity_input.upstream_take_number,
+                    "upstream_last_frame_sha256": continuity_input.frame_sha256,
+                    "continuity_revision": continuity_input.continuity_revision,
+                    "continuity_fingerprint": continuity_input.continuity_fingerprint,
+                }
+                next_pic = 4
+            else:
+                next_pic = 3
+
+            # Remaining slots: additional character refs
+            for extra_asset in selected_char_assets[1:]:
+                if len(ordered_bindings) >= max_slots:
+                    from film_director.errors import ParameterResolutionError
+                    raise ParameterResolutionError(
+                        f"Shot requires more reference inputs ({len(ordered_bindings)+1}) "
+                        f"than image-pack capacity ({max_slots})",
+                        detail=f"shot_id={shot_id}",
+                    )
+                extra_char = next(c for c in characters if c.id == extra_asset.character_id)
+                ordered_bindings.append(H3ReferenceBinding(
+                    reference_asset_id=extra_asset.id,
+                    reference_kind=extra_asset.kind.value,
+                    subject_index=next_pic - 1,
+                    character_id=extra_char.id,
+                    character_name=extra_char.name,
+                    appearance=extra_char.appearance,
+                    picture_index=next_pic,
+                    local_path=os.path.join(self._storage_root, extra_asset.managed_path),
+                    content_sha256=extra_asset.content_sha256,
+                ))
+                next_pic += 1
+
+            # Build prompt
+            prompt = self._prompt_repo.get_current_prompt(
+                shot.id, shot.version, plan.id, plan.version,
+            )
+            if prompt is None:
+                prompt = self._prompt_builder.build(shot, plan, ordered_bindings)
+                self._prompt_repo.save_prompt(prompt)
+            if prompt_override is not None:
+                prompt = prompt.model_copy(update={"rendered_prompt_text": prompt_override})
+
+            template = self._workflow_resolver.load_template(workflow_def)
+            uploaded_bindings = self._upload_references(ordered_bindings)
+
+            if seed_override is not None:
+                seed = seed_override
+            else:
+                seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
+
+            output_prefix = f"imgpack/{shot_id}/{uuid.uuid4().hex[:8]}"
+            injections = self._param_resolver.build_injections(
+                plan=plan, shot=shot, prompt=prompt,
+                workflow_def=workflow_def,
+                uploaded_bindings=uploaded_bindings,
+                seed=seed, output_prefix=output_prefix,
+            )
+            submission_workflow = self._param_resolver.apply_injections(template, injections)
+
+            # Persist continuity state for downstream shots
+            if continuity_input is not None:
+                scene_id = None
+                with self._db.connection() as conn:
+                    scene_id = ContinuityResolver.get_scene_id_for_shot(shot_id, conn)
+                if scene_id:
+                    self._continuity_service.persist_state(shot_id, scene_id, continuity_input)
+
+        elif continuity_input is not None:
+            # ---- LEGACY FLF PATH (no environment ref available) ----
             import dataclasses as _dc
             from film_director.continuity.continuity_binding import ContinuityBinding
 
-            # Select FLF workflow
             workflow_def = self._workflow_resolver.resolve_for_continuity(
                 has_continuity_frame=True, reference_count=0,
             )
-
-            # Resolve identity contexts from approved reference provenance
             identity_contexts = self._identity_resolver.resolve_for_subjects(
                 shot.subjects or [], project_id,
             )
-
-            # Build identity-locked continuity prompt (no <Picture N> tags)
             prompt = self._prompt_repo.get_current_prompt(
                 shot.id, shot.version, plan.id, plan.version,
             )
@@ -180,22 +309,17 @@ class GenerationService:
                     shot, plan, identity_contexts=identity_contexts,
                 )
                 self._prompt_repo.save_prompt(prompt)
-
-            # Apply operator prompt override if provided
             if prompt_override is not None:
                 prompt = prompt.model_copy(update={"rendered_prompt_text": prompt_override})
 
-            # Load and verify FLF workflow template
             template = self._workflow_resolver.load_template(workflow_def)
 
-            # Upload the predecessor's last frame
             frame_ext = os.path.splitext(continuity_input.frame_path)[1]
             frame_filename = f"cont_{uuid.uuid4().hex[:8]}{frame_ext}"
             uploaded_frame_name = self._comfyui.upload_image(
                 continuity_input.frame_path, frame_filename,
             )
 
-            # Build ContinuityBinding with uploaded filename
             binding = ContinuityBinding(
                 continuity_state_id=continuity_input.continuity_state_id,
                 upstream_shot_id=continuity_input.upstream_shot_id,
@@ -208,25 +332,18 @@ class GenerationService:
                 uploaded_filename=uploaded_frame_name,
             )
 
-            # Resolve seed
             if seed_override is not None:
                 seed = seed_override
             else:
                 seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
 
             output_prefix = f"flf/{shot_id}/{uuid.uuid4().hex[:8]}"
-
-            # Build FLF injections
             injections = self._param_resolver.build_continuity_injections(
-                plan=plan,
-                prompt_text=prompt.rendered_prompt_text,
-                workflow_def=workflow_def,
-                continuity_binding=binding,
-                seed=seed,
-                output_prefix=output_prefix,
+                plan=plan, prompt_text=prompt.rendered_prompt_text,
+                workflow_def=workflow_def, continuity_binding=binding,
+                seed=seed, output_prefix=output_prefix,
             )
 
-            # Build continuity snapshot for immutable request
             continuity_snapshot = {
                 "continuity_state_id": binding.continuity_state_id,
                 "upstream_shot_id": binding.upstream_shot_id,
@@ -244,30 +361,10 @@ class GenerationService:
                 "workflow_template_fingerprint": workflow_def.template_fingerprint,
                 "first_frame_node_id": workflow_def.parameter_mappings["first_frame"]["node_id"],
                 "first_frame_field": workflow_def.parameter_mappings["first_frame"]["field"],
-                "identity_context": [
-                    {
-                        "character_id": ic.character_id,
-                        "character_name": ic.character_name,
-                        "identity_text_source": ic.identity_text_source,
-                        "reference_asset_id": ic.reference_asset_id,
-                        "reference_kind": ic.reference_kind,
-                        "reference_source": ic.reference_source,
-                        "reference_content_sha256": ic.reference_content_sha256,
-                        "reference_generation_request_id": ic.reference_generation_request_id,
-                        "identity_text": ic.identity_text,
-                        "negative_identity_text": ic.negative_identity_text,
-                    }
-                    for ic in identity_contexts
-                ],
             }
-
-            # No character reference bindings for FLF
             uploaded_bindings = []
-
-            # Apply injections
             submission_workflow = self._param_resolver.apply_injections(template, injections)
 
-            # Persist continuity state
             scene_id = None
             with self._db.connection() as conn:
                 scene_id = ContinuityResolver.get_scene_id_for_shot(shot_id, conn)
@@ -275,147 +372,43 @@ class GenerationService:
                 self._continuity_service.persist_state(shot_id, scene_id, continuity_input)
 
         else:
-            # ---- CHAIN HEAD PATH (R2V / image-pack) ----
+            # ---- LEGACY R2V CHAIN HEAD (no environment ref) ----
             if plan.strategy != "REFERENCE_TO_VIDEO":
                 raise UnsupportedStrategyError(
                     f"Strategy {plan.strategy!r} not supported for chain head",
                     detail=f"shot_id={shot_id}",
                 )
 
-            characters = self._char_repo.get_characters_by_project(project_id)
-            all_assets = self._ref_asset_repo.list_by_project(project_id)
-
-            # Select character refs for this shot's subjects
-            selected_char_assets = self._ref_selector.select(
-                shot=shot,
-                project_id=project_id,
-                kind=ReferenceKind.CHARACTER_BODY,
-                characters=characters,
-                assets=all_assets,
+            workflow_def = self._workflow_resolver.resolve_for_reference_count(
+                len(selected_char_assets),
             )
-
-            # Check for approved+current environment ref
-            env_asset = next(
-                (a for a in all_assets
-                 if a.kind == ReferenceKind.ENVIRONMENT
-                 and a.status.value == "approved"
-                 and a.source_state.value == "current"),
-                None,
+            resolved_bindings = self._ref_resolver.resolve_from_assets(
+                shot, selected_char_assets, characters,
             )
+            prompt = self._prompt_repo.get_current_prompt(
+                shot.id, shot.version, plan.id, plan.version,
+            )
+            if prompt is None:
+                prompt = self._prompt_builder.build(shot, plan, resolved_bindings)
+                self._prompt_repo.save_prompt(prompt)
+            if prompt_override is not None:
+                prompt = prompt.model_copy(update={"rendered_prompt_text": prompt_override})
 
-            if env_asset is not None:
-                # ---- IMAGE-PACK PATH: character + environment ----
-                workflow_def = self._workflow_resolver.resolve_image_pack()
+            template = self._workflow_resolver.load_template(workflow_def)
+            uploaded_bindings = self._upload_references(resolved_bindings)
 
-                # Build character binding (Picture 1)
-                char_asset = selected_char_assets[0]
-                char = next(c for c in characters if c.id == char_asset.character_id)
-                char_local = os.path.join(self._storage_root, char_asset.managed_path)
-                char_binding = H3ReferenceBinding(
-                    reference_asset_id=char_asset.id,
-                    reference_kind=char_asset.kind.value,
-                    subject_index=1,
-                    character_id=char.id,
-                    character_name=char.name,
-                    appearance=char.appearance,
-                    picture_index=1,
-                    local_path=char_local,
-                    content_sha256=char_asset.content_sha256,
-                )
-
-                # Build environment binding (Picture 2)
-                env_local = os.path.join(self._storage_root, env_asset.managed_path)
-                env_binding = H3ReferenceBinding(
-                    reference_asset_id=env_asset.id,
-                    reference_kind=env_asset.kind.value,
-                    picture_index=2,
-                    local_path=env_local,
-                    content_sha256=env_asset.content_sha256,
-                )
-
-                # Build ordered bindings list
-                ordered_bindings = [char_binding, env_binding]
-
-                # Add additional character refs as extra pictures
-                for extra_idx, extra_asset in enumerate(selected_char_assets[1:], start=3):
-                    extra_char = next(c for c in characters if c.id == extra_asset.character_id)
-                    extra_local = os.path.join(self._storage_root, extra_asset.managed_path)
-                    ordered_bindings.append(H3ReferenceBinding(
-                        reference_asset_id=extra_asset.id,
-                        reference_kind=extra_asset.kind.value,
-                        subject_index=extra_idx - 1,
-                        character_id=extra_char.id,
-                        character_name=extra_char.name,
-                        appearance=extra_char.appearance,
-                        picture_index=extra_idx,
-                        local_path=extra_local,
-                        content_sha256=extra_asset.content_sha256,
-                    ))
-
-                # Build prompt
-                prompt = self._prompt_repo.get_current_prompt(
-                    shot.id, shot.version, plan.id, plan.version,
-                )
-                if prompt is None:
-                    prompt = self._prompt_builder.build(shot, plan, ordered_bindings)
-                    self._prompt_repo.save_prompt(prompt)
-
-                if prompt_override is not None:
-                    prompt = prompt.model_copy(update={"rendered_prompt_text": prompt_override})
-
-                template = self._workflow_resolver.load_template(workflow_def)
-                uploaded_bindings = self._upload_references(ordered_bindings)
-
-                if seed_override is not None:
-                    seed = seed_override
-                else:
-                    seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
-
-                output_prefix = f"imgpack/{shot_id}/{uuid.uuid4().hex[:8]}"
-
-                injections = self._param_resolver.build_injections(
-                    plan=plan, shot=shot, prompt=prompt,
-                    workflow_def=workflow_def,
-                    uploaded_bindings=uploaded_bindings,
-                    seed=seed, output_prefix=output_prefix,
-                )
+            if seed_override is not None:
+                seed = seed_override
             else:
-                # ---- LEGACY R2V PATH: character-only ----
-                workflow_def = self._workflow_resolver.resolve_for_reference_count(
-                    len(selected_char_assets),
-                )
+                seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
 
-                resolved_bindings = self._ref_resolver.resolve_from_assets(
-                    shot, selected_char_assets, characters,
-                )
-
-                prompt = self._prompt_repo.get_current_prompt(
-                    shot.id, shot.version, plan.id, plan.version,
-                )
-                if prompt is None:
-                    prompt = self._prompt_builder.build(shot, plan, resolved_bindings)
-                    self._prompt_repo.save_prompt(prompt)
-
-                if prompt_override is not None:
-                    prompt = prompt.model_copy(update={"rendered_prompt_text": prompt_override})
-
-                template = self._workflow_resolver.load_template(workflow_def)
-                uploaded_bindings = self._upload_references(resolved_bindings)
-
-                if seed_override is not None:
-                    seed = seed_override
-                else:
-                    seed = self._param_resolver.resolve_seed(plan, take_number=take_number)
-
-                output_prefix = f"m3/{shot_id}/{uuid.uuid4().hex[:8]}"
-
-                injections = self._param_resolver.build_injections(
-                    plan=plan, shot=shot, prompt=prompt,
-                    workflow_def=workflow_def,
-                    uploaded_bindings=uploaded_bindings,
-                    seed=seed, output_prefix=output_prefix,
-                )
-
+            output_prefix = f"m3/{shot_id}/{uuid.uuid4().hex[:8]}"
+            injections = self._param_resolver.build_injections(
+                plan=plan, shot=shot, prompt=prompt,
+                workflow_def=workflow_def, uploaded_bindings=uploaded_bindings,
+                seed=seed, output_prefix=output_prefix,
+            )
+            continuity_snapshot = None
             submission_workflow = self._param_resolver.apply_injections(template, injections)
             continuity_snapshot = None
 

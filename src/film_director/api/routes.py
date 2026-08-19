@@ -602,15 +602,15 @@ def create_router(
         char_ref = next((r for r in refs if r.kind.value == "character_body" and r.status.value == "approved" and r.source_state.value == "current"), None)
         env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "environment"), None)
 
-        # Workflow selection — matches GenerationService logic
-        if not is_head:
+        # Workflow selection — mirrors GenerationService logic exactly:
+        # env available → image-pack (both head and downstream)
+        # no env + downstream → legacy FLF
+        # no env + head → legacy R2V
+        if env_ref is not None:
             workflow_id = "h3_r2v_image_pack_v1"
             workflow_version = "1.0.0"
-        elif env_ref is not None:
-            workflow_id = "h3_r2v_image_pack_v1"
-            workflow_version = "1.0.0"
-        elif char_ref is not None:
-            workflow_id = "h3_r2v_v1"
+        elif not is_head:
+            workflow_id = "h3_flf_v1"
             workflow_version = "1.0.0"
         else:
             workflow_id = "h3_r2v_v1"

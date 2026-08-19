@@ -203,36 +203,82 @@ class TestMultipleCharacters:
 class TestPreviewMatchesExecution:
     """Preview workflow must match what generate_take would use."""
 
-    def test_preview_with_env_shows_image_pack(self):
-        """When env ref exists, preview should show image-pack, not legacy v2."""
-        # The corrected preview logic:
-        env_ref = _make_env_asset()
-        char_ref = _make_char_asset()
-        is_head = True
-
-        if not is_head:
-            wf = "h3_r2v_image_pack_v1"
-        elif env_ref is not None:
-            wf = "h3_r2v_image_pack_v1"
-        elif char_ref is not None:
-            wf = "h3_r2v_v1"
+    def _select_workflow(self, env_ref, is_head):
+        """Shared logic matching both preview and GenerationService."""
+        if env_ref is not None:
+            return "h3_r2v_image_pack_v1"
+        elif not is_head:
+            return "h3_flf_v1"
         else:
-            wf = "h3_r2v_v1"
+            return "h3_r2v_v1"
 
-        assert wf == "h3_r2v_image_pack_v1"
+    def test_head_with_env_shows_image_pack(self):
+        assert self._select_workflow(_make_env_asset(), is_head=True) == "h3_r2v_image_pack_v1"
 
-    def test_preview_without_env_shows_legacy(self):
-        env_ref = None
-        char_ref = _make_char_asset()
-        is_head = True
+    def test_downstream_with_env_shows_image_pack(self):
+        assert self._select_workflow(_make_env_asset(), is_head=False) == "h3_r2v_image_pack_v1"
 
-        if not is_head:
-            wf = "h3_r2v_image_pack_v1"
-        elif env_ref is not None:
-            wf = "h3_r2v_image_pack_v1"
-        elif char_ref is not None:
-            wf = "h3_r2v_v1"
-        else:
-            wf = "h3_r2v_v1"
+    def test_head_without_env_shows_legacy_r2v(self):
+        assert self._select_workflow(None, is_head=True) == "h3_r2v_v1"
 
-        assert wf == "h3_r2v_v1"
+    def test_downstream_without_env_shows_legacy_flf(self):
+        assert self._select_workflow(None, is_head=False) == "h3_flf_v1"
+
+
+class TestDownstreamImagePack:
+    """Downstream shots with env use image-pack with continuity frame."""
+
+    def test_downstream_bindings_char_env_continuity(self):
+        """Downstream with char + env + predecessor → 3 bindings."""
+        bindings = [
+            H3ReferenceBinding(
+                reference_asset_id="ref-char", reference_kind="character_body",
+                subject_index=1, character_id="c1", character_name="The Man",
+                appearance="dark hair", picture_index=1,
+                local_path="/f1.png", content_sha256="a" * 64,
+            ),
+            H3ReferenceBinding(
+                reference_asset_id="ref-env", reference_kind="environment",
+                picture_index=2,
+                local_path="/f2.png", content_sha256="b" * 64,
+            ),
+            H3ReferenceBinding(
+                reference_asset_id="take-prev", reference_kind="continuity_frame",
+                picture_index=3,
+                local_path="/f3.png", content_sha256="c" * 64,
+            ),
+        ]
+        assert len(bindings) == 3
+        assert bindings[0].reference_kind == "character_body"
+        assert bindings[1].reference_kind == "environment"
+        assert bindings[2].reference_kind == "continuity_frame"
+
+    def test_downstream_2char_all_4_slots(self):
+        """2-character downstream shot fills all 4 slots."""
+        bindings = [
+            H3ReferenceBinding(
+                reference_asset_id="ref-c1", reference_kind="character_body",
+                subject_index=1, character_id="c1", character_name="The Man",
+                appearance="dark", picture_index=1,
+                local_path="/f1.png", content_sha256="a" * 64,
+            ),
+            H3ReferenceBinding(
+                reference_asset_id="ref-env", reference_kind="environment",
+                picture_index=2,
+                local_path="/f2.png", content_sha256="b" * 64,
+            ),
+            H3ReferenceBinding(
+                reference_asset_id="take-prev", reference_kind="continuity_frame",
+                picture_index=3,
+                local_path="/f3.png", content_sha256="c" * 64,
+            ),
+            H3ReferenceBinding(
+                reference_asset_id="ref-c2", reference_kind="character_body",
+                subject_index=3, character_id="c2", character_name="The Woman",
+                appearance="blonde", picture_index=4,
+                local_path="/f4.png", content_sha256="d" * 64,
+            ),
+        ]
+        assert len(bindings) == 4
+        assert bindings[3].character_name == "The Woman"
+        assert bindings[3].picture_index == 4

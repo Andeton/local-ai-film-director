@@ -93,6 +93,7 @@ class ShotPlanner:
         characters: list[CharacterReference],
         storyboard_notes: list[str],
         script_context: dict | None = None,
+        project_description: str = "",
     ) -> tuple[list[Beat], list[ShotSpecificationV1]]:
         """Plan shots for a scene. Returns (beats, shots).
 
@@ -108,6 +109,7 @@ class ShotPlanner:
             scene_name=scene.name,
             scene_location=scene.location,
             scene_description=scene.description,
+            project_description=project_description,
             characters=char_dicts,
             storyboard_notes=storyboard_notes,
             script_context=script_context,

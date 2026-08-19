@@ -139,15 +139,15 @@ class ImportService:
                 )
                 proj_hash = compute_source_hash(proj_payload)
 
-                # Build director_context from plan if available
+                # Build director_context from plan + project description
                 director_context = {}
+                if bundle.project.description:
+                    director_context["description"] = bundle.project.description
                 if bundle.director_plan is not None:
                     dp = bundle.director_plan
-                    director_context = {
-                        "genre": dp.genre,
-                        "style": dp.style,
-                        "story_structure": dp.story_structure,
-                    }
+                    director_context["genre"] = dp.genre
+                    director_context["style"] = dp.style
+                    director_context["story_structure"] = dp.story_structure
 
                 project = ProductionProject(
                     id=project_id,

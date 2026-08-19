@@ -139,7 +139,7 @@ class WindComicAdapter:
             WindComicArtifactMalformedError: JSON fields are corrupt
         """
         row = self._query_one(
-            "SELECT id, title, status, aspect, style_id, script_data, locked_characters"
+            "SELECT id, title, description, status, aspect, style_id, script_data, locked_characters"
             " FROM projects WHERE id = ?",
             (project_id,),
         )
@@ -148,6 +148,7 @@ class WindComicAdapter:
         return WCProject(
             id=row["id"],
             title=row["title"] or "",
+            description=row["description"] or "",
             status=row["status"] or "draft",
             aspect=row["aspect"] or "16:9",
             style_id=row["style_id"],
@@ -226,7 +227,7 @@ class WindComicAdapter:
         try:
             # --- project ---
             row = conn.execute(
-                "SELECT id, title, status, aspect, style_id, script_data, locked_characters"
+                "SELECT id, title, description, status, aspect, style_id, script_data, locked_characters"
                 " FROM projects WHERE id = ?",
                 (project_id,),
             ).fetchone()
@@ -235,6 +236,7 @@ class WindComicAdapter:
             project = WCProject(
                 id=row["id"],
                 title=row["title"] or "",
+                description=row["description"] or "",
                 status=row["status"] or "draft",
                 aspect=row["aspect"] or "16:9",
                 style_id=row["style_id"],

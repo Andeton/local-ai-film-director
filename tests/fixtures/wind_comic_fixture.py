@@ -9,6 +9,7 @@ TEST_PROJECT = {
     "id": TEST_PROJECT_ID,
     "user_id": "u1",
     "title": "The Abandoned Hospital",
+    "description": "A detective enters an abandoned hospital at night searching for clues about a missing person.",
     "status": "active",
     "script_data": json.dumps(
         {"shots": [{"shotNumber": 1, "action": "walk", "characters": ["Detective"], "emotion": "tension"}]}
@@ -107,6 +108,7 @@ CREATE TABLE projects (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     title TEXT,
+    description TEXT DEFAULT '',
     status TEXT,
     script_data TEXT,
     director_notes TEXT,
@@ -131,7 +133,7 @@ CREATE TABLE project_assets (
 );
 """
 
-_COLS_P = "id,user_id,title,status,script_data,director_notes,style_id,aspect,locked_characters,primary_character_ref,mode"
+_COLS_P = "id,user_id,title,description,status,script_data,director_notes,style_id,aspect,locked_characters,primary_character_ref,mode"
 _COLS_A = "id,project_id,type,name,data,media_urls,persistent_url,shot_number,version,confirmed,stale"
 
 

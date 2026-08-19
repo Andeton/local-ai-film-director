@@ -72,7 +72,8 @@ def _create_wc_fixture(tmp_path, *, script_data=None, storyboard_desc="A wide sh
     db_path = str(tmp_path / "wc.db")
     conn = sqlite3.connect(db_path)
     conn.execute("""CREATE TABLE projects (
-        id TEXT PRIMARY KEY, title TEXT, status TEXT, aspect TEXT,
+        id TEXT PRIMARY KEY, title TEXT, description TEXT DEFAULT '',
+        status TEXT, aspect TEXT,
         style_id TEXT, script_data TEXT, locked_characters TEXT
     )""")
     conn.execute("""CREATE TABLE project_assets (
@@ -87,8 +88,8 @@ def _create_wc_fixture(tmp_path, *, script_data=None, storyboard_desc="A wide sh
              "dialogue": "Hello", "action": "walks", "emotion": "happy"},
         ]}
 
-    conn.execute("INSERT INTO projects VALUES (?,?,?,?,?,?,?)", (
-        "wc-proj", "Test Film", "complete", "16:9", None,
+    conn.execute("INSERT INTO projects VALUES (?,?,?,?,?,?,?,?)", (
+        "wc-proj", "Test Film", "A test film.", "complete", "16:9", None,
         json.dumps(script_data), "[]",
     ))
     # Scene

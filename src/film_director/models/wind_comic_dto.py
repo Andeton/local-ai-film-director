@@ -6,6 +6,7 @@ from dataclasses import dataclass
 class WCProject:
     id: str
     title: str
+    description: str
     status: str
     aspect: str
     style_id: str | None

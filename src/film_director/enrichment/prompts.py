@@ -155,20 +155,29 @@ def build_shot_plan_messages(
     characters: list[dict],
     storyboard_notes: list[str],
     script_context: dict | None = None,
+    project_description: str = "",
 ) -> list[dict]:
     """Build messages for a direct shot planning call.
 
-    Receives the richest available context from WC/canonical data:
-    - scene metadata
+    Receives the richest available context:
+    - project_description: the original creative idea/premise (highest priority)
+    - scene metadata from WC
     - character names and appearances
     - storyboard descriptions (cinematography notes from WC)
     - original script context
     """
-    parts = [
-        f"Scene: {scene_name}",
+    parts = []
+
+    # Project description is the primary creative context — WC scene data
+    # may be generic placeholders if WC's local model failed to expand
+    if project_description:
+        parts.append(f"Story/Premise:\n{project_description}")
+
+    parts.extend([
+        f"\nScene: {scene_name}",
         f"Location: {scene_location}",
         f"Description: {scene_description}",
-    ]
+    ])
 
     if characters:
         char_lines = []
@@ -189,7 +198,7 @@ def build_shot_plan_messages(
         parts.append(f"\nScript context:\n{json.dumps(script_context, indent=2, ensure_ascii=False)}")
 
     parts.append(
-        "\nPlan a sequence of 5-7 production shots for this scene. "
+        "\nPlan a sequence of 5-7 production shots for this story. "
         'Return a JSON object: {"shots": [...]}'
     )
 

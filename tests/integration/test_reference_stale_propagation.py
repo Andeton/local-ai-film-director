@@ -141,7 +141,7 @@ def _build_mock_adapter(appearance: str = "dark hair, trench coat", name: str = 
     mock = MagicMock()
     mock.read_project_bundle.return_value = WCProjectBundle(
         project=WCProject(
-            id="wc-p1", title="Test", status="active", aspect="16:9",
+            id="wc-p1", title="Test", description="", status="active", aspect="16:9",
             style_id=None, script_data=None, locked_characters=[],
         ),
         scenes=[WCScene(

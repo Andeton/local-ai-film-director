@@ -127,6 +127,8 @@ class EnrichmentService:
         new_shots: list[ShotSpecificationV1] = []
         new_plans: list[GenerationPlan] = []
 
+        # Check which scenes need planning
+        scenes_needing_planning = []
         for scene in scenes:
             current_beats = self._beat_repo.get_current_beats_by_scene(scene.id)
             if current_beats:
@@ -150,36 +152,45 @@ class EnrichmentService:
                                 ctx, shot, project.aspect,
                             )
                             new_plans.append(plan)
-                continue
-
-            # --- No existing beats: plan from scratch ---
-            wc_context = self._get_wc_scene_context(scene, project.wc_project_id)
-
-            if self._shot_planner is not None:
-                # Direct planning path: one LLM call → beats + shots
-                sb_notes = [
-                    str(sb.data.get("description", ""))
-                    for sb in storyboard_shots
-                    if sb.data.get("description")
-                ]
-                scene_beats, scene_shots = self._shot_planner.plan_scene(
-                    scene=scene,
-                    characters=characters,
-                    storyboard_notes=sb_notes,
-                    script_context=wc_context,
-                )
-                new_beats.extend(scene_beats)
-                new_shots.extend(scene_shots)
-
-                # Assign generation plans for each shot
-                for shot in scene_shots:
-                    ctx = build_selection_context(shot)
-                    plan = self._strategy_selector.select_strategy(
-                        ctx, shot, project.aspect,
-                    )
-                    new_plans.append(plan)
             else:
-                # Legacy beat→coverage chain (M2 path)
+                scenes_needing_planning.append(scene)
+
+        # --- Plan scenes from scratch ---
+        if scenes_needing_planning and self._shot_planner is not None:
+            # Direct planning: ONE call for the whole project
+            # Use first scene as the primary scene for the planner
+            primary_scene = scenes_needing_planning[0]
+            sb_notes = [
+                str(sb.data.get("description", ""))
+                for sb in storyboard_shots
+                if sb.data.get("description")
+            ]
+            # Pass the project description as the primary creative context
+            project_description = project.director_context.get("description", "")
+            wc_context = self._get_wc_scene_context(
+                primary_scene, project.wc_project_id,
+            )
+            planned_beats, planned_shots = self._shot_planner.plan_scene(
+                scene=primary_scene,
+                characters=characters,
+                storyboard_notes=sb_notes,
+                script_context=wc_context,
+                project_description=project_description,
+            )
+            new_beats.extend(planned_beats)
+            new_shots.extend(planned_shots)
+            for shot in planned_shots:
+                ctx = build_selection_context(shot)
+                plan = self._strategy_selector.select_strategy(
+                    ctx, shot, project.aspect,
+                )
+                new_plans.append(plan)
+        elif scenes_needing_planning:
+            # Legacy beat→coverage chain (M2 path) — per scene
+            for scene in scenes_needing_planning:
+                wc_context = self._get_wc_scene_context(
+                    scene, project.wc_project_id,
+                )
                 beats_for_scene = self._beat_enricher.enrich_scene(
                     scene, script_context=wc_context,
                 )

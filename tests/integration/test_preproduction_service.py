@@ -128,7 +128,8 @@ class FakeEnrichmentService:
 
 def _wc_project(pid="wc-proj-1") -> WCProject:
     return WCProject(
-        id=pid, title="Test Film", status="complete", aspect="16:9",
+        id=pid, title="Test Film", description="A test film about a hero.",
+        status="complete", aspect="16:9",
         style_id=None, script_data={"shots": [
             {"shotNumber": 1, "sceneDescription": "desc", "characters": ["Hero"],
              "dialogue": "Hello", "action": "walks", "emotion": "happy"},

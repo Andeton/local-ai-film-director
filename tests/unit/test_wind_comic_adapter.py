@@ -104,7 +104,8 @@ class TestMalformedData:
         conn = sqlite3.connect(db_path)
         conn.executescript(
             "CREATE TABLE projects ("
-            "id TEXT PRIMARY KEY, user_id TEXT, title TEXT, status TEXT, script_data TEXT, "
+            "id TEXT PRIMARY KEY, user_id TEXT, title TEXT, description TEXT DEFAULT '', "
+            "status TEXT, script_data TEXT, "
             "director_notes TEXT, style_id TEXT, aspect TEXT, locked_characters TEXT, "
             "primary_character_ref TEXT, mode TEXT"
             "); "
@@ -115,7 +116,7 @@ class TestMalformedData:
             ");"
         )
         conn.execute(
-            "INSERT INTO projects VALUES ('p1','u','T','active',NULL,NULL,NULL,'16:9','[]',NULL,'cinematic')"
+            "INSERT INTO projects VALUES ('p1','u','T','','active',NULL,NULL,NULL,'16:9','[]',NULL,'cinematic')"
         )
         conn.execute(
             "INSERT INTO project_assets VALUES (?,?,?,?,?,?,?,?,?,?,?)",

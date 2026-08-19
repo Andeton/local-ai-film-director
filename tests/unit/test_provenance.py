@@ -64,20 +64,20 @@ def test_character_payload_detects_persistent_url_change():
 
 
 def test_project_payload_detects_title_change():
-    p1 = WCProject(id="p1", title="A", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
-    p2 = WCProject(id="p1", title="B", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
+    p1 = WCProject(id="p1", title="A", description="", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
+    p2 = WCProject(id="p1", title="B", description="", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
     assert compute_source_hash(build_project_source_payload(p1)) != compute_source_hash(build_project_source_payload(p2))
 
 
 def test_project_payload_ignores_wc_status():
-    p1 = WCProject(id="p1", title="F", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
-    p2 = WCProject(id="p1", title="F", status="completed", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
+    p1 = WCProject(id="p1", title="F", description="", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
+    p2 = WCProject(id="p1", title="F", description="", status="completed", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
     assert compute_source_hash(build_project_source_payload(p1)) == compute_source_hash(build_project_source_payload(p2))
 
 
 def test_project_payload_detects_aspect_change():
-    p1 = WCProject(id="p1", title="F", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
-    p2 = WCProject(id="p1", title="F", status="active", aspect="9:16", style_id=None, script_data=None, locked_characters=[])
+    p1 = WCProject(id="p1", title="F", description="", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
+    p2 = WCProject(id="p1", title="F", description="", status="active", aspect="9:16", style_id=None, script_data=None, locked_characters=[])
     assert compute_source_hash(build_project_source_payload(p1)) != compute_source_hash(build_project_source_payload(p2))
 
 
@@ -89,7 +89,7 @@ from film_director.models.wind_comic_dto import WCDirectorPlan, WCStoryboardShot
 
 
 def _proj():
-    return WCProject(id="p1", title="F", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
+    return WCProject(id="p1", title="F", description="", status="active", aspect="16:9", style_id=None, script_data=None, locked_characters=[])
 
 
 def test_project_payload_detects_director_genre_change():

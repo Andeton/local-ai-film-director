@@ -51,6 +51,7 @@ class EnrichmentResult:
     beats_created: int
     shots_created: int
     plans_created: int
+    characters_enriched: int = 0
 
 
 class EnrichmentService:
@@ -215,8 +216,17 @@ class EnrichmentService:
                         )
                         new_plans.append(plan)
 
+        # --- Character enrichment (deficient characters only) ---
+        enriched_chars: list = []
+        if self._shot_planner is not None:
+            project_description = project.director_context.get("description", "")
+            if project_description:
+                enriched_chars = self._shot_planner.enrich_characters(
+                    characters, project_description,
+                )
+
         # --- Phase 2: ONE write transaction ---
-        if new_beats or new_shots or new_plans:
+        if new_beats or new_shots or new_plans or enriched_chars:
             with self._db.connection() as conn:
                 for beat in new_beats:
                     self._beat_repo.save_beat(beat, conn=conn)
@@ -224,12 +234,15 @@ class EnrichmentService:
                     self._shot_repo.save_shot(shot, conn=conn)
                 for plan in new_plans:
                     self._plan_repo.save_plan(plan, conn=conn)
+                for char in enriched_chars:
+                    self._character_repo.save_character(char, conn=conn)
 
         return EnrichmentResult(
             project_id=project_id,
             beats_created=len(new_beats),
             shots_created=len(new_shots),
             plans_created=len(new_plans),
+            characters_enriched=len(enriched_chars),
         )
 
     # ------------------------------------------------------------------

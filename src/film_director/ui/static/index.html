@@ -315,7 +315,7 @@ async function enrichProject(){
   logEvent('enrich','running',`Enriching ${pid}...`);
   try{
     const r=await api(`/projects/${pid}/enrich`,{method:'POST'});
-    logEvent('enrich','success',`${pid}: ${r.beats_created} beats, ${r.shots_created} shots, ${r.plans_created} plans`);
+    logEvent('enrich','success',`${pid}: ${r.beats_created} beats, ${r.shots_created} shots, ${r.plans_created} plans${r.characters_enriched?' + '+r.characters_enriched+' characters enriched':''}`);
     await loadShots();showShotPlanEditor();
   }catch(e){logEvent('enrich','error',`${pid}: ${e.message}`)}
 }

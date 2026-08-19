@@ -859,6 +859,12 @@ def create_router(
         if ref_generation_service is None:
             raise HTTPException(status_code=501, detail="M5 reference management not available")
 
+        if not char.appearance or not char.appearance.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Character has no appearance description. Run 'Enrich with LLM' first.",
+            )
+
         ref_kind = ReferenceKind(body.kind)
         result = ref_generation_service.generate_character_reference(
             project_id=char.project_id,

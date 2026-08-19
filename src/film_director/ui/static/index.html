@@ -406,15 +406,16 @@ async function showReferenceManager(){
   const panel=document.getElementById('main-panel');
   panel.innerHTML='<div class="loading">Loading references...</div>';
   try{
-    const [chars,refs]=await Promise.all([
+    const [chars,refs,proj]=await Promise.all([
       api(`/projects/${currentProject.id}/characters`),
       api(`/projects/${currentProject.id}/references`),
+      api(`/projects/${currentProject.id}`),
     ]);
-    renderReferenceManager(chars,refs);
+    renderReferenceManager(chars,refs,proj);
   }catch(e){panel.innerHTML=`<div class="loading">Error: ${esc(e.message)}</div>`}
 }
 
-function renderReferenceManager(chars,refs){
+function renderReferenceManager(chars,refs,proj){
   const panel=document.getElementById('main-panel');
   let html=`<div class="shot-title">Reference Manager</div>`;
 
@@ -453,10 +454,15 @@ function renderReferenceManager(chars,refs){
   // Environment references section
   const envRefs=refs.filter(r=>r.kind==='environment');
   const hasApprovedEnv=envRefs.some(r=>r.status==='approved'&&r.source_state==='current');
+  const envDesc=(proj&&proj.director_context&&proj.director_context.environment_description)||'';
   html+=`<div class="section"><div class="section-title">Environment Reference ${hasApprovedEnv?'<span class="badge badge-approved">Ready</span>':'<span class="badge badge-empty">Required</span>'}</div>`;
-  html+=`<div style="font-size:10px;color:var(--text2);margin-bottom:4px">Generate or upload a location/set reference for the scene environment.</div>`;
+  if(envDesc){
+    html+=`<div class="desc-box" style="margin-bottom:6px;font-size:10px">${esc(envDesc)}</div>`;
+  }else{
+    html+=`<div style="font-size:10px;color:var(--yellow);margin-bottom:6px">No environment description. Click "Enrich Missing Data" in the readiness panel first.</div>`;
+  }
   html+=`<div class="ref-char-actions" style="margin-bottom:6px">`;
-  html+=`<button class="btn btn-primary btn-sm" ${refGenerating?'disabled':''} onclick="generateEnvRef()">Generate Environment</button>`;
+  html+=`<button class="btn btn-primary btn-sm" ${refGenerating||!envDesc?'disabled':''} onclick="generateEnvRef()">Generate Environment</button>`;
   html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadEnvRef(this)">Upload Image</label>`;
   html+=`</div>`;
   for(const ref of envRefs){

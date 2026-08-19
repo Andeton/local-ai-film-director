@@ -1003,7 +1003,7 @@ def create_router(
 
     @router.post("/projects/{project_id}/environment-references/generate")
     def generate_environment_reference(project_id: str) -> dict:
-        """Generate an environment reference from project context."""
+        """Generate an environment reference from persisted environment description."""
         _m5_guard()
         p = project_repo.get_project(project_id)
         if p is None:
@@ -1011,17 +1011,12 @@ def create_router(
         if ref_generation_service is None:
             raise HTTPException(status_code=501, detail="Reference generation not available")
 
-        # Derive environment description from project context
-        description = p.director_context.get("description", "")
-        if not description:
+        env_description = p.director_context.get("environment_description", "")
+        if not env_description or not env_description.strip():
             raise HTTPException(
                 status_code=422,
-                detail="Project has no description. Cannot derive environment context.",
+                detail="No environment description. Run 'Enrich Missing Data' first.",
             )
-
-        # Extract location/setting from the description for the environment prompt
-        # Use a concise location summary derived from the project description
-        env_description = _derive_environment_description(p)
 
         result = ref_generation_service.generate_environment_reference(
             project_id=project_id,
@@ -1032,38 +1027,6 @@ def create_router(
             "request_id": result.request_id,
             "execution_id": result.execution_id,
         }
-
-    def _derive_environment_description(project) -> str:
-        """Derive a stable environment/location description from project context.
-
-        Extracts setting/location details from the project description while
-        excluding character actions and plot events. Used for environment
-        reference generation.
-        """
-        desc = project.director_context.get("description", "")
-        style = project.director_context.get("style", "")
-
-        # Get scene locations from canonical data
-        sequences = seq_repo.get_sequences_by_project(project.id)
-        scene_locations = []
-        for seq in sequences:
-            for scene in scene_repo.get_scenes_by_sequence(seq.id):
-                if scene.location and scene.location.strip():
-                    scene_locations.append(scene.location)
-
-        # Build a composite environment description
-        parts = []
-        if desc:
-            # Use the full description — the image model will focus on setting
-            # because the prompt template explicitly requests "no people, no action"
-            parts.append(desc)
-        if scene_locations:
-            locs = ", ".join(dict.fromkeys(scene_locations))  # deduplicate, preserve order
-            parts.append(f"Location: {locs}")
-        if style:
-            parts.append(f"Visual style: {style}")
-
-        return ". ".join(parts) if parts else "Interior scene"
 
     @router.get("/shots/{shot_id}/selected-references")
     def get_selected_references(

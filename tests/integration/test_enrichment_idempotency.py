@@ -80,6 +80,8 @@ def _make_fake_llm():
             data = _fake_shot_plan()
         elif "character visual" in sys_msg:
             data = _fake_char_enrichment()
+        elif "SET" in sys_msg or "LOCATION" in sys_msg:
+            data = {"environment_description": "A test office interior with desks and fluorescent lighting, neutral walls, modern."}
         else:
             data = _fake_shot_plan()
         return LLMResponse(content=json.dumps(data), parsed=data, model="test")

@@ -41,16 +41,27 @@ logger = logging.getLogger(__name__)
 
 _SHA256_BUF = 65_536
 _DEFAULT_NEGATIVE = "text, labels, watermark, blurry, low quality, deformed, split panels, grid, multiple views, character sheet"
-_ENV_NEGATIVE = "text, labels, watermark, blurry, low quality, people, person, human, character, figure, hand, face, action, motion blur"
+_ENV_NEGATIVE = (
+    "text, labels, watermark, blurry, low quality, "
+    "people, person, human, character, figure, hand, face, "
+    "collage, contact sheet, storyboard, split screen, multiple panels, "
+    "grid, inset, border, picture frame, "
+    "police car, blood, envelope, weapon, "
+    "action, motion blur, multiple views"
+)
 
 
 def _build_environment_prompt(description: str) -> str:
     """Build a location/set reference prompt from an environment description."""
     return (
-        f"A cinematic production design reference photo of a location: {description}. "
-        f"Empty interior establishing shot, no people, no characters, no action. "
-        f"Architectural detail, practical lighting, photorealistic, "
-        f"high detail, cinematic quality, no text, no labels"
+        f"A single continuous cinematic production design reference photograph of: "
+        f"{description}. "
+        f"One coherent wide-angle interior establishing shot from a single viewpoint. "
+        f"Empty set, no people, no characters, no figures, no action. "
+        f"Architectural detail, spatial layout clearly readable, "
+        f"practical lighting, photorealistic, high detail, cinematic quality. "
+        f"One image only, no collage, no split screen, no contact sheet, "
+        f"no storyboard, no multiple panels, no text, no labels"
     )
 
 

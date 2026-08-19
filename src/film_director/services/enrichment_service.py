@@ -204,15 +204,27 @@ class EnrichmentService:
 
         # --- Character enrichment (deficient characters only) ---
         enriched_chars: list = []
-        if self._shot_planner is not None:
-            project_description = project.director_context.get("description", "")
-            if project_description:
-                enriched_chars = self._shot_planner.enrich_characters(
-                    characters, project_description,
-                )
+        project_description = project.director_context.get("description", "")
+        if self._shot_planner is not None and project_description:
+            enriched_chars = self._shot_planner.enrich_characters(
+                characters, project_description,
+            )
+
+        # --- Environment derivation (if missing) ---
+        updated_project = None
+        if (self._shot_planner is not None
+                and project_description
+                and not project.director_context.get("environment_description")):
+            env_desc = self._shot_planner.derive_environment(project_description)
+            if env_desc:
+                new_ctx = dict(project.director_context)
+                new_ctx["environment_description"] = env_desc
+                updated_project = project.model_copy(update={
+                    "director_context": new_ctx,
+                })
 
         # --- Phase 2: ONE write transaction ---
-        if new_beats or new_shots or new_plans or enriched_chars:
+        if new_beats or new_shots or new_plans or enriched_chars or updated_project:
             with self._db.connection() as conn:
                 for beat in new_beats:
                     self._beat_repo.save_beat(beat, conn=conn)
@@ -222,6 +234,8 @@ class EnrichmentService:
                     self._plan_repo.save_plan(plan, conn=conn)
                 for char in enriched_chars:
                     self._character_repo.save_character(char, conn=conn)
+                if updated_project:
+                    self._project_repo.save_project(updated_project, conn=conn)
 
         return EnrichmentResult(
             project_id=project_id,

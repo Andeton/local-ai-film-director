@@ -223,6 +223,53 @@ class ShotPlanner:
         return subjects
 
     # ------------------------------------------------------------------
+    # Environment derivation
+    # ------------------------------------------------------------------
+
+    def derive_environment(self, project_description: str) -> str:
+        """Extract a stable production-design environment description from the story.
+
+        Converts narrative context into a physical set description, removing
+        characters, actions, plot events, and story-specific props.
+
+        Returns a concise environment definition suitable for persistent
+        storage and repeated reference generation.
+        """
+        if not project_description or not project_description.strip():
+            return ""
+
+        messages = [
+            {"role": "system", "content": _ENVIRONMENT_DERIVATION_SYSTEM},
+            {"role": "user", "content": (
+                f"Story/Premise:\n{project_description}\n\n"
+                "Extract the physical environment/location description. "
+                'Return JSON: {"environment_description": "..."}'
+            )},
+        ]
+
+        response = self._llm.chat(messages, expect_json=True)
+        parsed = response.parsed or {}
+        desc = parsed.get("environment_description", "")
+
+        if not desc or not desc.strip() or len(desc.strip()) < 20:
+            # Repair attempt
+            from film_director.enrichment.prompts import build_repair_messages
+            repair = build_repair_messages(
+                original_messages=messages,
+                bad_response_content=response.content,
+                error_detail="environment_description missing or too short (need 20+ chars)",
+            )
+            repair_resp = self._llm.chat(repair, expect_json=True)
+            desc = (repair_resp.parsed or {}).get("environment_description", "")
+            if not desc or len(desc.strip()) < 20:
+                raise EnrichmentError(
+                    "Failed to derive environment description",
+                    detail="LLM did not produce a usable environment description",
+                )
+
+        return desc.strip()
+
+    # ------------------------------------------------------------------
     # Character enrichment
     # ------------------------------------------------------------------
 
@@ -283,6 +330,39 @@ class ShotPlanner:
             }))
         return updated
 
+
+# -----------------------------------------------------------------------
+# Environment derivation prompt
+# -----------------------------------------------------------------------
+
+_ENVIRONMENT_DERIVATION_SYSTEM = """\
+You are a production designer extracting a physical SET/LOCATION description \
+from a story premise.
+
+Your job is to describe the PHYSICAL SPACE where the story takes place, \
+as a production design reference — NOT the story itself.
+
+INCLUDE:
+- Type of space (apartment, office, forest, etc.)
+- Size and spatial layout (rooms, connections, sightlines)
+- Key architectural features and furniture
+- Lighting conditions (practical lights, windows, time of day)
+- Color palette and visual atmosphere
+- Production design style (modern, period, worn, etc.)
+- Materials and textures
+
+EXCLUDE (these belong to shots, NOT environment):
+- Character names or descriptions
+- Actions, events, or plot points
+- Story-specific props (letters, weapons, evidence)
+- Emotions or dramatic intent
+- Dialogue or sound
+- Camera angles or shot descriptions
+
+Return ONLY a JSON object: {"environment_description": "..."}
+The description should be 2-4 sentences, concise, visual, in English.
+No markdown, no explanation — raw JSON only.
+"""
 
 # -----------------------------------------------------------------------
 # Character enrichment helpers

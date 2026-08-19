@@ -42,6 +42,7 @@ class ReferenceKind(str, Enum):
     CHARACTER_FACE = "character_face"
     CHARACTER_BODY = "character_body"
     STORYBOARD = "storyboard"
+    ENVIRONMENT = "environment"
 
 
 class ReferenceSource(str, Enum):
@@ -72,9 +73,10 @@ class ReferenceSourceState(str, Enum):
 class ReferenceAsset(BaseModel):
     """Source-neutral managed image reference asset.
 
-    Ownership invariant: exactly one of (character_id, shot_id) is non-None.
+    Ownership invariants by kind:
     CHARACTER_FACE/BODY → character_id required, shot_id None.
     STORYBOARD → shot_id required, character_id None.
+    ENVIRONMENT → project-level, both character_id and shot_id None.
     """
 
     id: str
@@ -132,6 +134,11 @@ class ReferenceAsset(BaseModel):
                 raise ValueError("storyboard requires shot_id")
             if cid is not None:
                 raise ValueError("storyboard must not have character_id")
+        elif kind == ReferenceKind.ENVIRONMENT:
+            if cid is not None:
+                raise ValueError("environment must not have character_id")
+            if sid is not None:
+                raise ValueError("environment must not have shot_id")
 
         return self
 
@@ -194,6 +201,8 @@ class ReferenceGenerationRequest(BaseModel):
     def _validate_kind(self):
         if self.requested_kind == ReferenceKind.STORYBOARD:
             raise ValueError("STORYBOARD is not valid for generation requests")
+        if self.requested_kind == ReferenceKind.ENVIRONMENT:
+            raise ValueError("ENVIRONMENT is not valid for character generation requests")
         return self
 
 

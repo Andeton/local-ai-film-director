@@ -415,6 +415,22 @@ function renderReferenceManager(chars,refs){
   }
   html+=`</div>`;
 
+  // Environment references section
+  const envRefs=refs.filter(r=>r.kind==='environment');
+  const hasApprovedEnv=envRefs.some(r=>r.status==='approved'&&r.source_state==='current');
+  html+=`<div class="section"><div class="section-title">Environment Reference ${hasApprovedEnv?'<span class="badge badge-approved">Ready</span>':'<span class="badge badge-empty">Required</span>'}</div>`;
+  html+=`<div style="font-size:10px;color:var(--text2);margin-bottom:4px">Upload an image representing the scene environment (location, setting, mood).</div>`;
+  html+=`<div class="ref-char-actions" style="margin-bottom:6px">`;
+  html+=`<label class="btn btn-primary btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadEnvRef(this)">Upload Environment Image</label>`;
+  html+=`</div>`;
+  for(const ref of envRefs){
+    html+=renderRefCard(ref);
+  }
+  if(!envRefs.length){
+    html+=`<div style="color:var(--text2);font-size:10px;padding:4px 0">No environment references yet.</div>`;
+  }
+  html+=`</div>`;
+
   panel.innerHTML=html;
   showReadiness();
 }
@@ -426,7 +442,9 @@ function renderRefCard(ref){
   html+=`<div class="ref-card-inner">`;
   html+=`<img src="/media/${ref.managed_path}" onclick="previewRef('/media/${ref.managed_path}')" onerror="this.style.background='#333';this.alt='?'">`;
   html+=`<div class="ref-card-info">`;
-  html+=`<div><span class="badge badge-${ref.kind==='character_body'?'available':'generated'}">${ref.kind==='character_body'?'Body':'Face'}</span> `;
+  const kindLabel=ref.kind==='character_body'?'Body':ref.kind==='character_face'?'Face':ref.kind==='environment'?'Environment':ref.kind;
+  const kindBadge=ref.kind==='character_body'?'available':ref.kind==='environment'?'available':'generated';
+  html+=`<div><span class="badge badge-${kindBadge}">${kindLabel}</span> `;
   html+=`<span class="badge badge-${ref.status}">${ref.status}</span> `;
   html+=`<span class="badge badge-${ref.source_state}">${ref.source_state}</span>`;
   if(isPinned)html+=` <span class="badge badge-approved">Pinned</span>`;
@@ -500,6 +518,24 @@ async function uploadRef(characterId,kind,input){
   input.value='';
 }
 
+async function uploadEnvRef(input){
+  if(!input.files||!input.files[0]||!currentProject)return;
+  const file=input.files[0];
+  if(file.size>50*1024*1024){toast('File too large (max 50MB)',false);return}
+  const formData=new FormData();
+  formData.append('file',file);
+  toast('Uploading environment reference...');
+  try{
+    await fetch(`/projects/${currentProject.id}/environment-references/register`,{method:'POST',body:formData})
+      .then(async r=>{if(!r.ok){const e=await r.json().catch(()=>({error:r.statusText}));throw new Error(e.error||e.detail||r.statusText)}return r.json()});
+    toast('Environment reference uploaded (candidate)');
+    await showReferenceManager();
+  }catch(e){
+    toast('Upload failed: '+e.message,false);
+  }
+  input.value='';
+}
+
 async function refAction(refId,action){
   try{
     await api(`/references/${refId}/${action}`,{method:'POST'});
@@ -547,6 +583,7 @@ async function showReadiness(){
       <div class="panel-title" style="margin-top:12px">Project</div>
       <div class="setting"><label>Shots</label><div class="val">${r.shot_count}</div></div>
       <div class="setting"><label>Character Ref</label><div class="val">${r.has_character_ref?'✓ Ready':'✗ Missing'}</div></div>
+      <div class="setting"><label>Environment Ref</label><div class="val">${r.has_environment_ref?'✓ Ready':'✗ Missing'}</div></div>
       <div class="setting"><label>Approved Takes</label><div class="val">${r.approved_takes}/${r.total_shots}</div></div>
       <div style="margin-top:12px">
         <button class="btn btn-primary" style="width:100%;font-size:11px;margin-bottom:4px" onclick="showReferenceManager()">Manage References</button>

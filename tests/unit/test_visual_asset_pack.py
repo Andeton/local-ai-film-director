@@ -872,7 +872,8 @@ class TestBackwardCompatibility:
         assert ReferenceKind.CHARACTER_FACE == "character_face"
         assert ReferenceKind.CHARACTER_BODY == "character_body"
         assert ReferenceKind.STORYBOARD == "storyboard"
-        assert len(ReferenceKind) == 3
+        assert ReferenceKind.ENVIRONMENT == "environment"
+        assert len(ReferenceKind) == 4
 
     def test_reference_source_unchanged(self):
         assert ReferenceSource.USER_UPLOAD == "user_upload"

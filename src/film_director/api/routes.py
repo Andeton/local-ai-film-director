@@ -570,7 +570,7 @@ def create_router(
         # Resolve references
         refs = ref_asset_repo.list_by_project(project_id) if project_id and ref_asset_repo else []
         char_ref = next((r for r in refs if r.kind.value == "character_body" and r.status.value == "approved" and r.source_state.value == "current"), None)
-        env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "storyboard"), None)
+        env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "environment"), None)
 
         # Workflow selection
         if is_head:
@@ -909,6 +909,78 @@ def create_router(
     @router.post("/references/{reference_id}/unpin")
     def unpin_reference(reference_id: str) -> dict:
         return _lifecycle_action(reference_id, "unpin")
+
+    # ------------------------------------------------------------------
+    # Environment References (project-level)
+    # ------------------------------------------------------------------
+
+    @router.get("/projects/{project_id}/environment-references")
+    def list_environment_references(project_id: str) -> list[dict]:
+        _m5_guard()
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        assets = ref_asset_repo.list_by_project(project_id)
+        env_assets = [a for a in assets if a.kind == ReferenceKind.ENVIRONMENT]
+        return [a.model_dump() for a in env_assets]
+
+    @router.post("/projects/{project_id}/environment-references/register")
+    async def register_environment_reference(
+        project_id: str,
+        file: UploadFile = File(...),
+    ) -> dict:
+        _m5_guard()
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if ref_ingest_service is None:
+            raise HTTPException(status_code=501, detail="M5 reference management not available")
+
+        tmp_path = None
+        try:
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".upload")
+            total = 0
+            try:
+                with os.fdopen(tmp_fd, "wb") as tmp_f:
+                    while True:
+                        chunk = await file.read(_UPLOAD_CHUNK)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > _MAX_UPLOAD_BYTES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=f"Upload exceeds {_MAX_UPLOAD_BYTES} byte limit",
+                            )
+                        tmp_f.write(chunk)
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=422, detail=f"Upload failed: {e}")
+
+            if total == 0:
+                raise HTTPException(status_code=422, detail="Empty upload")
+
+            result = ref_ingest_service.register_user_reference(
+                project_id=project_id,
+                kind=ReferenceKind.ENVIRONMENT,
+                source_path=tmp_path,
+            )
+
+            if result.outcome == "invalid_image":
+                raise ReferenceIngestError(
+                    "Invalid image file", detail=result.detail,
+                )
+            if result.asset is None:
+                raise ReferenceIngestError(
+                    f"Ingest failed: {result.outcome}", detail=result.detail,
+                )
+
+            return result.asset.model_dump()
+
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     @router.get("/shots/{shot_id}/selected-references")
     def get_selected_references(
@@ -1268,6 +1340,13 @@ def create_router(
             and r.source_state.value == "current"
             for r in refs
         )
+        # Image-pack production requires ENVIRONMENT ref (Picture 2)
+        has_env = any(
+            r.kind.value == "environment"
+            and r.status.value == "approved"
+            and r.source_state.value == "current"
+            for r in refs
+        )
         has_shots = len(shots) > 0
         approved_takes = 0
         if take_repo:
@@ -1280,15 +1359,18 @@ def create_router(
             missing.append("Shot plan (no shots)")
         if not has_char:
             missing.append("Character reference (character_body, approved)")
-        ready = has_shots and has_char
+        if not has_env:
+            missing.append("Environment reference (environment, approved)")
+        ready = has_shots and has_char and has_env
         next_action = "Review and correct the shot plan." if not has_shots else \
-                      "Prepare character references." if not ready else \
+                      "Prepare character and environment references." if not ready else \
                       "Generate Shot 1." if approved_takes == 0 else \
                       f"Review/approve Takes ({approved_takes}/{len(shots)} approved)."
         return {
             "ready": ready,
             "shot_count": len(shots),
             "has_character_ref": has_char,
+            "has_environment_ref": has_env,
             "approved_takes": approved_takes,
             "total_shots": len(shots),
             "missing": missing,

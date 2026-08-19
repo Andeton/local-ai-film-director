@@ -761,7 +761,7 @@ class TestBackwardCompatibility:
             ReferenceAsset, ReferenceKind, ReferenceStatus,
             ReferenceSourceState,
         )
-        assert len(ReferenceKind) == 3
+        assert len(ReferenceKind) == 4  # +ENVIRONMENT for production env refs
         assert len(ReferenceStatus) == 4
         assert len(ReferenceSourceState) == 2
 

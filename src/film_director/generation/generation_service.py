@@ -280,7 +280,7 @@ class GenerationService:
                 uploaded_bindings=uploaded_bindings,
                 seed=seed, output_prefix=output_prefix,
             )
-            submission_workflow = self._param_resolver.apply_injections(template, injections)
+            submission_workflow = self._param_resolver.apply_injections(template, injections, workflow_def)
 
             # Persist continuity state for downstream shots
             if continuity_input is not None:
@@ -363,7 +363,7 @@ class GenerationService:
                 "first_frame_field": workflow_def.parameter_mappings["first_frame"]["field"],
             }
             uploaded_bindings = []
-            submission_workflow = self._param_resolver.apply_injections(template, injections)
+            submission_workflow = self._param_resolver.apply_injections(template, injections, workflow_def)
 
             scene_id = None
             with self._db.connection() as conn:
@@ -409,7 +409,7 @@ class GenerationService:
                 seed=seed, output_prefix=output_prefix,
             )
             continuity_snapshot = None
-            submission_workflow = self._param_resolver.apply_injections(template, injections)
+            submission_workflow = self._param_resolver.apply_injections(template, injections, workflow_def)
             continuity_snapshot = None
 
         # ---------------------------------------------------------------
@@ -740,7 +740,7 @@ class GenerationService:
             output_prefix=output_prefix,
         )
 
-        submission_workflow = self._param_resolver.apply_injections(template, injections)
+        submission_workflow = self._param_resolver.apply_injections(template, injections, workflow_def)
 
         # Build reference snapshot with recipe metadata
         reference_snapshot = [

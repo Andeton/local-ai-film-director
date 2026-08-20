@@ -176,7 +176,7 @@ class TestSubmit:
         def handler(request):
             return httpx.Response(400, json={"error": "invalid workflow"})
         adapter = _adapter_with(handler)
-        with pytest.raises(ComfyUIExecutionError, match="(?i)submit"):
+        with pytest.raises(ComfyUIExecutionError, match="(?i)rejected|invalid"):
             adapter.submit({"bad": {}}, "client-1")
 
     def test_submit_transport_failure(self):

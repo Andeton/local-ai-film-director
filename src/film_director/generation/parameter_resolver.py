@@ -295,6 +295,7 @@ class ParameterResolver:
         self,
         template: dict,
         injections: list[WorkflowInjection],
+        workflow_def: WorkflowDefinition | None = None,
     ) -> dict:
         result = copy.deepcopy(template)
         for inj in injections:
@@ -311,4 +312,52 @@ class ParameterResolver:
                     detail=f"injection={inj.name}",
                 )
             inputs[inj.field] = inj.value
+
+        # Prune unused image slots from image-pack workflows
+        if workflow_def is not None:
+            injected_ref_keys = {inj.name for inj in injections if inj.name.startswith("ref_image_")}
+            result = self._prune_unused_image_slots(result, workflow_def, injected_ref_keys)
+
         return result
+
+    @staticmethod
+    def _prune_unused_image_slots(
+        workflow: dict,
+        workflow_def: WorkflowDefinition,
+        injected_ref_keys: set[str],
+    ) -> dict:
+        """Remove unused ref_image LoadImage nodes and their connections.
+
+        For image-pack workflows with N materialized slots, slots that were
+        NOT injected must be disconnected from the H3 node and their
+        LoadImage nodes removed. This matches the real ComfyUI workflow
+        behavior where unused ref_images inputs have link=null.
+        """
+        materialized = workflow_def.constraints.get("materialized_reference_slots", 0)
+        if materialized <= 0:
+            return workflow
+
+        mappings = workflow_def.parameter_mappings
+        prompt_node_id = mappings.get("prompt", {}).get("node_id")
+
+        for i in range(materialized):
+            ref_key = f"ref_image_{i}"
+            if ref_key in injected_ref_keys:
+                continue  # This slot was used — keep it
+
+            mapping = mappings.get(ref_key)
+            if mapping is None:
+                continue
+
+            load_node_id = mapping["node_id"]
+
+            # Remove the LoadImage node from the workflow
+            workflow.pop(load_node_id, None)
+
+            # Remove the ref_images connection from the H3 node
+            if prompt_node_id and prompt_node_id in workflow:
+                h3_inputs = workflow[prompt_node_id].get("inputs", {})
+                conn_key = f"ref_images.ref_image_{i}"
+                h3_inputs.pop(conn_key, None)
+
+        return workflow

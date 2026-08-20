@@ -198,10 +198,28 @@ class ComfyUIAdapter:
                 client.close()
 
         if resp.status_code != 200:
-            detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
+            raw = resp.text[:1000] if resp.text else ""
+            # Extract concise validation info from ComfyUI error responses
+            summary = f"HTTP {resp.status_code}"
+            try:
+                err_data = resp.json()
+                if "node_errors" in err_data:
+                    for nid, nerr in err_data["node_errors"].items():
+                        cls = nerr.get("class_type", "?")
+                        msgs = [e.get("message", "") for e in nerr.get("errors", [])]
+                        summary = f"Node {nid} ({cls}): {'; '.join(msgs)}"
+                        break
+                elif "error" in err_data:
+                    emsg = err_data["error"]
+                    if isinstance(emsg, dict):
+                        summary = emsg.get("message", str(emsg))[:200]
+                    else:
+                        summary = str(emsg)[:200]
+            except Exception:
+                summary = raw[:200] if raw else f"HTTP {resp.status_code}"
             raise ComfyUIExecutionError(
-                f"Submit failed: HTTP {resp.status_code}",
-                detail=detail,
+                f"ComfyUI rejected workflow: {summary}",
+                detail=raw,
             )
 
         try:

@@ -597,10 +597,22 @@ def create_router(
             else:
                 continuity_blocked = True
 
-        # Resolve references
+        # Resolve references — per-subject, matching GenerationService behavior
         refs = ref_asset_repo.list_by_project(project_id) if project_id and ref_asset_repo else []
-        char_ref = next((r for r in refs if r.kind.value == "character_body" and r.status.value == "approved" and r.source_state.value == "current"), None)
         env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "environment"), None)
+
+        # Select character refs per shot subject (same as ReferenceSelector)
+        shot_char_refs = []
+        if shot.subjects and refs:
+            eligible_char = sorted(
+                [r for r in refs if r.kind.value == "character_body" and r.status.value == "approved" and r.source_state.value == "current"],
+                key=lambda a: (not a.pinned, a.id),
+            )
+            for subj in shot.subjects:
+                match = next((a for a in eligible_char if a.character_id == subj.character_id), None)
+                if match:
+                    shot_char_refs.append(match)
+        char_ref = shot_char_refs[0] if shot_char_refs else None
 
         # Workflow selection — mirrors GenerationService logic exactly:
         # env available → image-pack (both head and downstream)
@@ -642,25 +654,37 @@ def create_router(
         seed_policy = "explicit" if seed is not None else plan.seed_policy
         seed_display = seed if seed is not None else plan.seed
 
-        # Pictures
+        # Pictures — mirrors GenerationService image-pack binding order exactly:
+        # Picture 1 = primary character, Picture 2 = env,
+        # Picture 3 = continuity (downstream), remaining = extra characters
         pictures = []
+        pic_idx = 1
+
+        # Picture 1: primary character identity
         if char_ref:
+            char_name = next((s.name for s in (shot.subjects or []) if s.character_id == char_ref.character_id), "Character")
             pictures.append({
-                "picture_index": 1, "role": "CHARACTER IDENTITY",
+                "picture_index": pic_idx, "role": f"CHARACTER: {char_name}",
                 "reference_id": char_ref.id, "kind": char_ref.kind.value,
                 "status": char_ref.status.value, "source_state": char_ref.source_state.value,
                 "thumbnail_url": f"/media/{char_ref.managed_path}",
             })
+            pic_idx += 1
+
+        # Picture 2: environment
         if env_ref:
             pictures.append({
-                "picture_index": 2, "role": "ENVIRONMENT",
+                "picture_index": pic_idx, "role": "ENVIRONMENT",
                 "reference_id": env_ref.id, "kind": env_ref.kind.value,
                 "status": env_ref.status.value, "source_state": env_ref.source_state.value,
                 "thumbnail_url": f"/media/{env_ref.managed_path}",
             })
+            pic_idx += 1
+
+        # Picture 3: continuity frame (downstream only)
         if not is_head:
             cont_pic = {
-                "picture_index": 3, "role": "CONTINUITY FRAME",
+                "picture_index": pic_idx, "role": "CONTINUITY FRAME",
                 "reference_id": None, "kind": "continuity",
                 "status": "blocked" if continuity_blocked else "available",
                 "source_state": "predecessor",
@@ -672,6 +696,18 @@ def create_router(
             else:
                 cont_pic["source_label"] = f"BLOCKED — approve Shot {shot_idx} first"
             pictures.append(cont_pic)
+            pic_idx += 1
+
+        # Remaining slots: additional character refs (2nd+ subjects)
+        for extra_ref in shot_char_refs[1:]:
+            extra_name = next((s.name for s in (shot.subjects or []) if s.character_id == extra_ref.character_id), "Character")
+            pictures.append({
+                "picture_index": pic_idx, "role": f"CHARACTER: {extra_name}",
+                "reference_id": extra_ref.id, "kind": extra_ref.kind.value,
+                "status": extra_ref.status.value, "source_state": extra_ref.source_state.value,
+                "thumbnail_url": f"/media/{extra_ref.managed_path}",
+            })
+            pic_idx += 1
 
         return {
             "shot_id": shot_id,

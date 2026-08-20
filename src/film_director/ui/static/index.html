@@ -131,7 +131,16 @@ function esc(s){const d=document.createElement('div');d.textContent=s||'';return
 async function init(){
   projects=await api('/projects');
   renderProjects();
-  if(projects.length)selectProject(projects[0].id);
+  if(!projects.length)return;
+  // Restore persisted selection or fall back to first project
+  const storedPid=localStorage.getItem('film_director.selected_project_id');
+  const target=storedPid&&projects.find(p=>p.id===storedPid)?storedPid:projects[0].id;
+  await selectProject(target);
+  // Restore persisted shot if applicable
+  const storedSid=localStorage.getItem('film_director.selected_shot_id');
+  if(storedSid&&currentShots.find(s=>s.id===storedSid)){
+    await selectShot(storedSid);
+  }
 }
 
 function renderProjects(){
@@ -142,10 +151,11 @@ function renderProjects(){
 
 async function selectProject(pid){
   currentProject=projects.find(p=>p.id===pid)||await api(`/projects/${pid}`);
+  localStorage.setItem('film_director.selected_project_id',currentProject.id);
   document.getElementById('project-sub').textContent=currentProject.id;
   renderProjects();
   await loadShots();
-  if(currentShots.length){selectShot(currentShots[0].id)}
+  if(currentShots.length){await selectShot(currentShots[0].id)}
   else{document.getElementById('main-panel').innerHTML='<div class="loading">No shots yet. Use shot plan editor.</div>';showShotPlanEditor()}
 }
 
@@ -177,6 +187,7 @@ function renderShotList(){
 
 async function selectShot(shotId){
   selectedShotId=shotId;draftPrompt=null;draftDuration=null;draftSeedMode='random';draftSeedValue=null;
+  localStorage.setItem('film_director.selected_shot_id',shotId);
   renderShotList();await refreshPreview();
 }
 

@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         return self
 
     comfyui_base_url: str = "http://127.0.0.1:8188"
-    comfyui_generation_timeout: int = 600
+    comfyui_generation_timeout: int = 1200
 
     # M6 queue worker
     queue_worker_concurrency: int = 1

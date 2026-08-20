@@ -155,12 +155,24 @@ FILM_WINDCOMIC_BASE_URL=http://127.0.0.1:3000
 OPENROUTER_API_KEY=...  # bare key, no FILM_ prefix
 ```
 
-## 9. Recommended Next Action
+## 9. Exact Next Action
 
-1. **Approve Shot 4**: The operator assessed it as visually good. Approve via UI or `POST /takes/takeaf8e1a965985/approve`.
+**Start a new feature branch/worktree:** `p3-scene-completion`
 
-2. **Generate Shots 5-6**: Continue through the normal UI Generate Take flow.
+**Then:**
+1. Open production project `proj_cfb89b04f3c8`
+2. Inspect existing Shot 4 Take `takeaf8e1a965985` in the UI
+3. Human approve/reject Shot 4 (assessed as visually good)
+4. Only if approved, proceed to Shot 5 generation
+5. After all 6 shots approved, build scene assembly
 
-3. **After all 6 shots approved**: Build the scene assembly (`POST /projects/{id}/build-scene`).
+**Do NOT generate Shot 5 until Shot 4 is explicitly approved.**
 
-4. **Suggested next feature branch**: `p3-scene-completion`
+**Runtime commands:**
+```bash
+cd "D:/Ai/Local AI Film Director"
+pip install -e .
+uvicorn film_director.main:app --host 127.0.0.1 --port 8000
+```
+
+**Durable documentation:** See `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STATE.md`, `docs/ROADMAP.md`, `docs/TECHNOLOGY_RADAR.md` for system design and implementation status.

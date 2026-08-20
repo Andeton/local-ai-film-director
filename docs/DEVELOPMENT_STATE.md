@@ -1,70 +1,89 @@
 # Development State — Local AI Film Director
 
-**Last Updated:** 2026-08-18
+**Last Updated:** 2026-08-20
+**Test Baseline:** 1907 passed, 12 deselected (live tests)
+**Branch:** main
 
 ---
 
 ## Current State
 
-**Production loop: PROVEN**
-
-**Active branch:** `main`
+**Production loop: VALIDATED through Shot 4 of 6**
 
 ---
 
-## P3 — Pre-Production UI
+## Production Validation Project
 
-**Status:** IN PROGRESS — latest checkpoint merged to main
+**Project:** `proj_cfb89b04f3c8`
+**Idea:** "A tense nighttime scene in a small New York apartment..."
 
-### Implemented Capabilities
+| Shot | ID | Status | Take |
+|------|----|--------|------|
+| 1 | shote6b5120632df | APPROVED | take1177d3c08bbd |
+| 2 | shot83bdb22a9c07 | APPROVED | take5e7ed5c36a09 |
+| 3 | shote7b54e8ac94f | APPROVED | takeeae22d01305f |
+| 4 | shot088711c1c99b | SUCCEEDED | takeaf8e1a965985 |
+| 5 | shot84f372d8c579 | NOT GENERATED | — |
+| 6 | shot7d12065a94e4 | NOT GENERATED | — |
 
-- New Project UI (Wind Comic creation through product path)
-- Canonical import (WC → LFDirector project)
-- Shot plan editor (add / edit / delete / reorder via API)
-- Explicit enrichment only (auto-enrichment removed)
-- Project readiness (missing refs disable generation)
-- Activity Monitor (operation tracking, duplicate protection)
-- Automatic idle model cleanup after expensive stages
-- Manual GPU memory release
-- System/resource status visibility
-
-### Current P3 Test Project
-
-- **LFDirector:** `proj_b885a403ecac`
-- **Wind Comic:** `OOBJ2pik0F5frZWWhaTFe`
-- **Scenes:** 1 · **Characters:** 2
-- **Shots:** 16 (old auto-enrichment, needs human review)
-- **Character reference:** MISSING
-- **Environment reference:** MISSING
-- **Generation ready:** NO
-
-### Next Action
-
-Open `proj_b885a403ecac` in operator UI → review/correct 16-shot plan → prepare references through UI.
+**Approved References:**
+- ref_cd7e358fc55f — CHARACTER_BODY (The Man)
+- ref_44bc8980faf4 — CHARACTER_BODY (The Woman)
+- ref_c9fa948003bd — ENVIRONMENT
 
 ---
 
-## P2 — First Complete Scene
+## Validated Production Capabilities
 
-**Status:** COMPLETE / HUMAN PASS / MERGED
+- Wind Comic pre-production and canonical import
+- OpenRouter shot planning (5-7 shot concise plans from project description)
+- Character enrichment (deficient placeholder characters → production-ready)
+- Environment description derivation (narrative → physical set description)
+- Editable character name/appearance with staleness propagation
+- Editable environment description with staleness propagation
+- Z-Image Turbo character body and environment reference generation
+- Reference approval/rejection lifecycle
+- Generation readiness gate (CHARACTER_BODY + ENVIRONMENT required)
+- H3 image-pack generation with up to 4 simultaneous references
+- Downstream continuity frame propagation
+- Unused image-slot pruning before ComfyUI submission
+- Subject-scoped preview/execution consistency
+- Take approval and continuity chain
+- Generation timeout recovery (finalize_from_result)
+- Browser project/shot localStorage persistence
 
-- **Project:** `proj_5339656ad20f`
-- **Scene:** 5 shots, all approved, 30.825s, 1376x768, 24fps
-- **Output:** `storage/exports/proj_5339656ad20f/scene_main_v1.mp4`
+### Shot 4 Observations
+
+- 4/4 image-pack produced a visually good result despite The Woman in Picture 4
+- H3 spontaneously produced dialogue audio without explicit control
+- Spontaneous dialogue is an observation for future evaluation, not a guaranteed feature or bug
 
 ---
 
-## M7 — Continuity
+## P3 — Pre-Production and Reference Management
 
-**Status:** COMPLETE / CLOSED / MERGED
+**Status:** Production-validated through Shot 4. Scene completion in progress.
 
-Selected strategy: H3 R2V image-pack (character + environment + predecessor frame).
+### Completed This Session (18 commits)
 
----
-
-## Deterministic Baseline
-
-**1743 passed, 12 deselected, 0 failed**
+- Reference Management UI
+- Editable character/environment definitions
+- Environment reference generation
+- OpenRouter provider + ShotPlanner
+- Character enrichment
+- Environment description derivation
+- Enrichment idempotency + explicit replan
+- ENVIRONMENT reference kind
+- REFERENCE_TO_VIDEO strategy fix
+- Real ComfyUI workflow source-reference policy
+- H3 image-pack integration into generate_take
+- Downstream image-pack continuity
+- Subject-scoped preview
+- Unused LoadImage slot pruning
+- ComfyUI error propagation
+- Generation timeout increase + recovery
+- Browser localStorage persistence
+- Activity event log
 
 ---
 
@@ -79,6 +98,23 @@ Selected strategy: H3 R2V image-pack (character + environment + predecessor fram
 
 ---
 
+## Known Limitations / Technical Debt
+
+| Issue | Severity |
+|---|---|
+| Windows backslashes in Take video paths | LOW — server normalizes |
+| Primary-subject slot ordering open question | OPEN — no demonstrated failure |
+| No H3 prompt compilation stage | DESIGN_GAP |
+| WC generic placeholder content | KNOWN — project description compensates |
+| Legacy FLF fallback remains | LEGACY |
+| No batch generation queue | DEFERRED |
+| Single-file HTML operator console | DEFERRED |
+| Spontaneous H3 dialogue not controllable | OBSERVATION |
+| LTX deferred | DEFERRED |
+| CapabilityRegistry frozen | FROZEN |
+
+---
+
 ## Closed Milestones
 
 | Milestone | Key Outcome |
@@ -86,15 +122,3 @@ Selected strategy: H3 R2V image-pack (character + environment + predecessor fram
 | M1-M6 | Integration, specification, H3 bridge, WC handoff, references, takes/queue |
 | M7 | Continuity chain, FLF, image-pack multi-ref |
 | P2 | First complete 5-shot scene, operator UI, assembly |
-
----
-
-## Known Gaps
-
-| Gap | Severity |
-|---|---|
-| qwen3:14b enrichment quality | PRODUCT_GAP |
-| P3 16-shot plan needs correction | PRODUCT_GAP |
-| Reference prep not full UI flow | PRODUCT_GAP |
-| LTX deferred | DEFERRED |
-| CapabilityRegistry frozen | FROZEN |

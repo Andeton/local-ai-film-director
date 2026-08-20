@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Callable
 
-from film_director.errors import GenerationError
+from film_director.errors import ComfyUIExecutionError, GenerationError
 from film_director.generation.comfyui_adapter import ComfyUIAdapter
 from film_director.generation.generation_service import GenerationService
 from film_director.persistence.database import Database
@@ -142,12 +142,38 @@ class QueueWorker:
         old_cb = self._gen_service._finalize_callback
         self._gen_service._finalize_callback = finalize_cb
         try:
-            take = self._gen_service.generate_take(
-                shot_id=job.shot_id,
-                take_number=job.take_number,
-                seed_override=job.seed,
-            )
+            kwargs: dict = {
+                "shot_id": job.shot_id,
+                "take_number": job.take_number,
+                "seed_override": job.seed,
+            }
+            if job.overrides:
+                if "prompt_override" in job.overrides:
+                    kwargs["prompt_override"] = job.overrides["prompt_override"]
+                if "duration_override" in job.overrides:
+                    kwargs["duration_override"] = job.overrides["duration_override"]
+            take = self._gen_service.generate_take(**kwargs)
             logger.info("Job %s succeeded: take=%s", job.id, take.id)
+        except (ComfyUIExecutionError, GenerationError) as e:
+            error_msg = str(e)[:1000]
+            if "timeout" in error_msg.lower():
+                # Monitoring timed out — ComfyUI may still complete.
+                # Leave job claimed so recovery can check ComfyUI history.
+                logger.warning(
+                    "Job %s monitoring timed out, leaving claimed for recovery: %s",
+                    job.id, error_msg,
+                )
+                return
+            logger.error("Job %s failed: %s", job.id, error_msg)
+            gen_req_id = self._find_request_for_job(job)
+            with self._db.connection() as conn:
+                self._queue_repo.update_status(
+                    job.id, "failed",
+                    error=error_msg,
+                    generation_request_id=gen_req_id,
+                    completed_at=_now_iso(),
+                    conn=conn,
+                )
         except Exception as e:
             error_msg = str(e)[:1000]
             logger.error("Job %s failed: %s", job.id, error_msg)
@@ -214,8 +240,12 @@ class QueueWorker:
 
         if req.status == "succeeded":
             self._recover_succeeded_request(job, req)
+        elif req.status == "failed" and req.comfyui_prompt_id:
+            # State 12b: request failed (e.g. timeout) but has prompt_id —
+            # ComfyUI may have completed after our timeout. Check history.
+            self._recover_with_prompt_id(job, req)
         elif req.status == "failed":
-            # State 12: request failed → failed
+            # State 12: request failed, no prompt_id → genuinely failed
             self._mark_failed(job, req.error or "Generation request failed", gen_req_id=req.id)
         elif req.comfyui_prompt_id:
             # States 4-7: has prompt_id, request still pending/queued/running

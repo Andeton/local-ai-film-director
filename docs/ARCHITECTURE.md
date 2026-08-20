@@ -70,7 +70,7 @@ All canonical entities are **provider/model agnostic** (ADR-005).
 
 "Enrich Missing Data" (`POST /projects/{id}/enrich`) is idempotent:
 - Creates shots only if NO current shots exist for the project
-- Enriches deficient characters (empty appearance or generic template names like 主角/伙伴)
+- Enriches deficient characters (empty appearance or generic template names)
 - Derives `environment_description` from the project description if not yet set
 - Does NOT overwrite characters with meaningful existing appearances
 - Does NOT duplicate or append shots to an existing plan
@@ -160,7 +160,49 @@ Preview and execution use the same selection logic.
 
 ---
 
-## 7. Continuity System
+## 7. Durable Generation Lifecycle (P3)
+
+### UI → Queue → Worker → ComfyUI → Take
+
+```
+Operator clicks Generate
+  → POST /shots/{id}/generate (returns 202 + job_id)
+  → QueueService.enqueue_shot() creates persistent QueueJob
+  → Embedded QueueWorker (daemon thread) claims job
+  → GenerationService.generate_take() submits to ComfyUI
+  → Worker monitors via WebSocket
+  → On completion: finalize_from_result() downloads, validates, persists Take
+  → QueueJob atomically updated to succeeded with take_id
+  → UI poll discovers completion, reloads Takes
+```
+
+### Timeout Semantics
+
+The `FILM_COMFYUI_GENERATION_TIMEOUT` (default 1200s) is a monitoring liveness safeguard. When monitoring times out:
+1. `generate_take()` marks the GenerationRequest as `failed`
+2. QueueWorker catches the timeout and leaves the QueueJob as `claimed` (not `failed`)
+3. On next poll cycle, `recover()` finds the claimed job
+4. Recovery checks ComfyUI history for the prompt_id
+5. If ComfyUI completed successfully, `finalize_from_result()` persists the Take
+6. If ComfyUI is still running, job stays `claimed` for next cycle
+
+**Correctness does not depend on H3 finishing within the timeout.**
+
+### Recovery on Restart
+
+The embedded worker calls `recover()` on startup, resolving all orphaned `claimed` jobs against ComfyUI history using the 12-state recovery matrix. Failed requests with a `comfyui_prompt_id` are also checked (State 12b: timeout recovery).
+
+### Duplicate Protection
+
+`QueueService.has_active_jobs(shot_id)` prevents concurrent generation for the same shot. The API returns 409 if pending/claimed jobs exist. The UI disables the Generate button during active generation.
+
+### Operator Overrides
+
+Queue jobs support optional `overrides` (JSON): `prompt_override` and `duration_override`. These are passed through to `generate_take()` by the worker.
+
+---
+
+## 8. Continuity System
 
 Per-shot continuity chain within scenes. In the image-pack path, the predecessor's approved Take's last frame is uploaded as Picture 3. ContinuityState tracks upstream Take provenance. Replace-approved triggers downstream invalidation.
 
@@ -168,34 +210,36 @@ Legacy FLF path (`h3_flf_v1`) remains available as fallback when no environment 
 
 ---
 
-## 8. ComfyUI Integration
+## 9. ComfyUI Integration
 
 | Aspect | Detail |
 |---|---|
 | Connection | REST/WebSocket, synchronous monitoring |
 | Timeout | 1200 seconds (configurable via `FILM_COMFYUI_GENERATION_TIMEOUT`) |
-| Recovery | If monitoring times out but ComfyUI completes, `finalize_from_result()` can recover the output from ComfyUI history |
+| Recovery | If monitoring times out but ComfyUI completes, recovery finalizes the output |
 | Error propagation | HTTP errors extract `node_errors` with class_type and validation messages |
 | Image upload | `POST /upload/image` before workflow submission |
 | Media storage | Managed under `storage/` with path confinement |
 
 ---
 
-## 9. Operator Console
+## 10. Operator Console
 
 Single-file HTML/JS application (`src/film_director/ui/static/index.html`):
-- Project selection with localStorage persistence (`film_director.selected_project_id`)
-- Shot selection with localStorage persistence (`film_director.selected_shot_id`)
+- Project selection with localStorage persistence
+- Shot selection with localStorage persistence
 - Shot plan editor (add/delete/reorder/edit)
 - Reference Manager (generate/upload/approve/reject/archive/pin)
 - Editable character definitions and environment description
 - Generation preview with per-subject reference binding
+- Async generation with queue status polling and page-refresh discovery
+- Duplicate generation protection (disabled button + 409)
 - Activity event log
 - Scene assembly
 
 ---
 
-## 10. Key Technical Facts
+## 11. Key Technical Facts
 
 | Fact | Value |
 |---|---|
@@ -212,11 +256,11 @@ Single-file HTML/JS application (`src/film_director/ui/static/index.html`):
 | Frame grid | 17k+5 |
 | Output | MP4 (H264 + AAC muxed) |
 | Output resolution (16:9) | 1376x768 |
-| Image-pack generation time | ~10-15 min on RTX 5090 |
+| Image-pack generation time | ~7-15 min typical on RTX 5090 |
 
 ---
 
-## 11. Architecture Decisions (Frozen)
+## 12. Architecture Decisions (Frozen)
 
 | ADR | Decision |
 |---|---|

@@ -1,6 +1,8 @@
 """FastAPI application factory."""
 import logging
 import sqlite3
+import threading
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -116,7 +118,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    app = FastAPI(title="Local AI Film Director", version="0.1.0")
+    # Lifespan placeholder — populated after worker is built
+    _worker_thread_ref: list[threading.Thread | None] = [None]
+    _worker_stop_ref: list[threading.Event | None] = [None]
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        stop_event = _worker_stop_ref[0]
+        if stop_event is not None and settings.queue_worker_enabled:
+            t = threading.Thread(
+                target=app.state._run_worker,
+                daemon=True,
+                name="queue-worker",
+            )
+            t.start()
+            _worker_thread_ref[0] = t
+            logger.info("Embedded queue worker started (poll=%ds)", settings.queue_worker_poll_interval_seconds)
+        yield
+        if stop_event is not None:
+            stop_event.set()
+            if _worker_thread_ref[0] is not None:
+                _worker_thread_ref[0].join(timeout=10)
+            logger.info("Embedded queue worker stopped")
+
+    app = FastAPI(title="Local AI Film Director", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
 
     @app.exception_handler(FilmDirectorError)
@@ -267,6 +292,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         seq_repo=seq_repo, beat_repo=beat_repo,
     )
     take_service = TakeService(take_repo, db, storage_root=settings.storage_root)
+
+    # Embedded queue worker (background thread)
+    from film_director.generation.queue_worker import QueueWorker
+
+    queue_worker = QueueWorker(
+        db=db,
+        queue_repo=queue_job_repo,
+        generation_service=generation_service,
+        request_repo=request_repo,
+        take_repo=take_repo,
+        comfyui=comfyui_adapter,
+        concurrency=settings.queue_worker_concurrency,
+    )
+    _worker_stop = threading.Event()
+
+    def _run_embedded_worker():
+        poll = settings.queue_worker_poll_interval_seconds
+        try:
+            recovered = queue_worker.recover()
+            if recovered > 0:
+                logger.info("Queue worker: recovered %d orphaned job(s)", recovered)
+        except Exception as e:
+            logger.error("Queue worker recovery error: %s", e)
+
+        while not _worker_stop.is_set():
+            try:
+                completed = queue_worker.run_available()
+                if completed > 0:
+                    logger.info("Queue worker: completed %d job(s)", completed)
+                else:
+                    _worker_stop.wait(poll)
+            except Exception as e:
+                logger.error("Queue worker error: %s", e)
+                _worker_stop.wait(poll)
+
+    # Wire embedded worker into lifespan
+    _worker_stop_ref[0] = _worker_stop
+    app.state._run_worker = _run_embedded_worker
 
     # M4 services
     wc_preproduction_client = WindComicPreproductionClient(

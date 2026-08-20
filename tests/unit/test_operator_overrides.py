@@ -138,16 +138,15 @@ class TestGenerateEndpoint:
     def test_generate_with_empty_overrides_parses(self, client):
         """POST /shots/{id}/generate with empty JSON body should parse OK."""
         r = client.post("/shots/s1/generate", json={})
-        # May fail at reference/ComfyUI resolution, but body should parse
-        # 422 from business logic (ref resolution) is acceptable, just not from body validation
-        assert r.status_code in (422, 500, 502, 503)
+        # Now returns 202 (enqueued) or error from queue/shot validation
+        assert r.status_code in (202, 404, 422, 500, 501, 502, 503)
 
     def test_generate_with_overrides_parses(self, client):
         """POST with overrides should be parsed by the endpoint."""
         body = {"prompt_override": "test", "duration_sec": 5.0, "seed": 42}
         r = client.post("/shots/s1/generate", json=body)
-        # Body parsing succeeds, then fails at generation (no ComfyUI)
-        assert r.status_code in (422, 500, 502, 503)
+        # Body parsing succeeds; returns 202 (enqueued) or error
+        assert r.status_code in (202, 404, 409, 422, 500, 501, 502, 503)
 
 
 class TestSeedValidation:

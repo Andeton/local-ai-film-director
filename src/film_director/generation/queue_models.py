@@ -101,6 +101,7 @@ class QueueJob(BaseModel):
     attempt_count: int = 0
     max_attempts: int = 1
     error: str | None = None
+    overrides: dict | None = None
     created_at: str = ""
     updated_at: str = ""
     claimed_at: str | None = None

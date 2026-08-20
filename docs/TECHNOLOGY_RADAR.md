@@ -23,15 +23,31 @@ Verified workflows, model capabilities, and candidate solutions.
 | Picture 3 | Predecessor continuity frame (downstream) |
 | Picture 4 | Second visible character (when required) |
 | Unused slots | Pruned from workflow JSON before submission |
-| Generation time | ~10-15 min per shot on RTX 5090 |
 
-**P3 live acceptance (2026-08-20):**
+**P3 full production acceptance (2026-08-20):**
 - Shot 1: 2/4 inputs (char + env). APPROVED
 - Shot 2: 3/4 inputs (char + env + continuity). APPROVED
 - Shot 3: 3/4 inputs (different char + env + continuity). APPROVED
-- Shot 4: 4/4 inputs (char1 + env + continuity + char2). Visually good
+- Shot 4: 4/4 inputs (char1 + env + continuity + char2). APPROVED
+- Shot 5: 3/4 inputs (char + env + continuity). APPROVED
+- Shot 6: 4/4 inputs (char1 + env + continuity + char2). APPROVED
 
-**Slot pruning:** Unused LoadImage nodes and `ref_images.ref_image_N` connections are removed before ComfyUI submission. Matches real workflow behavior where unused inputs have `link=null`.
+Assembled scene: 48.741s, 1376x768, 6 shots. HUMAN PASS.
+
+### Generation Duration Evidence (RTX 5090)
+
+| Shot | Inputs | Video Duration | ComfyUI Render Time | Source |
+|------|--------|---------------|---------------------|--------|
+| 1 | 2 | 7.0s | ~7 min | DB timestamps (submit→complete) |
+| 2 | 3 | 6.0s | ~6 min | DB timestamps |
+| 3 | 3 | 8.0s | ~7-19 min | DB timestamps (timed out at 600s, recovered) |
+| 4 | 4 | 7.0s | ~8 min | DB timestamps |
+| 5 | 3 | 9.0s | 12.2 min | ComfyUI execution timestamps |
+| 6 | 4 | 10.0s | **73.8 min** | ComfyUI execution timestamps |
+
+Shot 6 anomaly: 73.8 min actual render — ~6x longer than typical. ComfyUI completed successfully with no execution error. This is a single observation. No cause established. The render quality was visually acceptable and approved.
+
+Typical render range (excluding Shot 6): **6-13 minutes** on RTX 5090.
 
 ### Real Workflow Source Reference
 
@@ -86,7 +102,7 @@ Real locally-verified ComfyUI user workflows are copied into `workflows/source_r
 
 - H3 generates joint video+audio in a single forward pass
 - Stereo audio (voice, SFX, music) is native, not layered
-- Shot 4: H3 spontaneously generated simple dialogue audio without explicit prompt control
+- Spontaneous dialogue audio observed in multiple shots without explicit prompt control
 - Dialogue/audio controllability is NOT established — observation only
 
 ---
@@ -100,6 +116,7 @@ Real locally-verified ComfyUI user workflows are copied into `workflows/source_r
 | Wan VACE | CANDIDATE |
 | SCAIL-2 | CANDIDATE |
 | Audio/dialogue control | NEEDS INVESTIGATION |
+| H3 prompt compilation | DEMONSTRATED GAP — highest priority |
 
 ---
 
@@ -108,8 +125,9 @@ Real locally-verified ComfyUI user workflows are copied into `workflows/source_r
 - H3 R2V and FLF use different UNETs (ref2va vs fl2va) — cannot be mixed
 - H3 frame grid: 17k+5 (valid: 124, 141, ..., 362)
 - H3 aspect: `"16:9 (Widescreen)"`, `"9:16 (Portrait Widescreen)"`, etc.
-- Generation timeout: 1200s default (configurable via `FILM_COMFYUI_GENERATION_TIMEOUT`)
-- Completed renders recoverable via `finalize_from_result()` if monitoring times out
+- Generation timeout: 1200s default (monitoring liveness safeguard only)
+- Timeout does not determine correctness — recovery finalizes completed renders
+- Completed renders recoverable via embedded worker recovery or `finalize_from_result()`
 
 ---
 

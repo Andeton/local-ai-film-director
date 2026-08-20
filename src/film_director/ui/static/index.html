@@ -102,6 +102,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 let projects=[],currentProject=null,currentShots=[],selectedShotId=null,shotTakesCache={};
 let draftPrompt=null,draftDuration=null,draftSeedMode='random',draftSeedValue=null;
 let refGenerating=false; // prevents duplicate ref generation
+let activeJobPollers={}; // shot_id → {intervalId, jobId}
 
 // Event log — recent operator-visible events
 let eventLog=[];
@@ -174,8 +175,10 @@ function renderShotList(){
   for(const shot of currentShots){
     const takes=shotTakesCache[shot.id]||[];
     const ap=takes.find(t=>t.status==='approved');const rv=takes.find(t=>t.status==='succeeded');
+    const isActive=!!activeJobPollers[shot.id];
     let badge='<span class="badge badge-empty">—</span>';
-    if(ap)badge='<span class="badge badge-approved">✓</span>';
+    if(isActive)badge='<span class="badge badge-generating">Generating</span>';
+    else if(ap)badge='<span class="badge badge-approved">✓</span>';
     else if(rv)badge='<span class="badge badge-succeeded">Review</span>';
     const li=document.createElement('li');
     li.className='shot-card'+(shot.id===selectedShotId?' selected':'');
@@ -188,7 +191,10 @@ function renderShotList(){
 async function selectShot(shotId){
   selectedShotId=shotId;draftPrompt=null;draftDuration=null;draftSeedMode='random';draftSeedValue=null;
   localStorage.setItem('film_director.selected_shot_id',shotId);
-  renderShotList();await refreshPreview();
+  renderShotList();
+  // Rediscover active generation on page refresh / shot switch
+  if(!activeJobPollers[shotId])await checkActiveJobs(shotId);
+  await refreshPreview();
 }
 
 async function refreshPreview(){
@@ -254,8 +260,9 @@ function renderPanel(shot,preview){
     <div class="setting"><label>Resolution</label><div class="val">${preview.resolution} @ ${preview.fps}fps</div></div>
     <div class="panel-title">Generate</div>
     <div class="gen-summary"><strong>Workflow:</strong> ${preview.workflow_id}<br><strong>Duration:</strong> ${preview.resolved_duration_sec}s (${preview.resolved_frames}f)<br><strong>Inputs:</strong> ${preview.pictures.filter(p=>p.status!=='blocked').length}/${preview.pictures.length}<br><strong>Seed:</strong> ${preview.seed_policy==='explicit'?preview.seed:'Random'}</div>
-    <button class="btn btn-primary btn-generate" ${canGen?'':'disabled'} onclick="doGenerate('${shot.id}')">${canGen?'Generate Take':'Blocked'}</button>
-    ${!canGen&&preview.predecessor_shot_index!==null?`<div style="font-size:10px;color:var(--red);margin-top:4px;text-align:center">Approve Shot ${preview.predecessor_shot_index+1}</div>`:''}`;
+    <button class="btn btn-primary btn-generate" ${canGen&&!activeJobPollers[shot.id]?'':'disabled'} onclick="doGenerate('${shot.id}')">${activeJobPollers[shot.id]?'Generating...':canGen?'Generate Take':'Blocked'}</button>
+    ${activeJobPollers[shot.id]?'<div style="font-size:10px;color:var(--yellow);margin-top:4px;text-align:center">ComfyUI render in progress...</div>':''}
+    ${!canGen&&!activeJobPollers[shot.id]&&preview.predecessor_shot_index!==null?`<div style="font-size:10px;color:var(--red);margin-top:4px;text-align:center">Approve Shot ${preview.predecessor_shot_index+1}</div>`:''}`;
 }
 
 // Shot plan editor
@@ -406,7 +413,52 @@ function onSeedChange(v){const n=parseInt(v);draftSeedValue=isNaN(n)?null:n;refr
 
 async function approveTake(id){try{await api(`/takes/${id}/approve`,{method:'POST'});toast('Approved');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
 async function rejectTake(id){try{await api(`/takes/${id}/reject`,{method:'POST'});toast('Rejected');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
-async function doGenerate(sid){const body={};if(draftPrompt!==null)body.prompt_override=draftPrompt;if(draftDuration!==null)body.duration_sec=draftDuration;if(draftSeedMode==='explicit'&&draftSeedValue!==null)body.seed=draftSeedValue;logEvent('generate','running',`Generating take for ${sid.substring(0,12)}...`);try{const r=await api(`/shots/${sid}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});logEvent('generate','success',`Take ${r.take_id.substring(0,12)} seed=${r.seed}`);await loadShots();await selectShot(sid)}catch(e){logEvent('generate','error',e.message)}}
+async function doGenerate(sid){
+  const body={};
+  if(draftPrompt!==null)body.prompt_override=draftPrompt;
+  if(draftDuration!==null)body.duration_sec=draftDuration;
+  if(draftSeedMode==='explicit'&&draftSeedValue!==null)body.seed=draftSeedValue;
+  logEvent('generate','running',`Queuing generation for ${sid.substring(0,12)}...`);
+  try{
+    const r=await api(`/shots/${sid}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    logEvent('generate','running',`Job ${r.job_id.substring(0,12)} queued (seed=${r.seed})`);
+    startJobPoller(sid,r.job_id);
+    if(selectedShotId===sid)refreshPreview();
+  }catch(e){logEvent('generate','error',e.message)}
+}
+function startJobPoller(shotId,jobId){
+  stopJobPoller(shotId);
+  const poll=async()=>{
+    try{
+      const j=await api(`/queue/jobs/${jobId}`);
+      if(j.status==='succeeded'){
+        stopJobPoller(shotId);
+        logEvent('generate','success',`Take ready (job ${jobId.substring(0,12)})`);
+        await loadShots();if(selectedShotId===shotId)await selectShot(shotId);
+      }else if(j.status==='failed'){
+        stopJobPoller(shotId);
+        logEvent('generate','error',j.error||'Generation failed');
+        if(selectedShotId===shotId)refreshPreview();
+      }else{
+        // still pending/claimed — update shot list badge
+        renderShotList();
+      }
+    }catch(e){/* ignore transient fetch errors */}
+  };
+  activeJobPollers[shotId]={intervalId:setInterval(poll,4000),jobId};
+  renderShotList();
+}
+function stopJobPoller(shotId){
+  if(activeJobPollers[shotId]){clearInterval(activeJobPollers[shotId].intervalId);delete activeJobPollers[shotId]}
+}
+async function checkActiveJobs(shotId){
+  try{
+    const jobs=await api(`/queue/jobs?shot_id=${shotId}`);
+    const active=jobs.filter(j=>j.status==='pending'||j.status==='claimed');
+    if(active.length>0){startJobPoller(shotId,active[0].id);return true}
+  }catch(e){/* queue endpoint may not exist in tests */}
+  return false;
+}
 
 // ===================================================================
 // Reference Management

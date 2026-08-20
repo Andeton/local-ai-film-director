@@ -78,6 +78,7 @@ class QueueService:
         takes_count: int = 3,
         base_seed: int | None = None,
         priority: int = 0,
+        overrides: dict | None = None,
     ) -> list[QueueJob]:
         """Enqueue takes_count generation jobs for one shot.
 
@@ -147,12 +148,12 @@ class QueueService:
             # Create new batch + jobs
             return self._create_shot_batch(
                 conn, project_id, shot_id, idempotency_key, fingerprint,
-                takes_count, base_seed, priority,
+                takes_count, base_seed, priority, overrides=overrides,
             )
 
     def _create_shot_batch(
         self, conn, project_id, shot_id, idempotency_key, fingerprint,
-        takes_count, base_seed, priority,
+        takes_count, base_seed, priority, overrides: dict | None = None,
     ) -> list[QueueJob]:
         now = _now_iso()
         batch_id = _gen_id("qb_")
@@ -189,6 +190,7 @@ class QueueService:
                 seed=seed,
                 status="pending",
                 priority=priority,
+                overrides=overrides,
                 created_at=now,
                 updated_at=now,
             )
@@ -196,6 +198,15 @@ class QueueService:
             jobs.append(job)
 
         return jobs
+
+    # ------------------------------------------------------------------
+    # Active job check
+    # ------------------------------------------------------------------
+
+    def has_active_jobs(self, shot_id: str) -> bool:
+        """Check if shot has any pending or claimed (in-progress) queue jobs."""
+        jobs = self._queue_repo.list_by_shot(shot_id)
+        return any(j.status in ("pending", "claimed") for j in jobs)
 
     # ------------------------------------------------------------------
     # Scene enqueue

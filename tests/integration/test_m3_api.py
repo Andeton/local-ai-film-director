@@ -183,6 +183,23 @@ def api_env(tmp_path):
             content={"error": exc.message, "detail": exc.detail},
         )
 
+    from film_director.generation.queue_service import QueueService
+    from film_director.persistence.repositories import (
+        QueueJobRepository, QueueBatchRepository, TakeRepository,
+    )
+    from film_director.services.take_service import TakeService
+
+    queue_repo = QueueJobRepository(db)
+    batch_repo = QueueBatchRepository(db)
+    take_repo = TakeRepository(db)
+    queue_svc = QueueService(
+        db=db, queue_repo=queue_repo, batch_repo=batch_repo,
+        shot_repo=ShotRepository(db), plan_repo=GenerationPlanRepository(db),
+        scene_repo=SceneRepository(db), seq_repo=SequenceRepository(db),
+        beat_repo=BeatRepository(db),
+    )
+    take_svc = TakeService(take_repo, db, storage_root=storage)
+
     router = create_router(
         adapter=MagicMock(), import_service=MagicMock(),
         project_repo=ProjectRepository(db), seq_repo=SequenceRepository(db),
@@ -191,11 +208,15 @@ def api_env(tmp_path):
         generation_service=gen_service,
         comfyui_adapter=mock_comfyui,
         request_repo=request_repo,
+        queue_service=queue_svc,
+        take_service=take_svc,
+        take_repo=take_repo,
+        shot_repo=ShotRepository(db),
     )
     app.include_router(router)
     client = TestClient(app)
 
-    return {"client": client, "db": db, "mock_comfyui": mock_comfyui}
+    return {"client": client, "db": db, "mock_comfyui": mock_comfyui, "gen_service": gen_service}
 
 
 # ---------------------------------------------------------------------------
@@ -203,28 +224,26 @@ def api_env(tmp_path):
 # ---------------------------------------------------------------------------
 
 class TestGenerateShot:
-    def test_successful_generation(self, api_env):
+    def test_successful_enqueue(self, api_env):
+        """POST /shots/{id}/generate now enqueues and returns 202."""
         resp = api_env["client"].post("/shots/shot-1/generate")
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert data["shot_id"] == "shot-1"
-        assert data["status"] == "succeeded"
-        assert data["seed"] == 42
-        assert "take_id" in data
-        assert "generation_request_id" in data
-        assert "video_path" in data
+        assert data["status"] == "pending"
+        assert "job_id" in data
+        assert "seed" in data
 
     def test_missing_shot(self, api_env):
         resp = api_env["client"].post("/shots/nonexistent/generate")
-        assert resp.status_code == 500  # GenerationError
+        assert resp.status_code == 404
 
-    def test_unsupported_strategy(self, api_env):
-        with api_env["db"].connection() as conn:
-            conn.execute(
-                "UPDATE generation_plans SET strategy = 'TEXT_TO_VIDEO' WHERE id = 'plan-1'"
-            )
-        resp = api_env["client"].post("/shots/shot-1/generate")
-        assert resp.status_code == 422
+    def test_duplicate_blocked(self, api_env):
+        """Second enqueue for same shot while first is active returns 409."""
+        resp1 = api_env["client"].post("/shots/shot-1/generate")
+        assert resp1.status_code == 202
+        resp2 = api_env["client"].post("/shots/shot-1/generate")
+        assert resp2.status_code == 409
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +252,12 @@ class TestGenerateShot:
 
 class TestGetGenerationRequest:
     def test_existing_request(self, api_env):
-        # Generate first to create a request
-        api_env["client"].post("/shots/shot-1/generate")
+        # Use synchronous generate_take to create a request directly
+        from film_director.persistence.repositories import GenerationRequestRepository
+        gen_svc = api_env.get("gen_service")
+        if gen_svc is None:
+            pytest.skip("gen_service not in env")
+        take = gen_svc.generate_take("shot-1")
         req_repo = GenerationRequestRepository(api_env["db"])
         reqs = req_repo.get_requests_by_shot("shot-1")
         assert len(reqs) > 0

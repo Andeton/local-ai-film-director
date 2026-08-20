@@ -487,6 +487,17 @@ class Database:
                     )
                 logger.debug("Migration: added batch_id to generation_queue")
 
+        # P3: Add overrides column to generation_queue
+        if "generation_queue" in queue_tables:
+            queue_cols_p3 = {
+                row[1] for row in conn.execute("PRAGMA table_info(generation_queue)").fetchall()
+            }
+            if "overrides" not in queue_cols_p3:
+                conn.execute(
+                    "ALTER TABLE generation_queue ADD COLUMN overrides TEXT"
+                )
+                logger.debug("Migration: added overrides to generation_queue")
+
         # M7.A: Add continuity_snapshot column to generation_requests
         gen_req_tables = {
             row[0] for row in conn.execute(

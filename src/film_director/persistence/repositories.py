@@ -1432,15 +1432,16 @@ class QueueJobRepository:
             INSERT INTO generation_queue
                 (id, batch_id, shot_id, take_number, project_id, base_seed, seed,
                  status, generation_request_id, take_id, priority,
-                 attempt_count, max_attempts, error,
+                 attempt_count, max_attempts, error, overrides,
                  created_at, updated_at, claimed_at, completed_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
+        overrides_json = json.dumps(job.overrides) if job.overrides else None
         params = (
             job.id, job.batch_id, job.shot_id, job.take_number, job.project_id,
             job.base_seed, job.seed, job.status,
             job.generation_request_id, job.take_id, job.priority,
-            job.attempt_count, job.max_attempts, job.error,
+            job.attempt_count, job.max_attempts, job.error, overrides_json,
             job.created_at, job.updated_at, job.claimed_at, job.completed_at,
         )
         try:
@@ -1599,6 +1600,8 @@ class QueueJobRepository:
 
     @staticmethod
     def _row_to_job(row: sqlite3.Row) -> QueueJob:
+        overrides_raw = row["overrides"] if "overrides" in row.keys() else None
+        overrides = json.loads(overrides_raw) if overrides_raw else None
         return QueueJob(
             id=row["id"],
             batch_id=row["batch_id"],
@@ -1614,6 +1617,7 @@ class QueueJobRepository:
             attempt_count=row["attempt_count"],
             max_attempts=row["max_attempts"],
             error=row["error"],
+            overrides=overrides,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             claimed_at=row["claimed_at"],

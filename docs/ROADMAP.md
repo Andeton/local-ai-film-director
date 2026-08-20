@@ -17,43 +17,45 @@
 | M6 | 2026-08-17 | Take management: approve/reject, persistent queue, worker recovery. 1320 tests |
 | M7 | 2026-08-18 | Continuity: chain state, FLF, image-pack multi-reference. 1716 tests |
 | P2 | 2026-08-18 | First complete 5-shot scene: generated, approved, assembled. HUMAN PASS |
-| P3-refs | 2026-08-20 | Reference management UI, character/environment enrichment, image-pack integration. 1907 tests |
+| P3 | 2026-08-20 | 6-shot scene completion + durable async generation. 1923 tests. HUMAN PASS |
 
-### P3 Reference/Enrichment Session (2026-08-20)
+### P3 Scene Completion (2026-08-20)
 
-18 commits covering:
-- Reference Management UI (generate/upload/approve/reject/archive/pin)
-- Editable character name/appearance and environment description
-- OpenRouter shot planning and character enrichment
-- Environment description derivation from narrative
-- Environment reference generation
-- Enrichment idempotency and explicit replan
-- ENVIRONMENT reference kind
-- Real ComfyUI workflow source-reference adoption
-- H3 image-pack integration into generate_take (all shots)
-- Downstream continuity via image-pack Picture 3
-- Subject-scoped preview binding
-- Unused image-slot pruning
-- ComfyUI error propagation, timeout increase, render recovery
-- Browser localStorage persistence
+**Production:** All 6 shots generated, approved, assembled. 48.741s scene. HUMAN PASS.
 
-**Production validation:** Shots 1-4 generated and inspected. Shots 1-3 approved. Shot 4 (4/4 inputs) visually good, awaiting approval.
+**Async durable generation:**
+- UI generation moved from synchronous blocking to persistent queue lifecycle
+- Embedded QueueWorker background thread in FastAPI app
+- `POST /shots/{id}/generate` returns 202 immediately
+- Timeout leaves job claimed for recovery, not permanently failed
+- Recovery checks ComfyUI for failed requests with prompt_id (State 12b)
+- UI polling, page-refresh discovery, duplicate protection
+- Queue overrides for operator prompt/duration customization
+- Shots 5 and 6 recovered from old-path timeout orphans without regeneration
+
+**Reference/enrichment (prior session):**
+- Reference Management UI, character/environment enrichment
+- OpenRouter shot planning, environment description derivation
+- H3 image-pack integration, continuity, slot pruning
+- ComfyUI error propagation, timeout recovery, browser persistence
 
 ---
 
-## In Progress
+## Next Priorities
 
-### P3 Scene Completion
+Choose from demonstrated production gaps:
 
-Remaining work for the current production project (`proj_cfb89b04f3c8`):
+### 1. H3 Prompt Compilation (highest demonstrated value)
 
-1. Human approve/reject Shot 4
-2. Generate Shot 5 (single character + environment + continuity)
-3. Inspect and approve/reject Shot 5
-4. Generate Shot 6 (two characters + environment + continuity)
-5. Inspect and approve/reject Shot 6
-6. Build scene assembly
-7. Inspect assembled scene
+Shot action text is used directly as the H3 video prompt with no optimization step. An intermediate "compile shot direction into optimal H3 prompt" could improve generation quality systematically. This is the most impactful demonstrated gap from P3 production.
+
+### 2. Second Production Project
+
+Run a second complete idea-to-scene pipeline to validate generalization beyond the first project. Would surface any project-specific assumptions in the current pipeline.
+
+### 3. AI Reviewer (M8)
+
+Automated quality assessment of generated Takes before human review. Would reduce operator burden for multi-take evaluation.
 
 ---
 
@@ -62,12 +64,10 @@ Remaining work for the current production project (`proj_cfb89b04f3c8`):
 | Item | Status |
 |---|---|
 | LTX-2.3 fallback | DEFERRED — H3 image-pack works |
-| AI reviewer (M8) | DEFERRED |
 | Broad model routing | DEFERRED |
 | Additional model adapters | DEFERRED |
 | CapabilityRegistry expansion | FROZEN |
 | Audio/dialogue control | OBSERVATION — H3 generates spontaneous dialogue |
-| Batch generation queue | DEFERRED |
 | Modern frontend | DEFERRED |
 
 ---
@@ -81,3 +81,4 @@ Remaining work for the current production project (`proj_cfb89b04f3c8`):
 | No H3 prompt compilation | Shot text used directly | DESIGN_GAP |
 | FLF has no ref_images | Legacy fallback only | MITIGATED by image-pack |
 | Windows backslashes in Take paths | Server normalizes | LOW |
+| Shot 6 anomalous render duration (73.8 min) | Single observation, cause unknown | OBSERVATION |

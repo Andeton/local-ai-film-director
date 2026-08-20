@@ -734,17 +734,29 @@ def create_router(
             "can_generate": not continuity_blocked,
         }
 
-    @router.post("/shots/{shot_id}/generate")
+    @router.post("/shots/{shot_id}/generate", status_code=202)
     def generate_shot(shot_id: str, body: GenerateRequest = Body(default=GenerateRequest())) -> dict:
-        """Synchronous generation with optional operator overrides.
+        """Enqueue a durable generation job and return immediately.
+
+        The embedded queue worker monitors ComfyUI and finalizes the Take.
+        Poll GET /queue/jobs?shot_id={shot_id} or GET /queue/jobs/{job_id}
+        for status updates.
 
         Accepts optional prompt_override, duration_sec, and seed.
-        If omitted, uses plan defaults (backward compatible).
         """
-        if generation_service is None:
-            raise HTTPException(status_code=501, detail="M3 generation not available")
+        _m6_guard()
+        if shot_repo is not None and shot_repo.get_shot(shot_id) is None:
+            raise HTTPException(status_code=404, detail="Shot not found")
+
+        # Duplicate protection: refuse if shot already has active jobs
+        if queue_service.has_active_jobs(shot_id):
+            raise HTTPException(status_code=409, detail="Generation already in progress for this shot")
+
+        # Build overrides dict from operator inputs
+        import uuid as _uuid
         _SQLITE_INT64_MAX = (1 << 63) - 1
-        kwargs: dict = {}
+        overrides: dict | None = None
+        base_seed: int | None = None
         if body:
             if body.seed is not None:
                 if body.seed < 0 or body.seed > _SQLITE_INT64_MAX:
@@ -752,20 +764,35 @@ def create_router(
                         status_code=422,
                         detail=f"Seed must be 0..{_SQLITE_INT64_MAX}, got {body.seed}",
                     )
-                kwargs["seed_override"] = body.seed
+                base_seed = body.seed
+            ovr: dict = {}
             if body.prompt_override is not None:
-                kwargs["prompt_override"] = body.prompt_override
+                ovr["prompt_override"] = body.prompt_override
             if body.duration_sec is not None:
-                kwargs["duration_override"] = body.duration_sec
-        take = generation_service.generate_take(shot_id, **kwargs)
+                ovr["duration_override"] = body.duration_sec
+            if ovr:
+                overrides = ovr
+
+        key = f"ui-{shot_id}-{_uuid.uuid4().hex[:8]}"
+        try:
+            jobs = queue_service.enqueue_shot(
+                shot_id=shot_id,
+                idempotency_key=key,
+                takes_count=1,
+                base_seed=base_seed,
+                priority=0,
+                overrides=overrides,
+            )
+        except QueueValidationError as e:
+            raise HTTPException(status_code=422, detail=e.message)
+
+        job = jobs[0]
         return {
-            "take_id": take.id,
-            "shot_id": take.shot_id,
-            "generation_request_id": take.generation_request_id,
-            "seed": take.seed,
-            "video_path": take.video_path,
-            "last_frame_path": take.last_frame_path,
-            "status": take.status,
+            "job_id": job.id,
+            "shot_id": shot_id,
+            "status": job.status,
+            "seed": job.seed,
+            "take_number": job.take_number,
         }
 
     @router.get("/generation-requests/{request_id}")

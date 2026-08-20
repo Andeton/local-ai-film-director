@@ -58,26 +58,26 @@ All work is on `main`. Run `git rev-parse HEAD` for current commit.
 | 1 | shote6b5120632df | Man sits at kitchen table | The Man | APPROVED (take1177d3c08bbd) |
 | 2 | shot83bdb22a9c07 | Man hears door, turns off lamp | The Man | APPROVED (take5e7ed5c36a09) |
 | 3 | shote7b54e8ac94f | POV: woman enters with envelope | The Woman | APPROVED (takeeae22d01305f) |
-| 4 | shot088711c1c99b | Close-up woman, meets man's eyes | Both | IN PROGRESS (ComfyUI rendering) |
+| 4 | shot088711c1c99b | Close-up woman, meets man's eyes | Both | SUCCEEDED, awaiting approval (takeaf8e1a965985) |
 | 5 | shot84f372d8c579 | Man opens envelope, shock | The Man | NOT GENERATED |
 | 6 | shot7d12065a94e4 | Wide: both, police lights | Both | NOT GENERATED |
 
-### Shot 4 Recovery
+### Shot 4 Observations
 
-Shot 4 was submitted to ComfyUI (prompt ID `593dcd35-780c-4ccf-9ec9-37fc362bf733`, request `greqa09482e9ae4e`) but the LFDirector monitor process was terminated. If ComfyUI completed the render, recover it using:
+Shot 4 generated successfully using the full 4-slot image-pack:
+- Picture 1: The Man (CHARACTER_BODY)
+- Picture 2: Environment
+- Picture 3: Shot 3 continuity frame
+- Picture 4: The Woman (CHARACTER_BODY)
 
-```python
-gen_service.finalize_from_result(
-    request_id='greqa09482e9ae4e',
-    shot_id='shot088711c1c99b',
-    take_number=1,
-    seed=0,
-    prompt_id='593dcd35-780c-4ccf-9ec9-37fc362bf733',
-    output_node_id='92',
-)
-```
+**Human visual assessment**: Shot 4 looks very good. The 4-input image-pack
+produced a usable two-character scene despite The Woman being Picture 4.
 
-Check `D:\ComfyUI\output\imgpack\shot088711c1c99b\` for the output file. If ComfyUI failed or the job was lost, regenerate through the normal UI.
+**Spontaneous dialogue**: H3 generated a small/simple dialogue element despite
+dialogue not being explicitly controlled in the prompt. This is an observation
+for later audio/dialogue-control evaluation, not a current blocker.
+
+Shot 4 remains `succeeded` / awaiting human approval.
 
 ## 5. H3 Image-Pack Slot Policy
 
@@ -126,7 +126,9 @@ Check `D:\ComfyUI\output\imgpack\shot088711c1c99b\` for the output file. If Comf
 
 1. **Video paths contain Windows backslashes** in the DB (e.g. `storage\takes\...`). The media router normalizes these server-side. Reference image paths were fixed to use forward slashes but Take video paths still use `os.path.join`.
 
-2. **Shot 4 primary-subject ordering**: Shot 4 is a close-up of The Woman, but The Man is listed first in `subjects`. The image-pack puts The Man in Picture 1. This may or may not affect H3's visual output. Inspect the Shot 4 result before deciding whether subject priority ranking is needed.
+2. **Primary-subject slot ordering**: Shot 4 is a close-up of The Woman, but The Man is listed first in `subjects`, placing The Man in Picture 1 and The Woman in Picture 4. Shot 4 live acceptance with all 4 inputs produced a visually good result despite this ordering. Primary-subject slot ranking remains an open question, but there is currently no evidence requiring a change.
+
+8. **Spontaneous H3 dialogue**: H3 sometimes generates dialogue audio even when not explicitly prompted. Observed in Shot 4. Not currently controlled. Mark for later audio/dialogue-control evaluation.
 
 3. **No H3 prompt compilation stage**: The shot action text is used directly as the video prompt. There is no intermediate "compile shot direction into optimal H3 prompt" step. The H3PromptBuilder assembles sections mechanically.
 
@@ -155,12 +157,10 @@ OPENROUTER_API_KEY=...  # bare key, no FILM_ prefix
 
 ## 9. Recommended Next Action
 
-1. **Check Shot 4 result**: If ComfyUI completed the render, recover it with `finalize_from_result()`. Inspect the video — Shot 4 tests whether H3 handles the primary-subject ordering correctly for a Woman-focused close-up where The Man is Picture 1.
+1. **Approve Shot 4**: The operator assessed it as visually good. Approve via UI or `POST /takes/takeaf8e1a965985/approve`.
 
-2. **If Shot 4 is acceptable**: Approve it and generate Shots 5-6.
+2. **Generate Shots 5-6**: Continue through the normal UI Generate Take flow.
 
-3. **If primary-subject ordering is wrong**: Implement a `visible_primary_subject` field or reorder subjects by dramatic importance before binding.
+3. **After all 6 shots approved**: Build the scene assembly (`POST /projects/{id}/build-scene`).
 
-4. **After all 6 shots approved**: Build the scene assembly (`POST /projects/{id}/build-scene`).
-
-5. **Suggested next feature branch**: `p3-scene-completion`
+4. **Suggested next feature branch**: `p3-scene-completion`

@@ -223,6 +223,68 @@ class ShotPlanner:
         return subjects
 
     # ------------------------------------------------------------------
+    # Location planning (Slice 5)
+    # ------------------------------------------------------------------
+
+    def plan_locations(
+        self,
+        scenes: list[Scene],
+        project_description: str,
+    ) -> list[dict]:
+        """Identify distinct production Locations from scene structure.
+
+        Returns a list of dicts, each with:
+        - name: canonical Location name
+        - description: physical/set description (2-4 sentences)
+        - scene_ids: list of Scene.id values assigned to this Location
+
+        Uses LLM for semantic canonicalization/deduplication. Falls back
+        to deterministic string grouping on LLM failure.
+        """
+        if not scenes:
+            return []
+
+        scene_evidence = []
+        for s in scenes:
+            scene_evidence.append({
+                "scene_id": s.id,
+                "scene_name": s.name,
+                "location_text": s.location or "",
+                "description": s.description or "",
+            })
+
+        messages = [
+            {"role": "system", "content": _LOCATION_PLANNING_SYSTEM},
+            {"role": "user", "content": (
+                f"Story/Premise:\n{project_description}\n\n"
+                f"Scenes:\n{_format_scene_evidence(scene_evidence)}\n\n"
+                "Identify the distinct physical production Locations. "
+                "Group scenes that take place in the same location. "
+                'Return JSON: {"locations": [...]}'
+            )},
+        ]
+
+        try:
+            response = self._llm.chat(messages, expect_json=True)
+            parsed = response.parsed or {}
+            result, error = _validate_location_plan(parsed, scenes)
+            if error:
+                repair = build_repair_messages(
+                    original_messages=messages,
+                    bad_response_content=response.content,
+                    error_detail=error,
+                )
+                repair_resp = self._llm.chat(repair, expect_json=True)
+                result, error2 = _validate_location_plan(
+                    repair_resp.parsed or {}, scenes,
+                )
+                if error2:
+                    return _fallback_location_plan(scenes)
+            return result
+        except Exception:
+            return _fallback_location_plan(scenes)
+
+    # ------------------------------------------------------------------
     # Environment derivation
     # ------------------------------------------------------------------
 
@@ -386,6 +448,137 @@ def _is_character_deficient(char: CharacterReference) -> bool:
     if not has_meaningful_name and len(char.appearance.strip()) < 20:
         return True
     return False
+
+
+_LOCATION_PLANNING_SYSTEM = """\
+You are a production designer identifying distinct physical locations for a film.
+
+Given a story premise and a list of scenes with location evidence, identify \
+the distinct production Locations. Each Location is a reusable physical place.
+
+Rules:
+- Merge scenes that clearly take place in the SAME physical location.
+- Keep scenes in DIFFERENT physical places as separate Locations.
+- "the apartment" and "Grandpa's apartment" are the same place.
+- "apartment" and "subway" are different places.
+- Do NOT merge unrelated places that merely share a word ("office" vs "office lobby").
+- For each Location, provide:
+  - name: concise production label (e.g., "Grandpa's Apartment", "Subway Platform")
+  - description: 2-4 sentences describing the physical set: architecture, spatial \
+layout, materials, furniture, persistent visual anchors. Focus on permanent \
+physical features, NOT temporary scene state (weather, time, damage).
+  - scene_ids: list of scene ID strings that take place at this Location
+
+Return ONLY a JSON object: {"locations": [{"name": "...", "description": "...", "scene_ids": ["..."]}]}
+No markdown, no explanation — raw JSON only.
+"""
+
+
+def _format_scene_evidence(evidence: list[dict]) -> str:
+    parts = []
+    for e in evidence:
+        line = f"  - scene_id: {e['scene_id']}"
+        if e["scene_name"]:
+            line += f", name: {e['scene_name']}"
+        if e["location_text"]:
+            line += f", location: {e['location_text']}"
+        if e["description"]:
+            line += f", description: {e['description'][:150]}"
+        parts.append(line)
+    return "\n".join(parts)
+
+
+def _validate_location_plan(
+    parsed: dict,
+    scenes: list[Scene],
+) -> tuple[list[dict], str | None]:
+    """Validate LLM location plan output.
+
+    Returns (list of validated location dicts, error_or_None).
+    Each validated dict has: name, description, scene_ids.
+    """
+    if "locations" not in parsed:
+        return [], "Response missing 'locations' key"
+    raw = parsed["locations"]
+    if not isinstance(raw, list) or not raw:
+        return [], "'locations' must be a non-empty list"
+
+    valid_scene_ids = {s.id for s in scenes}
+    assigned_scene_ids: set[str] = set()
+    result = []
+
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            return [], f"Location at index {i} is not an object"
+        name = (item.get("name") or "").strip()
+        desc = (item.get("description") or "").strip()
+        scene_ids = item.get("scene_ids", [])
+        if not name:
+            return [], f"Location at index {i} has empty name"
+        if not isinstance(scene_ids, list):
+            return [], f"Location at index {i}: scene_ids must be a list"
+
+        # Validate scene_ids
+        validated_ids = []
+        for sid in scene_ids:
+            if not isinstance(sid, str):
+                continue
+            if sid not in valid_scene_ids:
+                continue  # skip invalid IDs silently (may be LLM hallucination)
+            if sid in assigned_scene_ids:
+                continue  # skip duplicate assignment
+            validated_ids.append(sid)
+            assigned_scene_ids.add(sid)
+
+        if validated_ids:
+            result.append({
+                "name": name,
+                "description": desc,
+                "scene_ids": validated_ids,
+            })
+
+    if not result:
+        return [], "No valid locations with assigned scenes"
+
+    # Assign any unassigned scenes to nearest match or create catch-all
+    unassigned = [s for s in scenes if s.id not in assigned_scene_ids]
+    if unassigned and result:
+        # Append unassigned to the first location as fallback
+        result[0]["scene_ids"].extend(s.id for s in unassigned)
+
+    return result, None
+
+
+def _fallback_location_plan(scenes: list[Scene]) -> list[dict]:
+    """Deterministic fallback when LLM fails.
+
+    Groups scenes by normalized location string. Scenes with identical
+    normalized strings share one Location. Empty/missing location strings
+    are grouped together as "Main Location".
+    """
+    groups: dict[str, list[str]] = {}
+    for s in scenes:
+        key = _normalize_location_string(s.location)
+        groups.setdefault(key, []).append(s.id)
+
+    result = []
+    for key, scene_ids in groups.items():
+        name = key if key else "Main Location"
+        result.append({
+            "name": name,
+            "description": "",  # no LLM available for description
+            "scene_ids": scene_ids,
+        })
+    return result
+
+
+def _normalize_location_string(loc: str) -> str:
+    """Normalize a location string for grouping."""
+    import re
+    s = loc.strip().lower()
+    s = re.sub(r"[^a-z0-9\s]", "", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 _CHARACTER_ENRICHMENT_SYSTEM = """\

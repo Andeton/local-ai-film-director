@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from film_director.enrichment.beat_enricher import BeatEnricher
@@ -40,6 +41,7 @@ from film_director.persistence.repositories import (
     SequenceRepository,
     ShotRepository,
 )
+from film_director.persistence.repositories import LocationRepository
 from film_director.services.import_service import ChangeDetection
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,7 @@ class EnrichmentService:
         strategy_selector: StrategySelector,
         stale_propagator: StalePropagator,
         shot_planner=None,  # ShotPlanner | None — direct planning path
+        location_repo: LocationRepository | None = None,
     ) -> None:
         self._db = db
         self._project_repo = project_repo
@@ -92,6 +95,7 @@ class EnrichmentService:
         self._strategy_selector = strategy_selector
         self._stale_propagator = stale_propagator
         self._shot_planner = shot_planner
+        self._location_repo = location_repo
 
     # ------------------------------------------------------------------
     # enrich_project — idempotent full-project enrichment
@@ -140,6 +144,37 @@ class EnrichmentService:
             if enriched_chars:
                 enriched_by_id = {c.id: c for c in enriched_chars}
                 characters = [enriched_by_id.get(c.id, c) for c in characters]
+
+        # --- Location planning (Slice 5): only for new projects without Locations ---
+        new_locations: list = []
+        location_assignments: dict[str, str] = {}  # scene_id → location_id
+        if (self._shot_planner is not None
+                and self._location_repo is not None
+                and scenes
+                and project_description):
+            existing_locations = self._location_repo.list_by_project(project_id)
+            if not existing_locations:
+                # Plan Locations from scene structure
+                import uuid as _uuid
+                from film_director.models.canonical import Location
+                now = datetime.now(timezone.utc).isoformat()
+
+                planned = self._shot_planner.plan_locations(scenes, project_description)
+                for loc_plan in planned:
+                    loc_id = f"loc_{_uuid.uuid4().hex[:12]}"
+                    loc = Location(
+                        id=loc_id,
+                        project_id=project_id,
+                        name=loc_plan["name"],
+                        description=loc_plan.get("description", ""),
+                        source="llm" if loc_plan.get("description") else "wind_comic",
+                        version=1,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    new_locations.append(loc)
+                    for sid in loc_plan.get("scene_ids", []):
+                        location_assignments[sid] = loc_id
 
         # --- Shot planning: only if the project has NO current shots at all ---
         existing_shots = self._shot_repo.get_current_shots_by_project(project_id)
@@ -214,22 +249,48 @@ class EnrichmentService:
                     )
                     new_plans.append(plan)
 
-        # --- Environment derivation (if missing) ---
+        # --- Environment derivation ---
         updated_project = None
         if (self._shot_planner is not None
                 and project_description
                 and not project.director_context.get("environment_description")):
-            env_desc = self._shot_planner.derive_environment(project_description)
-            if env_desc:
-                new_ctx = dict(project.director_context)
-                new_ctx["environment_description"] = env_desc
-                updated_project = project.model_copy(update={
-                    "director_context": new_ctx,
-                })
+            if new_locations:
+                # Use first Location description as legacy environment_description
+                first_desc = next(
+                    (loc.description for loc in new_locations if loc.description),
+                    None,
+                )
+                if not first_desc:
+                    first_desc = self._shot_planner.derive_environment(project_description)
+                if first_desc:
+                    new_ctx = dict(project.director_context)
+                    new_ctx["environment_description"] = first_desc
+                    updated_project = project.model_copy(update={
+                        "director_context": new_ctx,
+                    })
+            else:
+                # No Locations planned — legacy single-environment derivation
+                env_desc = self._shot_planner.derive_environment(project_description)
+                if env_desc:
+                    new_ctx = dict(project.director_context)
+                    new_ctx["environment_description"] = env_desc
+                    updated_project = project.model_copy(update={
+                        "director_context": new_ctx,
+                    })
 
         # --- Phase 2: ONE write transaction ---
-        if new_beats or new_shots or new_plans or enriched_chars or updated_project:
+        if new_beats or new_shots or new_plans or enriched_chars or updated_project or new_locations:
             with self._db.connection() as conn:
+                # Locations first (Scenes reference them)
+                if self._location_repo is not None:
+                    for loc in new_locations:
+                        self._location_repo.save(loc, conn=conn)
+                    # Assign Scenes to Locations (initial assignment — no outdated propagation)
+                    for scene in scenes:
+                        assigned_loc = location_assignments.get(scene.id)
+                        if assigned_loc and scene.location_id is None:
+                            updated_scene = scene.model_copy(update={"location_id": assigned_loc})
+                            self._scene_repo.save_scene(updated_scene, conn=conn)
                 for beat in new_beats:
                     self._beat_repo.save_beat(beat, conn=conn)
                 for shot in new_shots:

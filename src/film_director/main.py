@@ -218,6 +218,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         scene_repo=scene_repo,
     )
 
+    from film_director.persistence.repositories import LocationRepository
+    location_repo = LocationRepository(db)
+
     enrichment_service = EnrichmentService(
         db=db,
         project_repo=project_repo,
@@ -235,6 +238,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         strategy_selector=StrategySelector(),
         stale_propagator=stale_propagator,
         shot_planner=shot_planner,
+        location_repo=location_repo,
     )
 
     # M3 services
@@ -346,9 +350,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     from film_director.services.activity import ActivityMonitor
     activity_monitor = ActivityMonitor()
-
-    from film_director.persistence.repositories import LocationRepository
-    location_repo = LocationRepository(db)
 
     router = create_router(
         adapter=adapter,

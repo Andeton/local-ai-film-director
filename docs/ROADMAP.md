@@ -62,7 +62,7 @@ Location is the highest-priority product-model gap — it blocks multi-scene/mul
 | ~~**2. Legacy migration**~~ | ~~Deterministic backfill: one Location per project with env_desc, assign scenes + ENVIRONMENT refs. Idempotent. Historical data immutable.~~ | **COMPLETE — 2026-08-21. 24 tests. 2050 total passed.** |
 | ~~**3. Location API + assignment + staleness**~~ | ~~CRUD, Scene assignment with outdated propagation, description edit staleness. 5 endpoints.~~ | **COMPLETE — 2026-08-21. 36 tests. 2086 total passed.** |
 | ~~**4. Location-scoped reference management/resolution/readiness**~~ | ~~Location ref APIs, select_location_ref, GenerationService + preview Location resolution, per-shot readiness. Legacy fallback.~~ | **COMPLETE — 2026-08-21. 21 tests. 2107 total passed.** |
-| **5. Multi-Location planning/enrichment** | Enrichment identifies distinct physical places from story/scene structure, creates/reuses Location entities, assigns Scenes, derives per-Location descriptions. Single-Location fallback when only one place identified. | Slice 4 |
+| ~~**5. Multi-Location planning/enrichment**~~ | ~~LLM-based Location identification + semantic deduplication + per-Location descriptions. Deterministic fallback. Enrichment integration.~~ | **COMPLETE — 2026-08-21. 35 tests. 2141 total passed.** |
 | **6. Operator UI surfaces** | Location management panel, location ref cards, scene Location selector, generation preview Location labels. Remove project-level environment controls. | Slice 4 |
 | **7. Multi-scene/multi-location acceptance production** | End-to-end production with 2+ Locations, validating the complete pipeline. | Slices 5-6 |
 

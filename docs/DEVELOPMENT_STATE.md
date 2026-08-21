@@ -1,7 +1,7 @@
 # Development State — Local AI Film Director
 
-**Last Updated:** 2026-08-21 (Location Slice 5 implemented)
-**Test Baseline:** 2146 passed, 1 skipped, 12 deselected (live tests)
+**Last Updated:** 2026-08-21 (Location Slice 6 implemented — pending human UI acceptance)
+**Test Baseline:** 2168 passed, 1 skipped, 12 deselected (live tests)
 **Branch:** p4-operator-workflow (P3 merged to main at 0ea4bce)
 
 ---
@@ -28,7 +28,7 @@ Full product archaeology and entity capability audit completed. Reconciled ORIGI
 | Director Treatment | Imported, never consumed | Canonical entity (PD-5) | No immediate blocker |
 | Style Bible | MISSING | Canonical entity (PD-5) | No immediate blocker |
 | Character | EXISTS as `CharacterReference` | Conceptually Character (PD-2, naming debt) | — |
-| Location | Slices 1-5 COMPLETE — model/persistence/migration/API/refs/generation/readiness/multi-Location enrichment | First-class entity (PD-1), Slice 6 (operator UI) next | **Functional — needs UI** |
+| Location | Slices 1-6 COMPLETE — model/persistence/migration/API/refs/generation/readiness/enrichment/UI | First-class entity (PD-1), pending human UI acceptance → Slice 7 | **Pending human acceptance** |
 | Prop | MISSING | Future entity | No immediate blocker |
 | Scene/Beat | EXISTS (Beat invisible in UI) | Beat as lightweight grouping (PD-3) | — |
 | Storyboard | Schema exists, never populated | Core pre-generation stage (PD-8) | No immediate blocker |

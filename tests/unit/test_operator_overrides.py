@@ -41,9 +41,9 @@ def _make_test_app(tmp_path):
             "INSERT INTO sequences VALUES (?,?,?,?)", ("seq1", "p1", "Main", 0),
         )
         conn.execute(
-            "INSERT INTO scenes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO scenes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             ("sc1", "seq1", "wc_sc1", "Scene", "", "", 0, "draft",
-             "wind_comic", "wc1", "wc_sc1", 1, now, "a" * 64),
+             "wind_comic", "wc1", "wc_sc1", 1, now, "a" * 64, None),
         )
         conn.execute(
             "INSERT INTO character_references VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",

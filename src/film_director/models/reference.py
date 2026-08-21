@@ -83,6 +83,7 @@ class ReferenceAsset(BaseModel):
     project_id: str
     character_id: str | None = None
     shot_id: str | None = None
+    location_id: str | None = None  # FK to Location (nullable — Slice 2 migration)
     kind: ReferenceKind
     source: ReferenceSource
     managed_path: str

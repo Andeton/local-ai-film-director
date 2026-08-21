@@ -3,7 +3,7 @@
 **Date**: 2026-08-21
 **Branch**: `p4-operator-workflow` (run `git rev-parse HEAD` for current commit)
 **Main HEAD**: `0ea4bce835264621a2513af52cb12aa75b083479`
-**Test baseline**: 1997 passed, 1 skipped, 12 deselected (live tests)
+**Test baseline**: 2026 passed, 1 skipped, 12 deselected (live tests)
 **GitHub**: https://github.com/Andeton/local-ai-film-director.git
 
 ## 1. Project Purpose
@@ -110,9 +110,9 @@ python -m uvicorn "film_director.main:create_app" --factory --host 127.0.0.1 --p
 
 ## 9. Exact Next Action
 
-**Implement Location Slice 1 on `p4-operator-workflow`.**
+**Implement Location Slice 2 (legacy migration) on `p4-operator-workflow`.**
 
-Location design is finalized. Begin implementation with Slice 1: Location model, `locations` table, `LocationRepository`, nullable `location_id` FK on `scenes` and `reference_assets`. Unit tests. See `docs/ROADMAP.md` for the complete 7-slice plan.
+Slice 1 is complete: `Location` model, `locations` table, `LocationRepository`, nullable `location_id` on `scenes` and `reference_assets`. 29 tests, 2026 total passed. See `docs/ROADMAP.md` for the complete 7-slice plan.
 
 Do NOT start broad infrastructure, new model adapters, or generalized routing until Location entity and a successful multi-scene production validate the target architecture.
 

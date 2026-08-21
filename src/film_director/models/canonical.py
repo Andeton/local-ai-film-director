@@ -29,13 +29,33 @@ class Sequence(BaseModel):
     # No provenance — Sequence is a synthetic grouping entity
 
 
+class Location(BaseModel):
+    """Canonical reusable physical place/set (PD-1).
+
+    Owns a physical/set description and location reference assets.
+    Multiple Scenes may reference the same Location.
+    No lifecycle status field — staleness is expressed through dependent
+    reference and shot state, not on Location itself.
+    """
+
+    id: str
+    project_id: str
+    name: str
+    description: str = ""
+    source: Literal["wind_comic", "llm", "human"] = "human"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class Scene(BaseModel):
     id: str
     sequence_id: str
     wc_scene_id: str
     name: str
-    location: str
+    location: str  # legacy WC-imported string — preserved as provenance
     description: str
+    location_id: str | None = None  # FK to Location (nullable — Slice 2 migration)
     order_index: int
     status: Literal["draft", "ready", "outdated"] = "draft"
     provenance: Provenance  # REQUIRED

@@ -58,7 +58,7 @@ Location is the highest-priority product-model gap — it blocks multi-scene/mul
 
 | Slice | Scope | Dependency |
 |---|---|---|
-| **1. Location domain/persistence/repository** | `Location` model, `locations` table, `LocationRepository`, nullable `location_id` FK on `scenes` and `reference_assets`. Unit tests. | None |
+| ~~**1. Location domain/persistence/repository**~~ | ~~`Location` model, `locations` table, `LocationRepository`, nullable `location_id` FK on `scenes` and `reference_assets`. Unit tests.~~ | **COMPLETE — 2026-08-21. 29 tests. 2026 total passed.** |
 | **2. Legacy migration** | Create one Location per existing project from `director_context.environment_description`. Populate `location_id` on scenes and ENVIRONMENT refs. Integration test: P3 project unchanged. | Slice 1 |
 | **3. Location API + assignment + staleness** | CRUD endpoints, `PUT /scenes/{id}/location` with outdated propagation (affected shots/plans → `outdated`), description edit staleness. | Slice 2 |
 | **4. Location-scoped reference management/resolution/readiness** | Location ref generate/upload/preview. `ReferenceSelector.select_location_ref()`. Update `GenerationService` and generation preview to resolve via Scene → Location. Per-shot readiness. | Slice 3 |

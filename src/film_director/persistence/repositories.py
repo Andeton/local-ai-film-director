@@ -38,6 +38,7 @@ from film_director.models.canonical import (
     CameraIntent,
     CharacterReference,
     GenerationPlan,
+    Location,
     ProductionProject,
     ReferenceRequirements,
     Scene,
@@ -207,6 +208,117 @@ class SequenceRepository:
 # SceneRepository
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# LocationRepository (Location Slice 1)
+# ---------------------------------------------------------------------------
+
+class LocationRepository:
+    """CRUD persistence for canonical Location entities."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save(self, location: Location, conn: sqlite3.Connection | None = None) -> None:
+        """Upsert a Location. Caller must increment version before calling."""
+        sql = """
+            INSERT INTO locations
+                (id, project_id, name, description, source, version,
+                 created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                project_id  = excluded.project_id,
+                name        = excluded.name,
+                description = excluded.description,
+                source      = excluded.source,
+                version     = excluded.version,
+                created_at  = excluded.created_at,
+                updated_at  = excluded.updated_at
+        """
+        params = (
+            location.id, location.project_id, location.name,
+            location.description, location.source, location.version,
+            location.created_at, location.updated_at,
+        )
+        try:
+            with _use_conn(self._db, conn) as c:
+                c.execute(sql, params)
+        except sqlite3.Error as exc:
+            raise PersistenceError("Failed to save location", str(exc)) from exc
+
+    def get(self, location_id: str, conn: sqlite3.Connection | None = None) -> Location | None:
+        with _use_conn(self._db, conn) as c:
+            row = c.execute(
+                "SELECT * FROM locations WHERE id = ?", (location_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_location(row)
+
+    def list_by_project(
+        self, project_id: str, conn: sqlite3.Connection | None = None,
+    ) -> list[Location]:
+        with _use_conn(self._db, conn) as c:
+            rows = c.execute(
+                "SELECT * FROM locations WHERE project_id = ? ORDER BY name, id",
+                (project_id,),
+            ).fetchall()
+        return [self._row_to_location(r) for r in rows]
+
+    def update(
+        self,
+        location_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        conn: sqlite3.Connection | None = None,
+    ) -> Location | None:
+        """Update editable fields. Increments version and updated_at.
+
+        Returns the updated Location or None if not found.
+        """
+        current = self.get(location_id, conn=conn)
+        if current is None:
+            return None
+        new_name = name if name is not None else current.name
+        new_desc = description if description is not None else current.description
+        now = datetime.now(timezone.utc).isoformat()
+        updated = current.model_copy(update={
+            "name": new_name,
+            "description": new_desc,
+            "version": current.version + 1,
+            "updated_at": now,
+        })
+        self.save(updated, conn=conn)
+        return updated
+
+    def delete(self, location_id: str, conn: sqlite3.Connection | None = None) -> bool:
+        """Delete a Location. Returns True if deleted, False if not found.
+
+        Will raise sqlite3.IntegrityError if referenced by scenes (FK RESTRICT).
+        Product-level guarded deletion belongs in Slice 3 service layer.
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute("DELETE FROM locations WHERE id = ?", (location_id,))
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def _row_to_location(row: sqlite3.Row) -> Location:
+        return Location(
+            id=row["id"],
+            project_id=row["project_id"],
+            name=row["name"],
+            description=row["description"],
+            source=row["source"],
+            version=row["version"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# SceneRepository
+# ---------------------------------------------------------------------------
+
 class SceneRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -217,16 +329,17 @@ class SceneRepository:
         sql = """
             INSERT INTO scenes
                 (id, sequence_id, wc_scene_id, name, location, description,
-                 order_index, status,
+                 location_id, order_index, status,
                  prov_source_system, prov_source_project_id, prov_source_asset_id,
                  prov_source_asset_version, prov_imported_at, prov_source_hash)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 sequence_id             = excluded.sequence_id,
                 wc_scene_id             = excluded.wc_scene_id,
                 name                    = excluded.name,
                 location                = excluded.location,
                 description             = excluded.description,
+                location_id             = excluded.location_id,
                 order_index             = excluded.order_index,
                 status                  = excluded.status,
                 prov_source_system      = excluded.prov_source_system,
@@ -239,7 +352,7 @@ class SceneRepository:
         params = (
             scene.id, scene.sequence_id, scene.wc_scene_id,
             scene.name, scene.location, scene.description,
-            scene.order_index, scene.status,
+            scene.location_id, scene.order_index, scene.status,
             prov.source_system, prov.source_project_id, prov.source_asset_id,
             prov.source_asset_version, prov.imported_at, prov.source_hash,
         )
@@ -279,6 +392,7 @@ class SceneRepository:
             name=row["name"],
             location=row["location"],
             description=row["description"],
+            location_id=row["location_id"],
             order_index=row["order_index"],
             status=row["status"],
             provenance=_prov_from_row(row),
@@ -1061,15 +1175,16 @@ class ReferenceAssetRepository:
     def save(self, asset: ReferenceAsset, conn: sqlite3.Connection | None = None) -> None:
         sql = """
             INSERT INTO reference_assets
-                (id, project_id, character_id, shot_id, kind, source,
+                (id, project_id, character_id, shot_id, location_id, kind, source,
                  managed_path, content_sha256, source_provenance,
                  source_fingerprint, status, source_state, pinned,
                  width, height, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 project_id         = excluded.project_id,
                 character_id       = excluded.character_id,
                 shot_id            = excluded.shot_id,
+                location_id        = excluded.location_id,
                 kind               = excluded.kind,
                 source             = excluded.source,
                 managed_path       = excluded.managed_path,
@@ -1086,6 +1201,7 @@ class ReferenceAssetRepository:
         """
         params = (
             asset.id, asset.project_id, asset.character_id, asset.shot_id,
+            asset.location_id,
             asset.kind.value, asset.source.value, asset.managed_path,
             asset.content_sha256, asset.source_provenance, asset.source_fingerprint,
             asset.status.value, asset.source_state.value, int(asset.pinned),
@@ -1237,6 +1353,7 @@ class ReferenceAssetRepository:
             project_id=row["project_id"],
             character_id=row["character_id"],
             shot_id=row["shot_id"],
+            location_id=row["location_id"],
             kind=ReferenceKind(row["kind"]),
             source=ReferenceSource(row["source"]),
             managed_path=row["managed_path"],

@@ -59,6 +59,20 @@ CREATE TABLE IF NOT EXISTS scenes (
     FOREIGN KEY (sequence_id) REFERENCES sequences(id)
 );
 
+CREATE TABLE IF NOT EXISTS locations (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT 'human',
+    version     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES production_projects(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_locations_project ON locations(project_id);
+
 CREATE TABLE IF NOT EXISTS character_references (
     id                      TEXT PRIMARY KEY,
     project_id              TEXT NOT NULL,
@@ -516,6 +530,26 @@ class Database:
                     "ADD COLUMN continuity_snapshot TEXT"
                 )
                 logger.debug("Migration: added continuity_snapshot to generation_requests")
+
+        # Location Slice 1: Add location_id to scenes
+        scenes_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(scenes)").fetchall()
+        }
+        if "location_id" not in scenes_cols:
+            conn.execute(
+                "ALTER TABLE scenes ADD COLUMN location_id TEXT"
+            )
+            logger.debug("Migration: added location_id to scenes")
+
+        # Location Slice 1: Add location_id to reference_assets
+        ref_asset_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(reference_assets)").fetchall()
+        }
+        if "location_id" not in ref_asset_cols:
+            conn.execute(
+                "ALTER TABLE reference_assets ADD COLUMN location_id TEXT"
+            )
+            logger.debug("Migration: added location_id to reference_assets")
 
     @contextmanager
     def connection(self):

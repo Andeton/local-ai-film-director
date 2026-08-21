@@ -156,9 +156,9 @@ def _seed_prerequisites(conn):
         ("seq-1", "proj-1", "Seq 1", 1),
     )
     conn.execute(
-        "INSERT INTO scenes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO scenes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         ("scene-1", "seq-1", "wc-scene-1", "Scene 1", "", "", 1, "draft",
-         "wind_comic", "wc-1", "asset-1", 1, "2024-01-01", "abc"),
+         "wind_comic", "wc-1", "asset-1", 1, "2024-01-01", "abc", None),
     )
     conn.execute(
         "INSERT INTO beats VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",

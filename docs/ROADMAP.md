@@ -60,7 +60,7 @@ Location is the highest-priority product-model gap — it blocks multi-scene/mul
 |---|---|---|
 | ~~**1. Location domain/persistence/repository**~~ | ~~`Location` model, `locations` table, `LocationRepository`, nullable `location_id` FK on `scenes` and `reference_assets`. Unit tests.~~ | **COMPLETE — 2026-08-21. 29 tests. 2026 total passed.** |
 | ~~**2. Legacy migration**~~ | ~~Deterministic backfill: one Location per project with env_desc, assign scenes + ENVIRONMENT refs. Idempotent. Historical data immutable.~~ | **COMPLETE — 2026-08-21. 24 tests. 2050 total passed.** |
-| **3. Location API + assignment + staleness** | CRUD endpoints, `PUT /scenes/{id}/location` with outdated propagation (affected shots/plans → `outdated`), description edit staleness. | Slice 2 |
+| ~~**3. Location API + assignment + staleness**~~ | ~~CRUD, Scene assignment with outdated propagation, description edit staleness. 5 endpoints.~~ | **COMPLETE — 2026-08-21. 36 tests. 2086 total passed.** |
 | **4. Location-scoped reference management/resolution/readiness** | Location ref generate/upload/preview. `ReferenceSelector.select_location_ref()`. Update `GenerationService` and generation preview to resolve via Scene → Location. Per-shot readiness. | Slice 3 |
 | **5. Multi-Location planning/enrichment** | Enrichment identifies distinct physical places from story/scene structure, creates/reuses Location entities, assigns Scenes, derives per-Location descriptions. Single-Location fallback when only one place identified. | Slice 4 |
 | **6. Operator UI surfaces** | Location management panel, location ref cards, scene Location selector, generation preview Location labels. Remove project-level environment controls. | Slice 4 |

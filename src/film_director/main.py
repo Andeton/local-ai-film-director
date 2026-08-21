@@ -347,6 +347,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from film_director.services.activity import ActivityMonitor
     activity_monitor = ActivityMonitor()
 
+    from film_director.persistence.repositories import LocationRepository
+    location_repo = LocationRepository(db)
+
     router = create_router(
         adapter=adapter,
         import_service=import_service,
@@ -372,6 +375,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         take_service=take_service,
         take_repo=take_repo,
         activity_monitor=activity_monitor,
+        location_repo=location_repo,
     )
     app.include_router(router)
 

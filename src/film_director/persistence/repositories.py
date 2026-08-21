@@ -703,6 +703,17 @@ class ShotRepository:
         with _use_conn(self._db, conn) as c:
             c.execute("UPDATE shots SET status = 'outdated' WHERE beat_id = ?", (beat_id,))
 
+    def mark_shots_outdated_by_scene(self, scene_id: str, conn: sqlite3.Connection | None = None) -> int:
+        """Mark all current shots in a scene as outdated (via beat FK chain)."""
+        sql = """
+            UPDATE shots SET status = 'outdated'
+            WHERE status != 'outdated'
+              AND beat_id IN (SELECT id FROM beats WHERE scene_id = ?)
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (scene_id,))
+            return cursor.rowcount
+
     @staticmethod
     def _row_to_shot(row: sqlite3.Row) -> ShotSpecificationV1:
         return ShotSpecificationV1(
@@ -809,6 +820,21 @@ class GenerationPlanRepository:
     def mark_plan_outdated_by_shot(self, shot_id: str, conn: sqlite3.Connection | None = None) -> None:
         with _use_conn(self._db, conn) as c:
             c.execute("UPDATE generation_plans SET status = 'outdated' WHERE shot_id = ?", (shot_id,))
+
+    def mark_plans_outdated_by_scene(self, scene_id: str, conn: sqlite3.Connection | None = None) -> int:
+        """Mark all current generation plans for shots in a scene as outdated."""
+        sql = """
+            UPDATE generation_plans SET status = 'outdated'
+            WHERE status != 'outdated'
+              AND shot_id IN (
+                SELECT s.id FROM shots s
+                JOIN beats b ON s.beat_id = b.id
+                WHERE b.scene_id = ?
+              )
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (scene_id,))
+            return cursor.rowcount
 
     @staticmethod
     def _row_to_plan(row: sqlite3.Row) -> GenerationPlan:
@@ -1344,6 +1370,31 @@ class ReferenceAssetRepository:
         """
         with _use_conn(self._db, conn) as c:
             cursor = c.execute(sql, (project_id, current_fingerprint))
+            return cursor.rowcount
+
+    def mark_generated_stale_for_location(
+        self,
+        location_id: str,
+        current_fingerprint: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Mark GENERATED + CURRENT environment refs for a Location as STALE.
+
+        Scoped by location_id (not project_id). Only affects refs with
+        source='generated' and source_state='current' whose fingerprint
+        does not match. USER_UPLOAD refs are not touched.
+        """
+        sql = """
+            UPDATE reference_assets
+            SET source_state = 'stale', updated_at = datetime('now')
+            WHERE location_id = ?
+              AND kind = 'environment'
+              AND source = 'generated'
+              AND source_state = 'current'
+              AND (source_fingerprint IS NULL OR source_fingerprint != ?)
+        """
+        with _use_conn(self._db, conn) as c:
+            cursor = c.execute(sql, (location_id, current_fingerprint))
             return cursor.rowcount
 
     @staticmethod

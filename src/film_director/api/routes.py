@@ -34,6 +34,7 @@ from film_director.persistence.repositories import (
     CharacterRepository,
     GenerationPlanRepository,
     GenerationRequestRepository,
+    LocationRepository,
     ProjectRepository,
     ReferenceAssetRepository,
     SceneRepository,
@@ -81,6 +82,29 @@ class CharacterEditRequest(BaseModel):
 class EnvironmentDescriptionRequest(BaseModel):
     """Edit the project's environment description."""
     environment_description: str
+
+
+class CreateLocationRequest(BaseModel):
+    """Create a new canonical Location."""
+    name: str
+    description: str = ""
+
+
+class EditLocationRequest(BaseModel):
+    """Edit a Location's canonical editable fields."""
+    name: str | None = None
+    description: str | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one(self):
+        if self.name is None and self.description is None:
+            raise ValueError("At least one of name or description must be provided")
+        return self
+
+
+class AssignSceneLocationRequest(BaseModel):
+    """Assign a Scene to a Location."""
+    location_id: str
 
 
 class BeatEditRequest(BaseModel):
@@ -226,6 +250,8 @@ def create_router(
     continuity_service=None,  # ContinuityService | None
     continuity_state_repo=None,  # ContinuityStateRepository | None
     activity_monitor=None,  # ActivityMonitor | None
+    # Location services
+    location_repo: LocationRepository | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -319,6 +345,168 @@ def create_router(
         else:
             import_service.apply_detected_changes(project_id, changes)
             return {"applied": len(changes)}
+
+    # ------------------------------------------------------------------
+    # Location Routes (Slice 3)
+    # ------------------------------------------------------------------
+
+    def _loc_guard():
+        if location_repo is None:
+            raise HTTPException(status_code=501, detail="Location not available")
+
+    @router.get("/projects/{project_id}/locations")
+    def list_locations(project_id: str) -> list[dict]:
+        _loc_guard()
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return [loc.model_dump() for loc in location_repo.list_by_project(project_id)]
+
+    @router.post("/projects/{project_id}/locations", status_code=201)
+    def create_location(project_id: str, body: CreateLocationRequest) -> dict:
+        _loc_guard()
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        import uuid
+        from datetime import datetime, timezone
+        from film_director.models.canonical import Location
+
+        now = datetime.now(timezone.utc).isoformat()
+        loc = Location(
+            id=f"loc_{uuid.uuid4().hex[:12]}",
+            project_id=project_id,
+            name=body.name.strip(),
+            description=body.description.strip(),
+            source="human",
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        location_repo.save(loc)
+        return loc.model_dump()
+
+    @router.get("/locations/{location_id}")
+    def get_location(location_id: str) -> dict:
+        _loc_guard()
+        loc = location_repo.get(location_id)
+        if loc is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+        return loc.model_dump()
+
+    @router.put("/locations/{location_id}")
+    def edit_location(location_id: str, body: EditLocationRequest) -> dict:
+        _loc_guard()
+        loc = location_repo.get(location_id)
+        if loc is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+
+        old_desc = loc.description
+        new_name = body.name.strip() if body.name is not None else None
+        new_desc = body.description.strip() if body.description is not None else None
+
+        # No-op check: skip version increment if nothing changed
+        effective_name = new_name if new_name is not None else loc.name
+        effective_desc = new_desc if new_desc is not None else loc.description
+        if effective_name == loc.name and effective_desc == loc.description:
+            return loc.model_dump()
+
+        updated = location_repo.update(
+            location_id, name=new_name, description=new_desc,
+        )
+
+        # Stale propagation: description change → generated env refs stale
+        if new_desc is not None and new_desc != old_desc and ref_asset_repo is not None:
+            import hashlib
+            new_fp = hashlib.sha256(new_desc.encode()).hexdigest()
+            ref_asset_repo.mark_generated_stale_for_location(
+                location_id=location_id,
+                current_fingerprint=new_fp,
+            )
+
+        return updated.model_dump()
+
+    @router.delete("/locations/{location_id}")
+    def delete_location(location_id: str) -> dict:
+        _loc_guard()
+        loc = location_repo.get(location_id)
+        if loc is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+
+        # Block deletion if any Scene references this Location
+        with location_repo._db.connection() as conn:
+            referencing = conn.execute(
+                "SELECT COUNT(*) FROM scenes WHERE location_id = ?",
+                (location_id,),
+            ).fetchone()[0]
+        if referencing > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Location is referenced by {referencing} scene(s) and cannot be deleted",
+            )
+
+        # Block deletion if Location owns any ReferenceAssets
+        if ref_asset_repo is not None:
+            with location_repo._db.connection() as conn:
+                owned_refs = conn.execute(
+                    "SELECT COUNT(*) FROM reference_assets WHERE location_id = ?",
+                    (location_id,),
+                ).fetchone()[0]
+            if owned_refs > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Location owns {owned_refs} reference asset(s) and cannot be deleted",
+                )
+
+        location_repo.delete(location_id)
+        return {"deleted": location_id}
+
+    @router.put("/scenes/{scene_id}/location")
+    def assign_scene_location(scene_id: str, body: AssignSceneLocationRequest) -> dict:
+        _loc_guard()
+        scene = scene_repo.get_scene(scene_id)
+        if scene is None:
+            raise HTTPException(status_code=404, detail="Scene not found")
+
+        loc = location_repo.get(body.location_id)
+        if loc is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+
+        # Cross-project check: derive project_id from scene
+        with location_repo._db.connection() as conn:
+            seq_row = conn.execute(
+                "SELECT project_id FROM sequences WHERE id = ?",
+                (scene.sequence_id,),
+            ).fetchone()
+        if seq_row is None:
+            raise HTTPException(status_code=404, detail="Sequence not found")
+        scene_project_id = seq_row[0]
+        if loc.project_id != scene_project_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Location and Scene belong to different projects",
+            )
+
+        # Idempotent: same assignment → no-op
+        if scene.location_id == body.location_id:
+            return {"scene_id": scene_id, "location_id": body.location_id, "changed": False}
+
+        old_location_id = scene.location_id
+
+        # Update scene location_id
+        updated_scene = scene.model_copy(update={"location_id": body.location_id})
+        scene_repo.save_scene(updated_scene)
+
+        # Outdated propagation: if location actually changed, mark
+        # all current shots + plans in this scene as outdated
+        if old_location_id != body.location_id:
+            if shot_repo is not None:
+                shot_repo.mark_shots_outdated_by_scene(scene_id)
+            if plan_repo is not None:
+                plan_repo.mark_plans_outdated_by_scene(scene_id)
+
+        return {"scene_id": scene_id, "location_id": body.location_id, "changed": True}
 
     # ------------------------------------------------------------------
     # M2 Routes

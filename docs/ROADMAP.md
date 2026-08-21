@@ -63,7 +63,7 @@ Location is the highest-priority product-model gap — it blocks multi-scene/mul
 | ~~**3. Location API + assignment + staleness**~~ | ~~CRUD, Scene assignment with outdated propagation, description edit staleness. 5 endpoints.~~ | **COMPLETE — 2026-08-21. 36 tests. 2086 total passed.** |
 | ~~**4. Location-scoped reference management/resolution/readiness**~~ | ~~Location ref APIs, select_location_ref, GenerationService + preview Location resolution, per-shot readiness. Legacy fallback.~~ | **COMPLETE — 2026-08-21. 21 tests. 2107 total passed.** |
 | ~~**5. Multi-Location planning/enrichment**~~ | ~~LLM-based Location identification + semantic deduplication + per-Location descriptions. Deterministic fallback. Enrichment integration.~~ | **COMPLETE — 2026-08-21. 35 tests. 2141 total passed.** |
-| ~~**6. Operator UI surfaces**~~ | ~~Locations workspace with CRUD, scene assignment, ref management, generation preview. Legacy env controls hidden for Location-enabled projects.~~ | **COMPLETE — 2026-08-21. 22 tests. 2168 total. Pending human UI acceptance.** |
+| ~~**6. Operator UI surfaces**~~ | ~~Locations workspace with CRUD, scene assignment, ref management, generation preview. Legacy env controls hidden for Location-enabled projects.~~ | **COMPLETE but UI acceptance FAILED. UX architecture audit completed. UX-A designed, not implemented.** |
 | **7. Multi-scene/multi-location acceptance production** | End-to-end production with 2+ Locations, validating the complete pipeline. | Slices 5-6 |
 
 ### After Location: Remaining Priorities

@@ -1,16 +1,15 @@
 # ChatGPT/Claude Code Handoff — Local AI Film Director
 
 **Date**: 2026-08-21
-**Branch**: `p4-operator-workflow` (run `git rev-parse HEAD` for current commit)
+**Branch**: `p4-operator-workflow`
+**HEAD**: `557527b53a2ecfa68990a6b5916f8d2c03769628`
 **Main HEAD**: `0ea4bce835264621a2513af52cb12aa75b083479`
 **Test baseline**: 2168 passed, 1 skipped, 12 deselected (live tests)
 **GitHub**: https://github.com/Andeton/local-ai-film-director.git
 
 ## 1. Project Purpose
 
-Local AI Film Director (LFDirector) is an **AI Director + Production Manager + ComfyUI Orchestrator**. It owns the complete production pipeline from idea to assembled film:
-
-idea → canonical pre-production (story/treatment/style/characters/locations) → scene/beat/shot planning → storyboard → reference management → generation → take review → continuity → timeline → export.
+Local AI Film Director (LFDirector) is an **AI Director + Production Manager + ComfyUI Orchestrator**. It owns the complete production pipeline from idea to assembled film.
 
 LFDirector owns the canonical production specification (ADR-002). External systems (Wind Comic, ComfyUI, H3, OpenRouter) are sources and execution providers, not canonical owners.
 
@@ -23,74 +22,73 @@ LFDirector owns the canonical production specification (ADR-002). External syste
 | Project root | `D:\Ai\Local AI Film Director` |
 | ComfyUI (READ-ONLY) | `D:\ComfyUI\` (Comfy Desktop) |
 | Production database | `data/p2_scene.db` |
+| Acceptance database | `data/acceptance_slice6.db` (disposable) |
 | Storage root | `storage/` |
 | Product specification | `docs/PRODUCT_SPEC.md` |
 
 **CRITICAL**: `D:\ComfyUI\` is external and READ-ONLY.
 
-## 3. Current Branch/HEAD
+## 3. Current State Summary
 
-Work is on branch `p4-operator-workflow`. P3 was merged to main at `0ea4bce`.
+### Location Implementation: Slices 1-6 COMPLETE
 
-## 4. Completed Production
+| Slice | Status |
+|---|---|
+| 1. Model/persistence/repository | COMPLETE (29 tests) |
+| 2. Legacy migration | COMPLETE (24 tests) |
+| 3. API + assignment + staleness | COMPLETE (36 tests) |
+| 4. Ref management + generation resolution + readiness | COMPLETE (21 tests) |
+| 5. Multi-Location planning/enrichment | COMPLETE + corrected (40 tests) |
+| 6. Operator UI | COMPLETE (22 tests) |
+| 7. End-to-end acceptance production | NOT STARTED |
 
-**Project `proj_cfb89b04f3c8`**: 6/6 shots APPROVED, 48.741s assembled scene, HUMAN PASS.
+**Slice 5 live validation**: OpenRouter check PASSED — 4 scenes (apartment/subway/office/apartment) → 3 Locations with correct apartment reuse via google/gemini-2.5-flash.
 
-## 5. P4 State
+### Human UI Acceptance: FAILED
 
-P4 has three completed phases:
+Location Slice 6 UI was tested by human operator. Result: **FAIL**.
 
-### Phase 1: Operator Workflow (Complete)
-- Original idea preservation, reference prompt preview/control, Shot Production Editor, Take generation provenance, character data-lineage fix, UX cleanup. See `docs/DEVELOPMENT_STATE.md` for full list.
+Feedback: "The interface is not intuitive. It is unclear what is happening and where to go. Normal production actions should feel native, but the current interface requires too much interpretation."
 
-### Phase 2: Product-Model Audit (Complete — 2026-08-21)
-- Full product archaeology and entity capability audit
-- 10 product decisions accepted (PD-1 through PD-10)
-- Target product architecture documented in PRODUCT_SPEC.md
-- Documentation consolidated across all five handoff files
+This is NOT a code bug — the backend/API layer works correctly. The failure is in **information architecture, workflow hierarchy, navigation, and separation of production stages**.
 
-### Phase 3: Location Design (Complete — 2026-08-21)
-- Location domain design finalized: `Location(id, project_id, name, description, source, version, created_at, updated_at)`
-- Three layers: Location (persistent identity) / Scene Environment State (future) / Shot Environment (existing)
-- Multi-Location enrichment is target behavior for new projects
-- Legacy migration: one Location per existing project
-- 7 implementation slices defined in ROADMAP.md
+### UX Architecture Audit: COMPLETED (design-only)
 
-### Accepted Product Decisions (PD-1 through PD-10)
+A comprehensive UX architecture audit was performed. Key findings:
 
-| ID | Decision |
-|----|----------|
-| PD-1 | Location is first-class canonical concept. Three layers: Location/SceneEnvState/ShotEnv. Multi-Location enrichment is target. |
-| PD-2 | CharacterReference is conceptually Character. Code rename deferred. |
-| PD-3 | Beat remains in canonical hierarchy (Scene → Beat → Shot). |
-| PD-4 | Prompt editing has persistent shot-level draft + immutable per-generation snapshot. |
-| PD-5 | Story, Treatment, Style are canonical LFDirector-owned artifacts. |
-| PD-6 | Wind Comic is source/sidecar, not canonical owner. Output-quality revisit condition demonstrated. |
-| PD-7 | ReferenceKind (what asset IS) and AssetRole (how asset is USED) remain separate. |
-| PD-8 | Storyboard is core pre-generation stage. |
-| PD-9 | H3 leakage in routes is acknowledged tech debt, not a standalone milestone. |
-| PD-10 | Timeline is future minimal. Semantic continuity deferred. |
+- Current UI was built incrementally bottom-up (M1→P4→Slices) rather than from a production workflow down
+- No production context on project entry — dumps directly into Shot 1
+- Flat shot list hides scene/location production structure
+- Three workspace tabs (Shots/Locations/Characters) are peers when they should be a hierarchy
+- Shot detail mixes specification + generation + results in one scroll
+- Technical vocabulary (H3, Picture slots, workflow IDs) is primary operator surface
+- Readiness is global rather than per-shot actionable
 
-## 6. Key Architecture Clarifications (Audit)
+**Proposed navigation architecture:**
+```
+PROJECT HOME → STORY → ELEMENTS → SCENES → PRODUCTION → REVIEW → EXPORT
+```
 
-### Ownership Principle
-LFDirector is the canonical owner of ALL production data. Wind Comic is a SOURCE that enters through `WindComicAdapter`. WC's output quality has been demonstrated as insufficient (generic placeholder content), confirming ADR-001's revisit condition. LFDirector compensates via OpenRouter planning and operator input.
+**Proposed implementation slices:**
+- UX-A: Application Shell + Project Home + Navigation (highest priority)
+- UX-B: Scenes Hierarchy
+- UX-C: Elements Workspace consolidation
+- UX-D: Shot Detail Restructuring
+- UX-E: Storyboard View
+- UX-F: Review Summary
+- UX-G: Export Consolidation
 
-### Current Implementation vs Target
-The current implementation successfully produces complete films (P3 proved this) but represents a subset of the target product model. Key gap blocking multi-scene production:
-- No Location entity (environment is project-level only) — **design finalized, 7 implementation slices defined**
-- No persistent prompt drafts (lost on shot switch)
-- No storyboard review stage
+**UX-A was NOT implemented** — only designed. No code changes were made after the Slice 6 commit.
 
-Story, Treatment, Style entities and Prop/Timeline models are accepted for the target but do not block current single-scene production.
+### Product Decisions (PD-1 through PD-10)
 
-### Location Design Summary
-`Location(id, project_id, name, description, source, version, created_at, updated_at)` — no lifecycle status field. Scene has nullable `location_id` FK. ReferenceAsset gets nullable `location_id` FK. ENVIRONMENT kind preserved during transition. Multi-Location enrichment for new projects; single Location per project for legacy migration. Per-shot readiness via Scene → Location. Scene Location change → affected shots/plans `outdated`.
+All 10 product decisions remain accepted and documented in `docs/PRODUCT_SPEC.md`.
 
-### Naming Debt
-`CharacterReference` class/table = Character entity. `director_context` dict = fragments of Story + Treatment + Style. Code/schema renames deferred.
+### Completed Productions
 
-## 7. Environment Variables (.env)
+**Project `proj_cfb89b04f3c8`**: 6/6 shots APPROVED, 48.741s assembled scene, HUMAN PASS (P3).
+
+## 4. Environment Variables (.env)
 
 ```
 FILM_DATABASE_PATH=data/p2_scene.db
@@ -101,19 +99,24 @@ FILM_COMFYUI_GENERATION_TIMEOUT=1200
 OPENROUTER_API_KEY=...
 ```
 
-## 8. Runtime
+## 5. Runtime
 
 ```bash
 cd "D:/Ai/Local AI Film Director"
 python -m uvicorn "film_director.main:create_app" --factory --host 127.0.0.1 --port 8000
 ```
 
-## 9. Exact Next Action
+## 6. Exact Next Action
 
-**Perform human UI acceptance of Location Slice 6, then run Location Slice 7 multi-scene/multi-Location end-to-end acceptance production.**
+**Resume from the UX architecture decision point. Re-read `docs/PRODUCT_SPEC.md` and the UX architecture findings documented in this conversation's session history, then implement UX-A (Application Shell + Project Home + Navigation) as one controlled slice, followed by human acceptance.**
 
-Slices 1-6 complete. Slice 6: Locations workspace with CRUD, scene assignment with outdated communication, Location-scoped reference management (generate/upload/approve/pin), generation preview with semantic Location labels, per-shot readiness, legacy env controls hidden for Location-enabled projects. 2168 total passed. Pending human UI acceptance. See `docs/ROADMAP.md` for the 7-slice plan.
+UX-A is the single most impactful change — it establishes the navigation framework and immediately provides production context on project entry. It requires NO backend changes (all data available from existing APIs). All existing functionality remains accessible through reorganized navigation.
 
-Do NOT start broad infrastructure, new model adapters, or generalized routing until Location entity and a successful multi-scene production validate the target architecture.
+Do NOT:
+- Skip to UX-B or later without completing UX-A
+- Start Location Slice 7 acceptance production until the UI passes human acceptance
+- Start Story/Style/Storyboard/Timeline backend work
+- Start M8, LTX, or generalized model routing
+- Merge p4-operator-workflow to main until human acceptance passes
 
 **Durable documentation:** `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STATE.md`, `docs/ROADMAP.md`, `docs/TECHNOLOGY_RADAR.md`, `docs/PRODUCT_SPEC.md`.

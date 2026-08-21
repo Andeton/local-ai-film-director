@@ -96,8 +96,10 @@ class PreproductionService:
         # 4. Validate required artifacts
         self._validate_artifacts(wc_project_id, bundle)
 
-        # 5. Import into canonical model
-        import_result = self._import_service.import_project(wc_project_id)
+        # 5. Import into canonical model, preserving the exact operator idea
+        import_result = self._import_service.import_project(
+            wc_project_id, original_idea=idea,
+        )
         logger.info(
             "Import complete: canonical=%s, scenes=%d, chars=%d",
             import_result.project_id,

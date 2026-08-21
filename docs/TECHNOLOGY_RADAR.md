@@ -103,7 +103,18 @@ Real locally-verified ComfyUI user workflows are copied into `workflows/source_r
 - H3 generates joint video+audio in a single forward pass
 - Stereo audio (voice, SFX, music) is native, not layered
 - Spontaneous dialogue audio observed in multiple shots without explicit prompt control
+- `audio_intent.ambient` maps to `[Overall Soundscape]` prompt section (P4: now operator-editable)
+- `audio_intent.music` maps to `[Non-Diegetic Music]` prompt section (P4: now operator-editable)
 - Dialogue/audio controllability is NOT established — observation only
+
+### Reference Generation Prompts (P4)
+
+- Character prompt: `"A character reference photo of {name}. {appearance}. {pose}, neutral studio lighting..."`
+- Environment prompt: `"A single continuous cinematic production design reference photograph of: {description}..."`
+- Default negatives are generic (no project-specific terms — P3 contamination removed in P4.2a)
+- Both prompt and negative_prompt are operator-editable before generation
+- Both are persisted in `ReferenceGenerationRequest` and inspectable afterward
+- Environment references now tracked via proper `ReferenceGenerationRequest` (real `rgreq_` ID)
 
 ---
 

@@ -88,6 +88,20 @@ Characters and environment descriptions are editable in the Reference Manager:
 - Edits trigger staleness propagation on GENERATED references (USER_UPLOAD refs unaffected)
 - IDs, provenance, and shot bindings are preserved
 
+### Enrichment Ordering (P4)
+
+Character enrichment runs BEFORE shot planning so that `ShotSubject.name` snapshots contain enriched names. The enriched character list is used in-memory for shot planning; all entities are persisted in a single atomic transaction.
+
+### Original Idea Preservation (P4)
+
+- `director_context.original_idea`: exact operator input, captured at `POST /projects/from-idea` before WC processing
+- `director_context.description`: WC-processed version (may include WC template text)
+- Legacy projects (created before P4) may lack `original_idea`; UI labels these "Imported Description / legacy project"
+
+### Character Name Resolution (P4)
+
+Operator-facing current state resolves subject display names from `CharacterReference.name` by `character_id`, not from the stale `ShotSubject.name` snapshot. Historical Take provenance always uses immutable values from the `GenerationRequest` that produced the Take.
+
 ---
 
 ## 5. Reference Asset Architecture
@@ -122,6 +136,23 @@ Eligibility: Only `APPROVED + CURRENT` assets are production-eligible.
 ### Reference Generation
 
 Character and environment references are generated via ComfyUI using Z-Image Turbo v1 (default profile). Environment prompts explicitly request empty-set images with no people/characters/action. Environment description is derived from the project idea by the OpenRouter LLM, stripping narrative events.
+
+### Reference Prompt Visibility (P4)
+
+- `GET /characters/{id}/reference-prompt-preview`: returns default prompt + negative before generation
+- `GET /projects/{id}/environment-reference-prompt-preview`: returns default env prompt + negative
+- `GET /reference-generation-requests/{id}`: returns stored prompt/negative after generation
+- Both character and environment generation accept `prompt_override` and `negative_prompt_override`
+- Environment references now create proper `ReferenceGenerationRequest` (real `rgreq_` ID, linked via `source_provenance`)
+
+### Reference Lifecycle Terminology (P4)
+
+- Internal domain: `ReferenceSourceState.CURRENT` / `STALE` (unchanged)
+- Operator-facing UI: badges display `Fresh` / `Outdated`
+- `ReferenceStatus` (CANDIDATE/APPROVED/REJECTED/ARCHIVED) is the review lifecycle
+- `ReferenceSourceState` is freshness relative to source definition — independent of review status
+- `REJECTED + CURRENT` ("Rejected + Fresh") is a valid state: generated from current source, operator judged visually inadequate
+- Selection requires `APPROVED + CURRENT`; rejected refs never selected
 
 ---
 

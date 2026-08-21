@@ -128,6 +128,19 @@ class EnrichmentService:
         new_shots: list[ShotSpecificationV1] = []
         new_plans: list[GenerationPlan] = []
 
+        # --- Character enrichment FIRST (deficient characters only) ---
+        # Must run before shot planning so ShotSubject snapshots get enriched names
+        enriched_chars: list = []
+        project_description = project.director_context.get("description", "")
+        if self._shot_planner is not None and project_description:
+            enriched_chars = self._shot_planner.enrich_characters(
+                characters, project_description,
+            )
+            # Update in-memory character list so shot planning uses enriched names
+            if enriched_chars:
+                enriched_by_id = {c.id: c for c in enriched_chars}
+                characters = [enriched_by_id.get(c.id, c) for c in characters]
+
         # --- Shot planning: only if the project has NO current shots at all ---
         existing_shots = self._shot_repo.get_current_shots_by_project(project_id)
         if not existing_shots:
@@ -139,7 +152,6 @@ class EnrichmentService:
                     for sb in storyboard_shots
                     if sb.data.get("description")
                 ]
-                project_description = project.director_context.get("description", "")
                 wc_context = self._get_wc_scene_context(
                     primary_scene, project.wc_project_id,
                 )
@@ -201,14 +213,6 @@ class EnrichmentService:
                         ctx, shot, project.aspect,
                     )
                     new_plans.append(plan)
-
-        # --- Character enrichment (deficient characters only) ---
-        enriched_chars: list = []
-        project_description = project.director_context.get("description", "")
-        if self._shot_planner is not None and project_description:
-            enriched_chars = self._shot_planner.enrich_characters(
-                characters, project_description,
-            )
 
         # --- Environment derivation (if missing) ---
         updated_project = None

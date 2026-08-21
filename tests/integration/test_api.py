@@ -80,6 +80,24 @@ class TestProjects:
         assert r.status_code == 200
         assert r.json()["title"] == "The Abandoned Hospital"
 
+    def test_get_project_includes_director_context_description(self, api_client):
+        """P4.1: director_context.description must be present for UI Original Idea display."""
+        imp = api_client.post(f"/imports/wind-comic/{TEST_PROJECT_ID}").json()
+        r = api_client.get(f"/projects/{imp['project_id']}")
+        assert r.status_code == 200
+        dc = r.json().get("director_context", {})
+        assert "description" in dc
+        assert len(dc["description"]) > 0
+
+    def test_list_projects_includes_director_context(self, api_client):
+        """P4.1: project list must include director_context for sidebar rendering."""
+        api_client.post(f"/imports/wind-comic/{TEST_PROJECT_ID}")
+        r = api_client.get("/projects")
+        projects = r.json()
+        assert len(projects) >= 1
+        dc = projects[0].get("director_context", {})
+        assert "description" in dc
+
     def test_get_missing_project_404(self, api_client):
         r = api_client.get("/projects/nonexistent")
         assert r.status_code == 404

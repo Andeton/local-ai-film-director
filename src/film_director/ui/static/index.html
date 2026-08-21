@@ -73,7 +73,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .ref-card{background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:6px;margin-bottom:4px}
 .ref-card.ref-selected{border-color:var(--green)}
 .ref-card-inner{display:flex;gap:6px;align-items:flex-start}
-.ref-card img{width:56px;height:56px;object-fit:cover;border-radius:4px;background:#111;cursor:pointer}
+.ref-card img{width:72px;height:72px;object-fit:cover;border-radius:4px;background:#111;cursor:pointer}
 .ref-card-info{flex:1;min-width:0}
 .ref-card-meta{font-size:9px;color:var(--text2);margin-top:2px}
 .ref-card-actions{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
@@ -81,6 +81,15 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .ref-char-name{font-size:11px;font-weight:700;margin-bottom:2px}
 .ref-char-appearance{font-size:9px;color:var(--text2);margin-bottom:4px;max-height:28px;overflow:hidden}
 .ref-char-actions{display:flex;gap:4px;margin-bottom:4px}
+.idea-section{padding:8px;border-bottom:1px solid var(--border);background:rgba(233,69,96,0.04)}
+.idea-label{font-size:9px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;font-weight:700;margin-bottom:3px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none}
+.idea-text{font-size:11px;color:var(--text);line-height:1.5;max-height:80px;overflow-y:auto;transition:max-height 0.2s}
+.idea-text.expanded{max-height:300px}
+.prompt-preview{background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:6px 8px;margin:4px 0 6px}
+.prompt-preview label{font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:0.3px;display:flex;justify-content:space-between;align-items:center}
+.prompt-preview textarea{width:100%;min-height:40px;padding:4px 6px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:10px;font-family:inherit;resize:vertical;margin-top:2px}
+.prompt-details{margin-top:3px;padding:4px 6px;background:rgba(255,255,255,0.02);border-radius:3px;font-size:9px;color:var(--text2);line-height:1.4}
+.prompt-details-toggle{font-size:9px;color:var(--blue);cursor:pointer;border:none;background:none;padding:0;text-decoration:underline}
 </style>
 </head>
 <body>
@@ -88,6 +97,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   <div class="sidebar">
     <div class="sidebar-header"><h1>Film Director</h1><div class="sub" id="project-sub">Loading...</div></div>
     <div class="project-selector" id="project-selector"></div>
+    <div id="idea-section" class="idea-section" style="display:none"></div>
     <ul class="shot-list" id="shot-list"></ul>
     <div id="scene-assembly" style="padding:8px;border-top:1px solid var(--border);margin-top:4px;"></div>
     <div style="padding:4px 8px;border-top:1px solid var(--border);margin-top:4px"><div class="panel-title" style="margin-top:0;display:flex;justify-content:space-between;align-items:center">Activity Log<button class="btn-link" style="font-size:8px" onclick="eventLog=[];renderEventLog()">clear</button></div><div id="event-log" style="max-height:140px;overflow-y:auto"></div></div>
@@ -128,6 +138,7 @@ function renderEventLog(){
 async function api(p,o){const r=await fetch(p,o);if(!r.ok){const e=await r.json().catch(()=>({error:r.statusText}));throw new Error(e.error||e.detail||r.statusText)}return r.json()}
 function toast(m,ok=true){const e=document.createElement('div');e.className='toast '+(ok?'toast-ok':'toast-err');e.textContent=m;document.body.appendChild(e);setTimeout(()=>{e.style.opacity='0';setTimeout(()=>e.remove(),300)},3000)}
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function sourceStateLabel(s){return s==='current'?'Fresh':s==='stale'?'Outdated':s}
 
 async function init(){
   projects=await api('/projects');
@@ -150,11 +161,43 @@ function renderProjects(){
     +projects.map(p=>`<div class="project-card${currentProject&&currentProject.id===p.id?' selected':''}" onclick="selectProject('${p.id}')">${esc((p.title||p.id).substring(0,35))}</div>`).join('');
 }
 
+function renderIdeaSection(){
+  const el=document.getElementById('idea-section');
+  if(!currentProject){el.style.display='none';return}
+  const dc=currentProject.director_context||{};
+  const originalIdea=dc.original_idea||'';
+  const importedDesc=dc.description||'';
+  if(!originalIdea&&!importedDesc){el.style.display='none';return}
+  el.style.display='';
+  const isExpanded=el.dataset.expanded==='1';
+  if(originalIdea){
+    el.innerHTML=`<div class="idea-label" onclick="toggleIdea()">Original Idea <span style="font-size:8px;color:var(--text2)">${isExpanded?'collapse':'expand'}</span></div><div class="idea-text${isExpanded?' expanded':''}">${esc(originalIdea)}</div><button class="btn-link" style="font-size:8px;margin-top:2px" onclick="showIdeaModal('Original Idea',${JSON.stringify(JSON.stringify(originalIdea))})">View Full</button>`;
+  }else{
+    el.innerHTML=`<div class="idea-label" onclick="toggleIdea()">Imported Description <span style="font-size:8px;color:var(--text2)">legacy project</span></div><div class="idea-text${isExpanded?' expanded':''}" style="opacity:0.7">${esc(importedDesc)}</div><button class="btn-link" style="font-size:8px;margin-top:2px" onclick="showIdeaModal('Imported Description',${JSON.stringify(JSON.stringify(importedDesc))})">View Full</button>`;
+  }
+}
+function toggleIdea(){
+  const el=document.getElementById('idea-section');
+  el.dataset.expanded=el.dataset.expanded==='1'?'0':'1';
+  renderIdeaSection();
+}
+function showIdeaModal(title,text){
+  document.getElementById('modal-container').innerHTML=`
+    <div class="modal-overlay" onclick="closeModal()">
+      <div class="modal" onclick="event.stopPropagation()" style="width:600px">
+        <h2>${esc(title)}</h2>
+        <div style="white-space:pre-wrap;font-size:12px;line-height:1.6;max-height:60vh;overflow-y:auto;padding:8px;background:var(--bg4);border-radius:6px">${esc(text)}</div>
+        <div class="actions"><button class="btn" onclick="closeModal()">Close</button></div>
+      </div>
+    </div>`;
+}
+
 async function selectProject(pid){
   currentProject=projects.find(p=>p.id===pid)||await api(`/projects/${pid}`);
+  _projectChars=null; // reset character cache for subject picker
   localStorage.setItem('film_director.selected_project_id',currentProject.id);
   document.getElementById('project-sub').textContent=currentProject.id;
-  renderProjects();
+  renderProjects();renderIdeaSection();
   await loadShots();
   if(currentShots.length){await selectShot(currentShots[0].id)}
   else{document.getElementById('main-panel').innerHTML='<div class="loading">No shots yet. Use shot plan editor.</div>';showShotPlanEditor()}
@@ -192,6 +235,10 @@ async function selectShot(shotId){
   selectedShotId=shotId;draftPrompt=null;draftDuration=null;draftSeedMode='random';draftSeedValue=null;
   localStorage.setItem('film_director.selected_shot_id',shotId);
   renderShotList();
+  // Ensure characters loaded for subject name resolution
+  if(!_projectChars&&currentProject){
+    try{_projectChars=await api(`/projects/${currentProject.id}/characters`)}catch(e){_projectChars=[]}
+  }
   // Rediscover active generation on page refresh / shot switch
   if(!activeJobPollers[shotId])await checkActiveJobs(shotId);
   await refreshPreview();
@@ -209,6 +256,8 @@ async function refreshPreview(){
   renderMain(shot,preview);renderPanel(shot,preview);
 }
 
+let _projectChars=null; // cached for subject picker
+
 function renderMain(shot,preview){
   const panel=document.getElementById('main-panel');
   const takes=shotTakesCache[shot.id]||[];const idx=currentShots.indexOf(shot);
@@ -217,26 +266,172 @@ function renderMain(shot,preview){
   const showTake=ap||rv[rv.length-1]||takes[takes.length-1];
   let videoHtml='<div class="no-video">No takes generated</div>';
   if(showTake&&showTake.video_path)videoHtml=`<video controls autoplay loop muted><source src="/media/${showTake.video_path.replace(/\\\\/g,'/')}" type="video/mp4"></video>`;
+
+  // Subject names — resolve current canonical name by character_id
+  const subjects=shot.subjects||[];
+  const subjectHtml=subjects.map((s,i)=>{
+    const ch=(_projectChars||[]).find(c=>c.id===s.character_id);
+    const displayName=ch?ch.name:s.name;
+    return `<span class="badge badge-available" style="margin-right:2px;display:inline-flex;align-items:center;gap:3px">${esc(displayName)}<button style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;padding:0 1px;line-height:1" onclick="removeSubject('${shot.id}','${s.character_id}')" title="Remove ${esc(displayName)}">x</button></span>`;
+  }).join('')||'<span style="color:var(--text2);font-size:10px">None</span>';
+
+  // Audio intent
+  const ai=shot.audio_intent||{};
+  const lighting=shot.lighting||{};
+  const env=shot.environment||{};
+
+  // Prompt
   const promptVal=draftPrompt!==null?draftPrompt:(preview?preview.prompt_text:'');
   const isOverride=draftPrompt!==null;
-  const src=isOverride?'operator_override':(preview?preview.prompt_source:'generated');
+  const promptSrc=isOverride?'operator_override':(preview?preview.prompt_source:'generated');
+
+  // Shot size options
+  const sizes=['extreme_wide','wide','medium_wide','medium','medium_close','close_up','extreme_close'];
+  const sizeOpts=sizes.map(s=>`<option value="${s}" ${cam.shot_size===s?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('');
+
   panel.innerHTML=`
-    <div class="shot-title">Shot ${idx+1}</div>
-    <div class="meta-row">
-      <div><div class="meta-label">Duration</div><div class="meta-value">${preview?preview.duration_sec+'s → '+preview.resolved_frames+' frames':shot.duration_sec+'s'}</div></div>
-      <div><div class="meta-label">Camera</div><div class="meta-value">${esc(cam.shot_size||'')} ${esc(cam.movement||'')}</div></div>
-      <div><div class="meta-label">Workflow</div><div class="meta-value">${preview?preview.workflow_id:''}</div></div>
-    </div>
-    <div class="section"><div class="section-title">Shot Description</div><div class="desc-box">${esc(shot.action||'')}</div></div>
-    ${promptVal?`<div class="section"><div class="section-title">Generation Prompt <span class="badge badge-${src}">${src==='operator_override'?'Override':'Generated'}</span></div>
-      <textarea class="prompt-area" id="prompt-edit" oninput="onPromptEdit(this.value)">${esc(promptVal)}</textarea>
-      ${isOverride?'<button class="btn-link" style="margin-top:3px" onclick="resetPrompt()">Reset to generated</button>':''}
-    </div>`:''}
+    <div class="shot-title">Shot ${idx+1} — Production Editor</div>
+
     <div class="section"><div class="section-title">Video</div><div class="video-wrap">${videoHtml}</div></div>
+
+    <div class="section"><div class="section-title">Shot Inputs</div>
+      <div class="setting"><label>Action</label><textarea id="ed-action" style="min-height:40px;font-size:11px">${esc(shot.action||'')}</textarea></div>
+      <div class="setting"><label>Dramatic Purpose</label><input type="text" id="ed-purpose" value="${esc(shot.dramatic_purpose||'')}"></div>
+
+      <div class="setting"><label>Subjects</label>
+        <div id="ed-subjects" style="margin-bottom:4px">${subjectHtml}</div>
+        <div style="display:flex;gap:4px;align-items:center">
+          <select id="ed-add-char" style="flex:1;font-size:10px"><option value="">+ Add character...</option></select>
+          <button class="btn btn-sm" onclick="addSubjectFromPicker('${shot.id}')">Add</button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px">
+        <div class="setting" style="flex:1"><label>Camera Size</label><select id="ed-cam-size" style="font-size:10px">${sizeOpts}</select></div>
+        <div class="setting" style="flex:1"><label>Angle</label><input type="text" id="ed-cam-angle" value="${esc(cam.angle||'')}" placeholder="eye_level, low, high..." style="font-size:10px"></div>
+        <div class="setting" style="flex:1"><label>Movement</label><input type="text" id="ed-cam-move" value="${esc(cam.movement||'')}" placeholder="static, dolly_in..." style="font-size:10px"></div>
+      </div>
+
+      <div style="display:flex;gap:8px">
+        <div class="setting" style="flex:1"><label>Duration (sec)</label><input type="number" id="ed-duration" value="${shot.duration_sec}" step="0.5" min="1" max="15" style="font-size:10px"></div>
+        <div class="setting" style="flex:1"><label>Lighting</label><input type="text" id="ed-lighting" value="${esc(Object.entries(lighting).map(([k,v])=>k+':'+v).join(', '))}" placeholder="e.g. dim warm practical, bright overhead, candlelight" style="font-size:10px"></div>
+      </div>
+
+      <div style="display:flex;gap:8px">
+        <div class="setting" style="flex:1"><label>Ambient Sound</label><input type="text" id="ed-audio-ambient" value="${esc(ai.ambient||'')}" placeholder="e.g. heavy rain, distant traffic, eerie silence" style="font-size:10px"></div>
+        <div class="setting" style="flex:1"><label>Music</label><input type="text" id="ed-audio-music" value="${esc(ai.music||'')}" placeholder="e.g. tense strings, none, soft piano" style="font-size:10px"></div>
+      </div>
+
+      <div style="margin-top:6px"><button class="btn btn-primary btn-sm" onclick="saveShot('${shot.id}')">Save Shot</button></div>
+    </div>
+
+    <div class="section"><div class="section-title">H3 Generation Prompt <span class="badge badge-${promptSrc}">${promptSrc==='operator_override'?'Override':'Generated from inputs'}</span></div>
+      ${promptVal?`<textarea class="prompt-area" id="prompt-edit" oninput="onPromptEdit(this.value)" style="min-height:180px">${esc(promptVal)}</textarea>
+        ${isOverride?'<button class="btn-link" style="margin-top:3px" onclick="resetPrompt()">Reset to generated</button>':''}
+      `:`<div style="color:var(--text2);font-size:10px">Save shot inputs to generate prompt preview.</div>`}
+    </div>
+
     <div class="section"><div class="section-title">Takes (${takes.length})</div>
       ${takes.length===0?'<div style="color:var(--text2);font-size:11px">No takes</div>':''}
-      ${takes.map(t=>`<div class="take-row"><div class="take-info"><span class="take-num">Take</span> <span class="badge badge-${t.status}">${t.status}</span><div class="take-meta">Seed: ${t.seed} · ${t.id.substring(0,12)}</div></div><div class="take-actions">${t.status==='succeeded'?`<button class="btn btn-approve btn-sm" onclick="approveTake('${t.id}')">Approve</button><button class="btn btn-reject btn-sm" onclick="rejectTake('${t.id}')">Reject</button>`:''}</div></div>`).join('')}
+      ${takes.map(t=>`<div class="take-row">
+        <div class="take-info">
+          <span class="take-num">Take</span> <span class="badge badge-${t.status}">${t.status}</span>
+          <div class="take-meta">Seed: ${t.seed} · ${t.id.substring(0,12)}</div>
+        </div>
+        <div class="take-actions">
+          ${t.status==='succeeded'?`<button class="btn btn-approve btn-sm" onclick="approveTake('${t.id}')">Approve</button><button class="btn btn-reject btn-sm" onclick="rejectTake('${t.id}')">Reject</button>`:''}
+          <button class="prompt-details-toggle" onclick="toggleTakeDetails('${t.id}')">Details</button>
+        </div>
+        <div id="take-details-${t.id}" style="display:none;width:100%"></div>
+      </div>`).join('')}
     </div>`;
+
+  // Populate character picker for subject editing
+  _populateCharPicker(shot);
+}
+
+async function _populateCharPicker(shot){
+  if(!currentProject)return;
+  if(!_projectChars){
+    try{_projectChars=await api(`/projects/${currentProject.id}/characters`)}catch(e){_projectChars=[]}
+  }
+  const sel=document.getElementById('ed-add-char');
+  if(!sel)return;
+  const existing=new Set((shot.subjects||[]).map(s=>s.character_id));
+  for(const ch of _projectChars){
+    if(!existing.has(ch.id)){
+      const opt=document.createElement('option');
+      opt.value=ch.id;opt.textContent=ch.name;
+      sel.appendChild(opt);
+    }
+  }
+}
+
+async function saveShot(shotId){
+  const body={};
+  const actionEl=document.getElementById('ed-action');
+  if(actionEl)body.action=actionEl.value;
+  const purposeEl=document.getElementById('ed-purpose');
+  if(purposeEl)body.dramatic_purpose=purposeEl.value;
+  const camSize=document.getElementById('ed-cam-size');
+  const camAngle=document.getElementById('ed-cam-angle');
+  const camMove=document.getElementById('ed-cam-move');
+  if(camSize)body.camera={shot_size:camSize.value,angle:camAngle?camAngle.value:'',movement:camMove?camMove.value:''};
+  const durEl=document.getElementById('ed-duration');
+  if(durEl)body.duration_sec=parseFloat(durEl.value)||5.0;
+
+  // Lighting: parse "key:val, key:val" into dict
+  const lightEl=document.getElementById('ed-lighting');
+  if(lightEl&&lightEl.value.trim()){
+    const ld={};lightEl.value.split(',').forEach(p=>{const [k,...v]=p.split(':');if(k&&v.length)ld[k.trim()]=v.join(':').trim()});
+    body.lighting=ld;
+  }else{body.lighting={}}
+
+  // Audio intent
+  const ambEl=document.getElementById('ed-audio-ambient');
+  const musEl=document.getElementById('ed-audio-music');
+  const ai={};
+  if(ambEl&&ambEl.value.trim())ai.ambient=ambEl.value.trim();
+  if(musEl&&musEl.value.trim())ai.music=musEl.value.trim();
+  body.audio_intent=ai;
+
+  try{
+    await api(`/shots/${shotId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    toast('Shot saved');
+    draftPrompt=null; // Reset override so new generated prompt shows
+    await loadShots();await selectShot(shotId);
+  }catch(e){toast('Save failed: '+e.message,false)}
+}
+
+async function addSubjectFromPicker(shotId){
+  const sel=document.getElementById('ed-add-char');
+  if(!sel||!sel.value)return;
+  const charId=sel.value;
+  const char=(_projectChars||[]).find(c=>c.id===charId);
+  if(!char)return;
+  const shot=currentShots.find(s=>s.id===shotId);
+  if(!shot)return;
+  const subjects=[...(shot.subjects||[])];
+  if(subjects.some(s=>s.character_id===charId)){toast('Character already in shot',false);return}
+  subjects.push({character_id:charId,name:char.name,ref_images:[]});
+  try{
+    await api(`/shots/${shotId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({subjects})});
+    toast(`Added ${char.name}`);
+    draftPrompt=null;
+    await loadShots();await selectShot(shotId);
+  }catch(e){toast(e.message,false)}
+}
+
+async function removeSubject(shotId,charId){
+  const shot=currentShots.find(s=>s.id===shotId);
+  if(!shot||!shot.subjects)return;
+  const subjects=shot.subjects.filter(s=>s.character_id!==charId);
+  try{
+    await api(`/shots/${shotId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({subjects})});
+    toast('Subject removed');
+    draftPrompt=null;
+    await loadShots();await selectShot(shotId);
+  }catch(e){toast(e.message,false)}
 }
 
 function renderPanel(shot,preview){
@@ -413,6 +608,54 @@ function onSeedChange(v){const n=parseInt(v);draftSeedValue=isNaN(n)?null:n;refr
 
 async function approveTake(id){try{await api(`/takes/${id}/approve`,{method:'POST'});toast('Approved');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
 async function rejectTake(id){try{await api(`/takes/${id}/reject`,{method:'POST'});toast('Rejected');await loadShots();if(selectedShotId)await selectShot(selectedShotId)}catch(e){toast(e.message,false)}}
+
+async function toggleTakeDetails(takeId){
+  const el=document.getElementById('take-details-'+takeId);
+  if(!el)return;
+  if(el.style.display!=='none'){el.style.display='none';return}
+  el.style.display='';
+  el.innerHTML='<div class="prompt-details">Loading generation details...</div>';
+  try{
+    const d=await api(`/takes/${takeId}/generation-details`);
+    if(!d.available){el.innerHTML='<div class="prompt-details" style="color:var(--text2)">Generation details unavailable for this Take.</div>';return}
+
+    // Prompt section
+    const promptPreview=d.prompt_text||'Unavailable';
+    let html='<div class="prompt-details">';
+    html+=`<div style="font-weight:700;margin-bottom:4px;color:var(--text)">Prompt</div>`;
+    html+=`<div style="white-space:pre-wrap;max-height:140px;overflow-y:auto;margin-bottom:6px;background:rgba(0,0,0,0.2);padding:4px 6px;border-radius:3px;font-size:10px;line-height:1.4">${esc(promptPreview)}</div>`;
+
+    // Generation metadata
+    html+=`<div style="font-weight:700;margin-bottom:4px;color:var(--text)">Generation</div>`;
+    html+=`<div>Seed: ${d.seed}</div>`;
+    html+=`<div>Workflow: ${esc(d.workflow_id||'?')} v${esc(d.workflow_version||'?')}</div>`;
+    if(d.submitted_at)html+=`<div>Started: ${new Date(d.submitted_at).toLocaleString()}</div>`;
+    if(d.completed_at)html+=`<div>Completed: ${new Date(d.completed_at).toLocaleString()}</div>`;
+
+    // Input references
+    if(d.reference_snapshot&&d.reference_snapshot.length){
+      html+=`<div style="font-weight:700;margin-top:6px;margin-bottom:4px;color:var(--text)">Input References</div>`;
+      for(const r of d.reference_snapshot){
+        const role=r.reference_kind==='character_body'?`Character: ${r.character_name||'?'}`:r.reference_kind==='environment'?'Environment':r.reference_kind==='continuity_frame'?'Continuity Frame':r.reference_kind;
+        html+=`<div>Pic ${r.picture_index||'?'}: ${esc(role)}`;
+        if(r.reference_asset_id)html+=` <span style="color:var(--text2)">(${r.reference_asset_id.substring(0,14)})</span>`;
+        html+=`</div>`;
+      }
+    }
+
+    // Continuity
+    if(d.continuity_snapshot){
+      const cs=d.continuity_snapshot;
+      html+=`<div style="font-weight:700;margin-top:6px;margin-bottom:4px;color:var(--text)">Continuity</div>`;
+      html+=`<div>From: Shot ${cs.upstream_shot_id?cs.upstream_shot_id.substring(0,14):'?'} / Take ${cs.upstream_take_id?cs.upstream_take_id.substring(0,14):'?'}</div>`;
+    }
+
+    html+=`</div>`;
+    el.innerHTML=html;
+  }catch(e){
+    el.innerHTML='<div class="prompt-details" style="color:var(--text2)">Generation details unavailable.</div>';
+  }
+}
 async function doGenerate(sid){
   const body={};
   if(draftPrompt!==null)body.prompt_override=draftPrompt;
@@ -498,10 +741,11 @@ function renderReferenceManager(chars,refs,proj){
     html+=`<div class="setting"><label>Appearance</label><textarea id="char-app-${ch.id}" style="min-height:48px;font-size:10px">${esc(ch.appearance||'')}</textarea></div>`;
     html+=`<div class="ref-char-actions">`;
     html+=`<button class="btn btn-sm" onclick="saveCharDef('${ch.id}')">Save</button>`;
-    html+=`<button class="btn btn-primary btn-sm" ${refGenerating||!ch.appearance?'disabled':''} onclick="generateRef('${ch.id}','character_body')">Generate Body</button>`;
-    html+=`<button class="btn btn-sm" ${refGenerating||!ch.appearance?'disabled':''} onclick="generateRef('${ch.id}','character_face')">Generate Face</button>`;
+    html+=`<button class="btn btn-primary btn-sm" ${refGenerating||!ch.appearance?'disabled':''} onclick="toggleRefPrompt('char-prompt-${ch.id}','character_body','${ch.id}')">Review Body Prompt</button>`;
+    html+=`<button class="btn btn-sm" ${refGenerating||!ch.appearance?'disabled':''} onclick="toggleRefPrompt('char-prompt-${ch.id}','character_face','${ch.id}')">Review Face Prompt</button>`;
     html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadRef('${ch.id}','character_body',this)">Upload Body</label>`;
     html+=`</div>`;
+    html+=`<div id="char-prompt-${ch.id}" style="display:none"></div>`;
 
     const allCharRefs=[...bodyRefs,...faceRefs];
     for(const ref of allCharRefs){
@@ -525,9 +769,10 @@ function renderReferenceManager(chars,refs,proj){
   }
   html+=`<div class="ref-char-actions" style="margin-bottom:6px">`;
   html+=`<button class="btn btn-sm" onclick="saveEnvDesc()">Save</button>`;
-  html+=`<button class="btn btn-primary btn-sm" ${refGenerating||!envDesc?'disabled':''} onclick="generateEnvRef()">Generate Environment</button>`;
+  html+=`<button class="btn btn-primary btn-sm" ${refGenerating||!envDesc?'disabled':''} onclick="toggleEnvRefPrompt()">Review Env Prompt</button>`;
   html+=`<label class="btn btn-sm" style="cursor:pointer"><input type="file" accept="image/*" style="display:none" onchange="uploadEnvRef(this)">Upload Image</label>`;
   html+=`</div>`;
+  html+=`<div id="env-prompt-preview" style="display:none"></div>`;
   for(const ref of envRefs){
     html+=renderRefCard(ref);
   }
@@ -552,7 +797,7 @@ function renderRefCard(ref){
   const kindBadge=ref.kind==='character_body'?'available':ref.kind==='environment'?'available':'generated';
   html+=`<div><span class="badge badge-${kindBadge}">${kindLabel}</span> `;
   html+=`<span class="badge badge-${ref.status}">${ref.status}</span> `;
-  html+=`<span class="badge badge-${ref.source_state}">${ref.source_state}</span>`;
+  html+=`<span class="badge badge-${ref.source_state}">${sourceStateLabel(ref.source_state)}</span>`;
   if(isPinned)html+=` <span class="badge badge-approved">Pinned</span>`;
   html+=`</div>`;
   html+=`<div class="ref-card-meta">${ref.source} · ${ref.width}x${ref.height} · ${ref.id.substring(0,12)}</div>`;
@@ -571,29 +816,117 @@ function renderRefCard(ref){
     html+=`<button class="btn btn-sm" onclick="refAction('${ref.id}','approve')">Re-approve</button>`;
     html+=`<button class="btn btn-sm" onclick="refAction('${ref.id}','archive')">Archive</button>`;
   }
-  html+=`</div></div></div></div>`;
+  html+=`</div></div>`;
+  // Generation prompt details (P4.3)
+  if(ref.source==='generated'&&ref.source_provenance){
+    html+=`<div><button class="prompt-details-toggle" onclick="toggleRefDetails('${ref.id}','${ref.source_provenance}')">Generation Details</button><div id="ref-details-${ref.id}" style="display:none"></div></div>`;
+  }else if(ref.source==='user_upload'){
+    html+=`<div class="ref-card-meta" style="margin-top:3px">User upload</div>`;
+  }
+  html+=`</div>`;
   return html;
 }
 
 function previewRef(url){
   document.getElementById('modal-container').innerHTML=`
     <div class="modal-overlay" onclick="closeModal()">
-      <div style="max-width:80vw;max-height:80vh"><img src="${url}" style="max-width:100%;max-height:80vh;border-radius:8px"></div>
+      <div style="max-width:90vw;max-height:90vh;padding:8px"><img src="${url}" style="max-width:100%;max-height:88vh;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.5)"></div>
     </div>`;
 }
 
-async function generateRef(characterId,kind){
+// --- Prompt preview and generation with overrides (P4.2) ---
+
+let _activeRefPrompt=null; // tracks which prompt panel is open
+
+async function toggleRefPrompt(containerId,kind,characterId){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  if(el.style.display!=='none'&&el.dataset.kind===kind){
+    el.style.display='none';_activeRefPrompt=null;return;
+  }
+  el.style.display='';
+  el.dataset.kind=kind;
+  _activeRefPrompt={containerId,kind,characterId};
+  el.innerHTML='<div style="font-size:10px;color:var(--text2)">Loading prompt preview...</div>';
+  try{
+    const preview=await api(`/characters/${characterId}/reference-prompt-preview?kind=${kind}`);
+    el.innerHTML=`<div class="prompt-preview">
+      <label>Prompt <span class="badge badge-generated">Generated Default</span></label>
+      <textarea id="ref-prompt-text-${containerId}">${esc(preview.prompt)}</textarea>
+      <label style="margin-top:4px">Negative Prompt</label>
+      <textarea id="ref-neg-text-${containerId}" style="min-height:28px">${esc(preview.negative_prompt)}</textarea>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="btn btn-primary btn-sm" ${refGenerating?'disabled':''} onclick="doGenerateRef('${characterId}','${kind}','${containerId}')">Generate with this prompt</button>
+        <button class="btn btn-sm" onclick="toggleRefPrompt('${containerId}','${kind}','${characterId}')">Cancel</button>
+      </div>
+    </div>`;
+  }catch(e){el.innerHTML=`<div style="font-size:10px;color:var(--red)">${esc(e.message)}</div>`}
+}
+
+async function doGenerateRef(characterId,kind,containerId){
   if(refGenerating){toast('Generation already in progress',false);return}
+  const promptEl=document.getElementById('ref-prompt-text-'+containerId);
+  const negEl=document.getElementById('ref-neg-text-'+containerId);
+  const body={kind};
+  if(promptEl)body.prompt_override=promptEl.value;
+  if(negEl)body.negative_prompt_override=negEl.value;
   refGenerating=true;
   logEvent('ref_generate','running',`Generating ${kind} for ${characterId.substring(0,12)}...`);
-  document.querySelectorAll('.ref-char-actions button,.ref-char-actions label').forEach(b=>b.disabled=true);
   try{
     await api(`/characters/${characterId}/references/generate`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({kind}),
+      body:JSON.stringify(body),
     });
     logEvent('ref_generate','success',`${kind} generated (candidate)`);
+    try{await api('/system/free-memory',{method:'POST'})}catch(e){}
+    _activeRefPrompt=null;
+    await showReferenceManager();
+  }catch(e){
+    logEvent('ref_generate','error',e.message);
+  }finally{
+    refGenerating=false;
+  }
+}
+
+async function toggleEnvRefPrompt(){
+  const el=document.getElementById('env-prompt-preview');
+  if(!el||!currentProject)return;
+  if(el.style.display!=='none'){el.style.display='none';return}
+  el.style.display='';
+  el.innerHTML='<div style="font-size:10px;color:var(--text2)">Loading prompt preview...</div>';
+  try{
+    const preview=await api(`/projects/${currentProject.id}/environment-reference-prompt-preview`);
+    el.innerHTML=`<div class="prompt-preview">
+      <label>Prompt <span class="badge badge-generated">Generated Default</span></label>
+      <textarea id="env-ref-prompt-text">${esc(preview.prompt)}</textarea>
+      <label style="margin-top:4px">Negative Prompt</label>
+      <textarea id="env-ref-neg-text" style="min-height:28px">${esc(preview.negative_prompt)}</textarea>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="btn btn-primary btn-sm" ${refGenerating?'disabled':''} onclick="doGenerateEnvRef()">Generate with this prompt</button>
+        <button class="btn btn-sm" onclick="document.getElementById('env-prompt-preview').style.display='none'">Cancel</button>
+      </div>
+    </div>`;
+  }catch(e){el.innerHTML=`<div style="font-size:10px;color:var(--red)">${esc(e.message)}</div>`}
+}
+
+async function doGenerateEnvRef(){
+  if(!currentProject)return;
+  if(refGenerating){toast('Generation already in progress',false);return}
+  const promptEl=document.getElementById('env-ref-prompt-text');
+  const negEl=document.getElementById('env-ref-neg-text');
+  const body={};
+  if(promptEl)body.prompt_override=promptEl.value;
+  if(negEl)body.negative_prompt_override=negEl.value;
+  refGenerating=true;
+  logEvent('ref_generate','running','Generating environment reference...');
+  try{
+    await api(`/projects/${currentProject.id}/environment-references/generate`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body),
+    });
+    logEvent('ref_generate','success','Environment reference generated (candidate)');
     try{await api('/system/free-memory',{method:'POST'})}catch(e){}
     await showReferenceManager();
   }catch(e){
@@ -601,6 +934,32 @@ async function generateRef(characterId,kind){
   }finally{
     refGenerating=false;
   }
+}
+
+// --- Reference card prompt details (P4.3) ---
+
+async function toggleRefDetails(refId,requestId){
+  const el=document.getElementById('ref-details-'+refId);
+  if(!el)return;
+  if(el.style.display!=='none'){el.style.display='none';return}
+  el.style.display='';
+  el.innerHTML='<div class="prompt-details">Loading...</div>';
+  try{
+    const req=await api(`/reference-generation-requests/${requestId}`);
+    el.innerHTML=`<div class="prompt-details">
+      <div><strong>Prompt:</strong> ${esc(req.prompt)}</div>
+      ${req.negative_prompt?`<div style="margin-top:2px"><strong>Negative:</strong> ${esc(req.negative_prompt)}</div>`:''}
+      <div style="margin-top:2px"><strong>Seed:</strong> ${req.seed} · <strong>Kind:</strong> ${req.requested_kind}</div>
+    </div>`;
+  }catch(e){
+    el.innerHTML=`<div class="prompt-details" style="color:var(--text2)">Prompt details unavailable</div>`;
+  }
+}
+
+// --- Legacy compatibility wrappers (removed direct generate) ---
+
+async function generateRef(characterId,kind){
+  toggleRefPrompt('char-prompt-'+characterId,kind,characterId);
 }
 
 async function uploadRef(characterId,kind,input){
@@ -649,21 +1008,7 @@ async function saveEnvDesc(){
 }
 
 async function generateEnvRef(){
-  if(!currentProject)return;
-  if(refGenerating){toast('Generation already in progress',false);return}
-  refGenerating=true;
-  logEvent('ref_generate','running','Generating environment reference...');
-  document.querySelectorAll('.ref-char-actions button,.ref-char-actions label').forEach(b=>b.disabled=true);
-  try{
-    await api(`/projects/${currentProject.id}/environment-references/generate`,{method:'POST'});
-    logEvent('ref_generate','success','Environment reference generated (candidate)');
-    try{await api('/system/free-memory',{method:'POST'})}catch(e){}
-    await showReferenceManager();
-  }catch(e){
-    logEvent('ref_generate','error',e.message);
-  }finally{
-    refGenerating=false;
-  }
+  toggleEnvRefPrompt();
 }
 
 async function uploadEnvRef(input){

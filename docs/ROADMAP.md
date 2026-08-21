@@ -19,43 +19,38 @@
 | P2 | 2026-08-18 | First complete 5-shot scene: generated, approved, assembled. HUMAN PASS |
 | P3 | 2026-08-20 | 6-shot scene completion + durable async generation. 1923 tests. HUMAN PASS |
 
-### P3 Scene Completion (2026-08-20)
+---
 
-**Production:** All 6 shots generated, approved, assembled. 48.741s scene. HUMAN PASS.
+## In Progress
 
-**Async durable generation:**
-- UI generation moved from synchronous blocking to persistent queue lifecycle
-- Embedded QueueWorker background thread in FastAPI app
-- `POST /shots/{id}/generate` returns 202 immediately
-- Timeout leaves job claimed for recovery, not permanently failed
-- Recovery checks ComfyUI for failed requests with prompt_id (State 12b)
-- UI polling, page-refresh discovery, duplicate protection
-- Queue overrides for operator prompt/duration customization
-- Shots 5 and 6 recovered from old-path timeout orphans without regeneration
+### P4 — Operator Workflow & Prompt Control
 
-**Reference/enrichment (prior session):**
-- Reference Management UI, character/environment enrichment
-- OpenRouter shot planning, environment description derivation
-- H3 image-pack integration, continuity, slot pruning
-- ComfyUI error propagation, timeout recovery, browser persistence
+**Branch:** `p4-operator-workflow` (1997 tests)
+
+Completed:
+- Product specification (docs/PRODUCT_SPEC.md)
+- Original idea preservation + legacy degradation
+- Reference prompt preview/control + provenance
+- P3 story contamination fix
+- Shot Production Editor (semantic inputs → compiled H3 prompt)
+- Take generation provenance (historical immutable)
+- Character data-lineage fix (enrichment ordering, name resolution)
+- UX cleanup (Fresh/Outdated badges, Review Prompt buttons, thumbnails, subject chips, field labels, prompt area, idea modal, structured Take details)
+
+Remaining (human acceptance demonstrated):
+- G14: Dialogue control — H3 controllability not established
+- G17: Side-by-side Take comparison
+- G20-G23: Lower-priority polish
 
 ---
 
 ## Next Priorities
 
-Choose from demonstrated production gaps:
+After P4 human acceptance:
 
-### 1. H3 Prompt Compilation (highest demonstrated value)
-
-Shot action text is used directly as the H3 video prompt with no optimization step. An intermediate "compile shot direction into optimal H3 prompt" could improve generation quality systematically. This is the most impactful demonstrated gap from P3 production.
-
-### 2. Second Production Project
-
-Run a second complete idea-to-scene pipeline to validate generalization beyond the first project. Would surface any project-specific assumptions in the current pipeline.
-
-### 3. AI Reviewer (M8)
-
-Automated quality assessment of generated Takes before human review. Would reduce operator burden for multi-take evaluation.
+1. **Second production project** — validate pipeline generalization beyond P3 project
+2. **H3 Prompt Compilation** — LLM-optimized prompts from shot direction
+3. **Environment View Packs** — multi-view environment references for varied camera angles
 
 ---
 
@@ -65,20 +60,6 @@ Automated quality assessment of generated Takes before human review. Would reduc
 |---|---|
 | LTX-2.3 fallback | DEFERRED — H3 image-pack works |
 | Broad model routing | DEFERRED |
-| Additional model adapters | DEFERRED |
-| CapabilityRegistry expansion | FROZEN |
-| Audio/dialogue control | OBSERVATION — H3 generates spontaneous dialogue |
+| AI reviewer (M8) | DEFERRED |
+| Audio/dialogue control | OBSERVATION — H3 controllability not established |
 | Modern frontend | DEFERRED |
-
----
-
-## Known Limitations
-
-| Limitation | Impact | Status |
-|---|---|---|
-| WC produces generic placeholder content | Project description compensates | KNOWN |
-| Primary-subject slot ordering | Open design question, no demonstrated failure | OPEN |
-| No H3 prompt compilation | Shot text used directly | DESIGN_GAP |
-| FLF has no ref_images | Legacy fallback only | MITIGATED by image-pack |
-| Windows backslashes in Take paths | Server normalizes | LOW |
-| Shot 6 anomalous render duration (73.8 min) | Single observation, cause unknown | OBSERVATION |

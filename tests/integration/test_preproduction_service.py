@@ -94,7 +94,7 @@ class FakeImportService:
         self._error = error
         self.calls: list[tuple] = []
 
-    def import_project(self, wc_project_id: str) -> ImportResult:
+    def import_project(self, wc_project_id: str, original_idea: str | None = None) -> ImportResult:
         self.calls.append(("import_project", wc_project_id))
         if self._error:
             raise self._error

@@ -111,7 +111,7 @@ class ImportService:
     # import_project
     # ------------------------------------------------------------------
 
-    def import_project(self, wc_project_id: str) -> ImportResult:
+    def import_project(self, wc_project_id: str, original_idea: str | None = None) -> ImportResult:
         """Import or reimport a WC project atomically.
 
         On reimport:
@@ -141,6 +141,8 @@ class ImportService:
 
                 # Build director_context from plan + project description
                 director_context = {}
+                if original_idea:
+                    director_context["original_idea"] = original_idea
                 if bundle.project.description:
                     director_context["description"] = bundle.project.description
                 if bundle.director_plan is not None:

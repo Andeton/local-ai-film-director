@@ -558,6 +558,10 @@ def create_router(
             raise HTTPException(status_code=404, detail="Shot not found")
         plan = plan_repo.get_current_plan_by_shot(shot_id)
         if plan is None:
+            # Fall back to latest plan (may be outdated after shot edit) for preview
+            all_plans = plan_repo.get_plans_by_shot(shot_id)
+            plan = all_plans[-1] if all_plans else None
+        if plan is None:
             raise HTTPException(status_code=404, detail="No generation plan")
 
         # Determine project
@@ -597,6 +601,9 @@ def create_router(
             else:
                 continuity_blocked = True
 
+        # Load characters for prompt compilation and reference resolution
+        characters = char_repo.get_characters_by_project(project_id) if project_id and char_repo else []
+
         # Resolve references — per-subject, matching GenerationService behavior
         refs = ref_asset_repo.list_by_project(project_id) if project_id and ref_asset_repo else []
         env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "environment"), None)
@@ -633,7 +640,7 @@ def create_router(
         frames = _seconds_to_grid_frames(effective_duration)
         actual_duration = round(frames / 24.0, 3)
 
-        # Prompt (operator override or existing artifact)
+        # Prompt (operator override, existing artifact, or freshly compiled)
         prompt_text = ""
         prompt_source = "generated"
         existing_prompt = None
@@ -648,6 +655,40 @@ def create_router(
             prompt_source = "operator_override"
         elif existing_prompt:
             prompt_text = existing_prompt.rendered_prompt_text
+        else:
+            # No existing artifact — compile a preview from current shot inputs
+            try:
+                from film_director.generation.h3_prompt import H3PromptBuilder
+                from film_director.generation.h3_types import H3ReferenceBinding
+                builder = H3PromptBuilder()
+                preview_bindings = []
+                pic_i = 1
+                for s in (shot.subjects or []):
+                    ch = next((c for c in characters if c.id == s.character_id), None)
+                    if ch:
+                        preview_bindings.append(H3ReferenceBinding(
+                            reference_asset_id="preview",
+                            reference_kind="character_body",
+                            subject_index=pic_i,
+                            character_id=ch.id,
+                            character_name=ch.name,
+                            appearance=ch.appearance or "",
+                            picture_index=pic_i,
+                            local_path="preview_placeholder",
+                            content_sha256="0" * 64,
+                        ))
+                        pic_i += 1
+                if preview_bindings:
+                    # Align plan version with shot for preview compilation
+                    preview_plan = plan.model_copy(update={
+                        "shot_version": shot.version,
+                        "duration_sec": duration_sec if duration_sec is not None else plan.duration_sec,
+                    })
+                    h3_prompt = builder.build(shot, preview_plan, preview_bindings)
+                    prompt_text = h3_prompt.rendered_prompt_text
+            except Exception as _compile_err:
+                import logging as _lg
+                _lg.getLogger(__name__).warning("Prompt preview compilation failed: %s", _compile_err, exc_info=True)
 
         # Seed resolution
         effective_seed = seed
@@ -662,7 +703,8 @@ def create_router(
 
         # Picture 1: primary character identity
         if char_ref:
-            char_name = next((s.name for s in (shot.subjects or []) if s.character_id == char_ref.character_id), "Character")
+            # Resolve current canonical name by character_id (not stale snapshot)
+            char_name = next((c.name for c in characters if c.id == char_ref.character_id), None) or next((s.name for s in (shot.subjects or []) if s.character_id == char_ref.character_id), "Character")
             pictures.append({
                 "picture_index": pic_idx, "role": f"CHARACTER: {char_name}",
                 "reference_id": char_ref.id, "kind": char_ref.kind.value,
@@ -700,7 +742,7 @@ def create_router(
 
         # Remaining slots: additional character refs (2nd+ subjects)
         for extra_ref in shot_char_refs[1:]:
-            extra_name = next((s.name for s in (shot.subjects or []) if s.character_id == extra_ref.character_id), "Character")
+            extra_name = next((c.name for c in characters if c.id == extra_ref.character_id), None) or next((s.name for s in (shot.subjects or []) if s.character_id == extra_ref.character_id), "Character")
             pictures.append({
                 "picture_index": pic_idx, "role": f"CHARACTER: {extra_name}",
                 "reference_id": extra_ref.id, "kind": extra_ref.kind.value,
@@ -802,6 +844,17 @@ def create_router(
         req = request_repo.get_request(request_id)
         if req is None:
             raise HTTPException(status_code=404, detail="Generation request not found")
+        return req.model_dump()
+
+    @router.get("/reference-generation-requests/{request_id}")
+    def get_reference_generation_request(request_id: str) -> dict:
+        """Retrieve a reference generation request with prompt details."""
+        _m5_guard()
+        if ref_generation_service is None:
+            raise HTTPException(status_code=501, detail="Reference management not available")
+        req = ref_generation_service._request_repo.get(request_id)
+        if req is None:
+            raise HTTPException(status_code=404, detail="Reference generation request not found")
         return req.model_dump()
 
     @router.get("/integrations/comfyui/health")
@@ -979,6 +1032,27 @@ def create_router(
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
+    @router.get("/characters/{character_id}/reference-prompt-preview")
+    def character_reference_prompt_preview(
+        character_id: str,
+        kind: str = Query(default="character_body"),
+    ) -> dict:
+        """Preview the default prompt for character reference generation."""
+        from film_director.generation.reference_generator import (
+            build_character_prompt,
+            DEFAULT_CHARACTER_NEGATIVE,
+        )
+        char = _resolve_character(character_id)
+        ref_kind = ReferenceKind(kind)
+        prompt = build_character_prompt(char.name, char.appearance or "", ref_kind)
+        return {
+            "prompt": prompt,
+            "negative_prompt": DEFAULT_CHARACTER_NEGATIVE,
+            "character_id": character_id,
+            "character_name": char.name,
+            "kind": kind,
+        }
+
     @router.post("/characters/{character_id}/references/generate")
     def generate_reference(
         character_id: str,
@@ -1143,8 +1217,31 @@ def create_router(
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
+    @router.get("/projects/{project_id}/environment-reference-prompt-preview")
+    def environment_reference_prompt_preview(project_id: str) -> dict:
+        """Preview the default prompt for environment reference generation."""
+        from film_director.generation.reference_generator import (
+            build_environment_prompt,
+            DEFAULT_ENVIRONMENT_NEGATIVE,
+        )
+        p = project_repo.get_project(project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        env_description = p.director_context.get("environment_description", "")
+        if not env_description or not env_description.strip():
+            raise HTTPException(status_code=422, detail="No environment description")
+        prompt = build_environment_prompt(env_description)
+        return {
+            "prompt": prompt,
+            "negative_prompt": DEFAULT_ENVIRONMENT_NEGATIVE,
+            "project_id": project_id,
+        }
+
     @router.post("/projects/{project_id}/environment-references/generate")
-    def generate_environment_reference(project_id: str) -> dict:
+    def generate_environment_reference(
+        project_id: str,
+        body: GenerateReferenceRequest = Body(default=GenerateReferenceRequest()),
+    ) -> dict:
         """Generate an environment reference from persisted environment description."""
         _m5_guard()
         p = project_repo.get_project(project_id)
@@ -1163,6 +1260,9 @@ def create_router(
         result = ref_generation_service.generate_environment_reference(
             project_id=project_id,
             environment_description=env_description,
+            prompt_override=body.prompt_override,
+            negative_prompt_override=body.negative_prompt_override,
+            seed=body.seed,
         )
         return {
             "asset": result.asset.model_dump(),
@@ -1372,6 +1472,52 @@ def create_router(
     @router.post("/takes/{take_id}/unfavorite")
     def unfavorite_take(take_id: str) -> dict:
         return _take_lifecycle(take_id, "unfavorite")
+
+    @router.get("/takes/{take_id}/generation-details")
+    def get_take_generation_details(take_id: str) -> dict:
+        """Historical generation provenance for a Take.
+
+        Returns the immutable GenerationRequest snapshot that produced this Take,
+        plus the rendered H3 prompt text. All data is historical — editing the
+        current shot does NOT change what is returned here.
+        """
+        if take_repo is None:
+            raise HTTPException(status_code=501, detail="Take management not available")
+        take = take_repo.get_take(take_id)
+        if take is None:
+            raise HTTPException(status_code=404, detail="Take not found")
+        if request_repo is None:
+            raise HTTPException(status_code=501, detail="Generation requests not available")
+        gen_req = request_repo.get_request(take.generation_request_id)
+        if gen_req is None:
+            return {"take_id": take_id, "available": False}
+
+        # Resolve the historical prompt text from the H3PromptV1 artifact
+        prompt_text = None
+        try:
+            h3_prompt = generation_service._prompt_repo.get_prompt(gen_req.prompt_artifact_id)
+            if h3_prompt:
+                prompt_text = h3_prompt.rendered_prompt_text
+        except Exception:
+            pass
+
+        return {
+            "take_id": take_id,
+            "available": True,
+            "generation_request_id": gen_req.id,
+            "prompt_text": prompt_text,
+            "prompt_artifact_id": gen_req.prompt_artifact_id,
+            "seed": gen_req.seed,
+            "take_number": gen_req.take_number,
+            "workflow_id": gen_req.workflow_definition_id,
+            "workflow_version": gen_req.workflow_definition_version,
+            "reference_snapshot": gen_req.reference_snapshot,
+            "continuity_snapshot": gen_req.continuity_snapshot,
+            "parameters_snapshot": gen_req.parameters_snapshot,
+            "status": gen_req.status,
+            "submitted_at": gen_req.submitted_at,
+            "completed_at": gen_req.completed_at,
+        }
 
     # ---------------------------------------------------------------
     # M7 — Continuity

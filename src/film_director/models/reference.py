@@ -148,10 +148,11 @@ class ReferenceAsset(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ReferenceGenerationRequest(BaseModel):
-    """Immutable snapshot of a character reference generation request.
+    """Immutable snapshot of a reference generation request.
 
     Once inserted, content fields NEVER change.
-    Only CHARACTER_FACE and CHARACTER_BODY are valid requested_kind values.
+    Supports CHARACTER_FACE, CHARACTER_BODY, and ENVIRONMENT kinds.
+    For ENVIRONMENT, character_id is '__environment__'.
     """
 
     id: str
@@ -201,8 +202,6 @@ class ReferenceGenerationRequest(BaseModel):
     def _validate_kind(self):
         if self.requested_kind == ReferenceKind.STORYBOARD:
             raise ValueError("STORYBOARD is not valid for generation requests")
-        if self.requested_kind == ReferenceKind.ENVIRONMENT:
-            raise ValueError("ENVIRONMENT is not valid for character generation requests")
         return self
 
 

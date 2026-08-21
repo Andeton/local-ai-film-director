@@ -40,18 +40,19 @@ from film_director.services.reference_service import _compute_sha256, _validate_
 logger = logging.getLogger(__name__)
 
 _SHA256_BUF = 65_536
-_DEFAULT_NEGATIVE = "text, labels, watermark, blurry, low quality, deformed, split panels, grid, multiple views, character sheet"
-_ENV_NEGATIVE = (
+DEFAULT_CHARACTER_NEGATIVE = "text, labels, watermark, blurry, low quality, deformed, split panels, grid, multiple views, character sheet"
+_DEFAULT_NEGATIVE = DEFAULT_CHARACTER_NEGATIVE  # backward compat
+DEFAULT_ENVIRONMENT_NEGATIVE = (
     "text, labels, watermark, blurry, low quality, "
     "people, person, human, character, figure, hand, face, "
     "collage, contact sheet, storyboard, split screen, multiple panels, "
     "grid, inset, border, picture frame, "
-    "police car, blood, envelope, weapon, "
     "action, motion blur, multiple views"
 )
+_ENV_NEGATIVE = DEFAULT_ENVIRONMENT_NEGATIVE  # backward compat
 
 
-def _build_environment_prompt(description: str) -> str:
+def build_environment_prompt(description: str) -> str:
     """Build a location/set reference prompt from an environment description."""
     return (
         f"A single continuous cinematic production design reference photograph of: "
@@ -63,6 +64,9 @@ def _build_environment_prompt(description: str) -> str:
         f"One image only, no collage, no split screen, no contact sheet, "
         f"no storyboard, no multiple panels, no text, no labels"
     )
+
+
+_build_environment_prompt = build_environment_prompt  # backward compat
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +195,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _build_prompt(name: str, appearance: str, kind: ReferenceKind) -> str:
+def build_character_prompt(name: str, appearance: str, kind: ReferenceKind) -> str:
     """Build a deterministic character reference prompt."""
     pose = "full body standing pose" if kind == ReferenceKind.CHARACTER_BODY else "portrait headshot"
     return (
@@ -199,6 +203,9 @@ def _build_prompt(name: str, appearance: str, kind: ReferenceKind) -> str:
         f"{pose}, neutral studio lighting, clean neutral background. "
         f"High detail, cinematic quality, no text, no labels"
     )
+
+
+_build_prompt = build_character_prompt  # backward compat
 
 
 def _compute_appearance_hash(appearance: str) -> str:
@@ -530,6 +537,7 @@ class ReferenceGenerationService:
         profile_id: str | None = None,
         seed: int | None = None,
         prompt_override: str | None = None,
+        negative_prompt_override: str | None = None,
     ) -> ReferenceGenerationResult:
         """Generate an environment/location reference image via ComfyUI.
 
@@ -550,10 +558,35 @@ class ReferenceGenerationService:
 
         if prompt_override is not None and not prompt_override.strip():
             raise ReferenceGenerationError("prompt_override must not be empty")
+        if negative_prompt_override is not None and not negative_prompt_override.strip():
+            raise ReferenceGenerationError("negative_prompt_override must not be empty")
 
-        prompt_text = prompt_override if prompt_override else _build_environment_prompt(environment_description)
-        negative_text = _ENV_NEGATIVE
+        prompt_text = prompt_override if prompt_override else build_environment_prompt(environment_description)
+        negative_text = negative_prompt_override if negative_prompt_override else DEFAULT_ENVIRONMENT_NEGATIVE
         actual_seed = seed if seed is not None else int.from_bytes(os.urandom(4), "big")
+
+        # Create immutable request (same pattern as character references)
+        now = _now_iso()
+        request_id = f"rgreq_{uuid.uuid4().hex[:12]}"
+        gen_request = ReferenceGenerationRequest(
+            id=request_id,
+            project_id=project_id,
+            character_id="__environment__",
+            requested_kind=ReferenceKind.ENVIRONMENT,
+            source_appearance_hash=hashlib.sha256(environment_description.encode()).hexdigest(),
+            prompt=prompt_text,
+            negative_prompt=negative_text,
+            workflow_definition_id=profile.id,
+            workflow_definition_version=profile.version,
+            workflow_template_fingerprint=profile.template_fingerprint,
+            parameters_snapshot=[
+                {"name": "unet_model", "value": profile.unet_model},
+                {"name": "seed", "value": actual_seed},
+            ],
+            seed=actual_seed,
+            created_at=now,
+        )
+        self._request_repo.create(gen_request)
 
         # Load and inject workflow
         template_path = os.path.join(
@@ -625,7 +658,7 @@ class ReferenceGenerationService:
             source=ReferenceSource.GENERATED,
             managed_path=managed_relative,
             content_sha256=content_sha256,
-            source_provenance=f"env_gen_{uuid.uuid4().hex[:8]}",
+            source_provenance=request_id,
             source_fingerprint=hashlib.sha256(environment_description.encode()).hexdigest(),
             status=ReferenceStatus.CANDIDATE,
             source_state=ReferenceSourceState.CURRENT,
@@ -639,7 +672,7 @@ class ReferenceGenerationService:
 
         return ReferenceGenerationResult(
             asset=asset,
-            request_id=f"env_{asset_id}",
+            request_id=request_id,
             execution_id=f"env_exec_{asset_id}",
         )
 

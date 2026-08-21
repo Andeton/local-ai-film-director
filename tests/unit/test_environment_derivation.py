@@ -162,11 +162,14 @@ class TestEnvironmentGenerationPrompt:
         assert "multiple panels" in neg
         assert "grid" in neg
 
-    def test_negative_excludes_story_props(self):
+    def test_negative_is_generic_no_story_props(self):
+        """P4.2a: generic default must NOT contain P3-specific terms."""
         neg = _ENV_NEGATIVE.lower()
-        assert "police car" in neg
-        assert "blood" in neg
-        assert "envelope" in neg
+        for term in ["police car", "blood", "envelope", "weapon"]:
+            assert term not in neg, f"Story-specific term in generic default: {term}"
+        # Generic exclusions must remain
+        assert "people" in neg
+        assert "action" in neg
 
 
 class TestEnvironmentGenerationGuard:

@@ -40,46 +40,39 @@
 
 #### P4 Phase 2: Product-Model Audit (Complete — 2026-08-21)
 
-Full product archaeology and entity capability audit. Accepted 10 product decisions (PD-1 through PD-10) establishing the target product architecture. Key decisions:
-- Location becomes first-class canonical concept (PD-1)
-- LFDirector owns canonical pre-production artifacts (PD-5)
-- Wind Comic is source, not canonical owner (PD-6)
-- Storyboard restored as core pre-generation stage (PD-8)
-- Prompt editing has persistent + immutable states (PD-4)
+Full product archaeology and entity capability audit. Accepted 10 product decisions (PD-1 through PD-10) establishing the target product architecture.
+
+#### P4 Phase 3: Location Design (Complete — 2026-08-21)
+
+Location domain design finalized. Three-layer model (Location / Scene Environment State / Shot Environment), multi-Location enrichment as target behavior, per-shot readiness, outdated propagation on Scene Location change. Implementation slices defined.
 
 Full product decisions documented in `docs/PRODUCT_SPEC.md`.
 
 ---
 
-## Next Priority: Product-Model Consolidation
+## Next Priority: Location Entity Implementation
 
-Before the next acceptance production run, consolidate the product model so the operator journey reflects the target architecture. Priority order based on what blocks a multi-scene production:
+Location is the highest-priority product-model gap — it blocks multi-scene/multi-location production.
 
-### 1. Location Entity and Per-Scene Environment
+### Location Implementation Slices
 
-A multi-scene project with different locations cannot currently have different environment references. This blocks the second production project if it involves more than one location.
+| Slice | Scope | Dependency |
+|---|---|---|
+| **1. Location domain/persistence/repository** | `Location` model, `locations` table, `LocationRepository`, nullable `location_id` FK on `scenes` and `reference_assets`. Unit tests. | None |
+| **2. Legacy migration** | Create one Location per existing project from `director_context.environment_description`. Populate `location_id` on scenes and ENVIRONMENT refs. Integration test: P3 project unchanged. | Slice 1 |
+| **3. Location API + assignment + staleness** | CRUD endpoints, `PUT /scenes/{id}/location` with outdated propagation (affected shots/plans → `outdated`), description edit staleness. | Slice 2 |
+| **4. Location-scoped reference management/resolution/readiness** | Location ref generate/upload/preview. `ReferenceSelector.select_location_ref()`. Update `GenerationService` and generation preview to resolve via Scene → Location. Per-shot readiness. | Slice 3 |
+| **5. Multi-Location planning/enrichment** | Enrichment identifies distinct physical places from story/scene structure, creates/reuses Location entities, assigns Scenes, derives per-Location descriptions. Single-Location fallback when only one place identified. | Slice 4 |
+| **6. Operator UI surfaces** | Location management panel, location ref cards, scene Location selector, generation preview Location labels. Remove project-level environment controls. | Slice 4 |
+| **7. Multi-scene/multi-location acceptance production** | End-to-end production with 2+ Locations, validating the complete pipeline. | Slices 5-6 |
 
-**Requires:** Domain model, schema, API, Reference Manager updates.
+### After Location: Remaining Priorities
 
-### 2. Persistent Shot-Level Generation Drafts
-
-Prompt/duration/seed overrides are lost on shot switch, forcing the operator to re-enter customizations. This directly impacts production workflow quality.
-
-**Requires:** Schema extension (shot-level draft fields or separate table), API, UI.
-
-### 3. Storyboard Pre-Generation Review
-
-The operator currently goes from shot plan directly to expensive video generation with no visual preview. A storyboard review stage would catch composition/framing issues before committing GPU time.
-
-**Requires:** Storyboard image import/generation, ReferenceKind extension, shot-level storyboard display.
-
-### 4. H3 Prompt Compilation
-
-Shot action text is used directly as H3 prompt. An intermediate LLM step compiling operator-facing shot direction into optimal H3 prompt format would improve generation quality systematically.
-
-### 5. Second Production Project
-
-Validate pipeline generalization with a multi-scene, multi-location production. Should follow Location entity work to properly test per-scene environments.
+| Priority | Scope |
+|---|---|
+| Persistent shot-level generation drafts (PD-4) | Schema + API + UI |
+| Storyboard pre-generation review (PD-8) | Storyboard import/generation, ReferenceKind extension |
+| H3 Prompt Compilation | LLM-optimized prompts from shot direction |
 
 ---
 
@@ -89,7 +82,7 @@ Validate pipeline generalization with a multi-scene, multi-location production. 
 |---|---|---|
 | Story/Treatment/Style entities | ACCEPTED (PD-5) — implementation not yet scheduled | LFDirector will own these canonically |
 | Prop entity | ACCEPTED — implementation not yet scheduled | Target concept, no current blocker |
-| ReferenceKind extension | ACCEPTED (PD-7) — implementation not yet scheduled | Needed for Location/Prop/Style refs |
+| ReferenceKind extension (beyond ENVIRONMENT) | ACCEPTED (PD-7) — after Location | Needed for Prop/Style refs |
 | AI reviewer (M8) | DEFERRED | Until operator workflow stable |
 | LTX-2.3 fallback | DEFERRED | H3 image-pack works |
 | Broad model routing | DEFERRED | |

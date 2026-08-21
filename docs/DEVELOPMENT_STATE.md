@@ -1,6 +1,6 @@
 # Development State — Local AI Film Director
 
-**Last Updated:** 2026-08-21
+**Last Updated:** 2026-08-21 (Location design finalized)
 **Test Baseline:** 1997 passed, 1 skipped, 12 deselected (live tests)
 **Branch:** p4-operator-workflow (P3 merged to main at 0ea4bce)
 
@@ -9,7 +9,7 @@
 ## Current State
 
 **P3 production: COMPLETE — 6/6 shots APPROVED, scene assembled, HUMAN PASS**
-**P4: Phase 1 (operator workflow) COMPLETE, Phase 2 (product-model audit) COMPLETE — documentation consolidated**
+**P4: Phase 1 (operator workflow) COMPLETE, Phase 2 (product-model audit) COMPLETE, Phase 3 (Location design) COMPLETE**
 
 ---
 
@@ -28,7 +28,7 @@ Full product archaeology and entity capability audit completed. Reconciled ORIGI
 | Director Treatment | Imported, never consumed | Canonical entity (PD-5) | No immediate blocker |
 | Style Bible | MISSING | Canonical entity (PD-5) | No immediate blocker |
 | Character | EXISTS as `CharacterReference` | Conceptually Character (PD-2, naming debt) | — |
-| Location | MISSING | First-class entity (PD-1) | **Blocks multi-scene production** |
+| Location | MISSING — design finalized | First-class entity (PD-1), 7 implementation slices defined | **Blocks multi-scene production** |
 | Prop | MISSING | Future entity | No immediate blocker |
 | Scene/Beat | EXISTS (Beat invisible in UI) | Beat as lightweight grouping (PD-3) | — |
 | Storyboard | Schema exists, never populated | Core pre-generation stage (PD-8) | No immediate blocker |
@@ -89,6 +89,17 @@ Full product archaeology and entity capability audit completed. Reconciled ORIGI
 - Dependency/invalidation readiness assessment
 - 10 product decisions accepted (PD-1 through PD-10)
 - Documentation consolidated (PRODUCT_SPEC, ARCHITECTURE, ROADMAP, DEVELOPMENT_STATE, CHATGPT_HANDOFF)
+
+### Phase 3: Location Design (Complete)
+
+- Location domain design finalized: `Location(id, project_id, name, description, source, version, created_at, updated_at)` — no lifecycle status field
+- Three conceptual layers: Location (persistent identity) / Scene Environment State (future, on Scene) / Shot Environment (existing `Shot.environment` dict)
+- Multi-Location enrichment is target behavior for new projects, not a post-MVP enhancement
+- Legacy migration: one Location per existing project from `director_context.environment_description`
+- Staleness: Location description edit → generated refs STALE; Scene Location change → affected shots/plans `outdated`; Takes remain immutable
+- Readiness evaluated per-shot via Scene → Location; ready scenes can generate independently
+- Shot alternate-location override architecturally reserved but not implemented
+- 7 implementation slices defined (see ROADMAP.md)
 
 ### Demonstrated Gaps Remaining
 

@@ -2,7 +2,7 @@
 
 **Purpose:** Durable operator-facing product specification. Defines the target production journey, current implementation state, and gaps between them. Not a handoff file — a separate product reference.
 
-**Last updated:** 2026-08-21 (product-model audit)
+**Last updated:** 2026-08-21 (Location design finalized)
 
 ---
 
@@ -85,20 +85,24 @@ Editing a character's appearance invalidates generated visual references. Charac
 
 ### Stage 4: Locations
 
-**TARGET:** Locations are first-class canonical production concepts:
-- A Location represents a physical place/set with its own visual description and reference assets.
-- Scenes reference reusable Locations — the same Location can appear in multiple scenes.
-- A Location owns its environment description and location reference images (replacing the current project-level-only ENVIRONMENT pattern).
-- Shots inherit their scene's Location but may have shot-level environment overrides.
+**TARGET:** Locations are first-class canonical production concepts (PD-1):
+
+- A **Location** represents a persistent, reusable physical place/set. It has an identity (name), a physical/set description (architecture, furnishing, spatial layout — may include location-specific production design), and owns its reference assets. Example: "Marcus's Kitchen — 1970s linoleum, overhead fluorescent panels, formica table, window facing a brick airshaft."
+- Multiple Scenes may reference the same Location (e.g., Kitchen used in Scene 1 morning and Scene 4 night).
+- A project with distinct physical places (apartment + subway + street + office) should have four Location entities.
+- **Scene Environment State** (future) — how the Location exists during a particular scene: time of day, weather, damage/state, practical conditions. This is a scene-level concept, not a Location property or a Shot property. Not implemented initially but the domain design reserves a clean place for it on Scene.
+- **Shot Environment** — shot-specific framing/state details that differ from the scene baseline. Already exists as `Shot.environment` dict. Shots inherit their Scene's Location; shot-level alternate-location/cutaway semantics are architecturally possible but not implemented initially.
+
+For new projects, enrichment identifies distinct production Locations from the source material, creates/reuses canonical Location entities, assigns Scenes to Locations, and derives a physical description for each. A story about "apartment + subway + office" should produce three Locations, not one.
 
 **CURRENT:** No `Location` entity exists. Environment is represented as:
-- `director_context.environment_description` — a single project-level string
+- `director_context.environment_description` — a single project-level string (legacy/MVP)
 - `ReferenceAsset` with `kind=ENVIRONMENT` — project-level, one per project
-- `Scene.location` — imported from WC but never displayed, edited, or consumed
+- `Scene.location` — imported from WC but never displayed, edited, or consumed downstream
 - `Shot.environment` — JSON dict, partially consumed by FLF continuity prompts but not editable in UI
 
 **GAP:**
-- **G27: No Location entity.** A multi-scene project with different locations (e.g., kitchen interior + street exterior) cannot have different environment references. All shots share one project-wide ENVIRONMENT ref.
+- **G27: No Location entity.** A multi-scene project with different locations cannot have different environment references. All shots share one project-wide ENVIRONMENT ref.
 - **G6: No idea↔environment connection shown.** Partially mitigated by G1 fix, but the derivation relationship is not visible.
 
 ---
@@ -271,7 +275,13 @@ Scene assembly produces concatenated output. The timeline may eventually export 
 The following decisions were accepted during the product-model audit (2026-08-21) and govern the target architecture:
 
 ### PD-1: Location is a first-class canonical concept
-Scenes reference reusable Locations. A Location owns its visual description and reference assets. The current project-level `environment_description` is legacy/MVP behavior.
+Scenes reference reusable Locations. A Location owns its physical/set description (including location-specific production design) and reference assets. The current project-level `environment_description` is legacy/MVP behavior. Three conceptual layers: Location (persistent identity), Scene Environment State (future — time/weather/conditions per scene), Shot Environment (shot-specific details). For new projects, enrichment derives multiple Locations when the source material describes distinct physical places. Legacy migration: one Location per existing project.
+
+**Location model:** `id, project_id, name, description, source, version, created_at, updated_at`. No lifecycle status field — staleness is expressed through dependent reference and shot state, not on Location itself.
+
+**Staleness:** Editing Location.description increments version and marks GENERATED Location refs as STALE. Changing a Scene's Location assignment marks affected shots and their GenerationPlans as `outdated`. Existing Takes remain immutable historical artifacts.
+
+**Readiness:** Evaluated per-shot via Scene → Location. A project with Scene 1 ready and Scene 8 unfinished can generate Scene 1's shots.
 
 ### PD-2: CharacterReference is conceptually Character
 Visual references remain `ReferenceAsset`. Code/schema rename deferred. Documentation and UI use "Character" terminology.

@@ -2,7 +2,7 @@
 
 **Status:** Active
 **ADRs:** ADR-001 through ADR-005 (frozen)
-**Last updated:** 2026-08-21 (product-model audit)
+**Last updated:** 2026-08-21 (Location design finalized)
 
 ---
 
@@ -74,8 +74,10 @@ ProductionProject
   │     └── ReferenceAssets (PROP)
   └── Sequence
         └── Scene (references Location, cast, props)
+              │     future: Scene Environment State (time, weather, conditions)
               └── Beat (dramatic unit)
                     └── ShotSpecificationV1 (coverage shot)
+                          ├── Shot.environment (shot-specific details/overrides)
                           ├── Storyboard frame
                           ├── GenerationPlan (strategy, requirements)
                           ├── Provider Prompt (H3PromptV1 — below adapter boundary)
@@ -84,6 +86,43 @@ ProductionProject
 ```
 
 All canonical entities above the adapter boundary are **provider/model agnostic** (ADR-005).
+
+### Location Conceptual Model (Finalized)
+
+Three distinct layers:
+
+**Location** — persistent physical/set identity. Reusable across scenes. Owns its canonical description (including location-specific production design) and reference assets.
+
+```
+Location: id, project_id, name, description, source, version, created_at, updated_at
+```
+
+No lifecycle status field. Location itself does not become "stale" — staleness is expressed through dependent state (generated refs become STALE, affected shots/plans become `outdated`).
+
+**Scene Environment State** (future) — how a Location exists during a particular scene: time of day, weather, damage/state, practical conditions. A scene-level concept — the same Location may appear differently in different scenes. Domain slot reserved on Scene; not implemented in the first Location slice.
+
+**Shot Environment** — shot-specific framing/state details. Already exists as `Shot.environment` dict. Shots inherit their Scene's Location for reference resolution. Future alternate-location/cutaway override on Shot is architecturally possible (optional `location_id_override` FK) but not implemented initially.
+
+### Location Relationships
+
+```
+Project ──1:N──→ Location
+Scene ──N:1──→ Location (scene.location_id, nullable FK)
+Shot ──inherits──→ Scene.Location (for ref resolution and prompt context)
+ReferenceAsset ──N:1──→ Location (reference_assets.location_id, nullable FK)
+```
+
+A Scene may temporarily lack a Location (nullable FK). Multiple Scenes may share one Location. Location deletion is blocked when referenced by Scenes (RESTRICT).
+
+### Location Enrichment
+
+For new projects, enrichment identifies distinct physical places from the story/scene structure, creates canonical Location entities, assigns Scenes, and derives a description per Location. A story with four distinct places produces four Locations. Legacy migration creates one Location per existing project from `director_context.environment_description`.
+
+### Location Staleness
+
+- Editing `Location.description`: increments `version`, marks GENERATED ENVIRONMENT refs for this Location as STALE
+- Changing Scene's Location assignment: marks all shots in the scene as `outdated` and their GenerationPlans as `outdated`. Existing Takes remain immutable.
+- Readiness evaluated per-shot: resolved via Shot → Scene → Location. A ready scene can generate while other scenes remain unfinished.
 
 ### Current Implementation vs Target
 

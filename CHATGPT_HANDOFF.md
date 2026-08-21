@@ -38,7 +38,7 @@ Work is on branch `p4-operator-workflow`. P3 was merged to main at `0ea4bce`.
 
 ## 5. P4 State
 
-P4 has two completed phases:
+P4 has three completed phases:
 
 ### Phase 1: Operator Workflow (Complete)
 - Original idea preservation, reference prompt preview/control, Shot Production Editor, Take generation provenance, character data-lineage fix, UX cleanup. See `docs/DEVELOPMENT_STATE.md` for full list.
@@ -49,11 +49,18 @@ P4 has two completed phases:
 - Target product architecture documented in PRODUCT_SPEC.md
 - Documentation consolidated across all five handoff files
 
+### Phase 3: Location Design (Complete — 2026-08-21)
+- Location domain design finalized: `Location(id, project_id, name, description, source, version, created_at, updated_at)`
+- Three layers: Location (persistent identity) / Scene Environment State (future) / Shot Environment (existing)
+- Multi-Location enrichment is target behavior for new projects
+- Legacy migration: one Location per existing project
+- 7 implementation slices defined in ROADMAP.md
+
 ### Accepted Product Decisions (PD-1 through PD-10)
 
 | ID | Decision |
 |----|----------|
-| PD-1 | Location is first-class canonical concept. Scenes reference reusable Locations. |
+| PD-1 | Location is first-class canonical concept. Three layers: Location/SceneEnvState/ShotEnv. Multi-Location enrichment is target. |
 | PD-2 | CharacterReference is conceptually Character. Code rename deferred. |
 | PD-3 | Beat remains in canonical hierarchy (Scene → Beat → Shot). |
 | PD-4 | Prompt editing has persistent shot-level draft + immutable per-generation snapshot. |
@@ -70,12 +77,15 @@ P4 has two completed phases:
 LFDirector is the canonical owner of ALL production data. Wind Comic is a SOURCE that enters through `WindComicAdapter`. WC's output quality has been demonstrated as insufficient (generic placeholder content), confirming ADR-001's revisit condition. LFDirector compensates via OpenRouter planning and operator input.
 
 ### Current Implementation vs Target
-The current implementation successfully produces complete films (P3 proved this) but represents a subset of the target product model. Key gaps that block multi-scene/multi-location productions:
-- No Location entity (environment is project-level only)
+The current implementation successfully produces complete films (P3 proved this) but represents a subset of the target product model. Key gap blocking multi-scene production:
+- No Location entity (environment is project-level only) — **design finalized, 7 implementation slices defined**
 - No persistent prompt drafts (lost on shot switch)
 - No storyboard review stage
 
 Story, Treatment, Style entities and Prop/Timeline models are accepted for the target but do not block current single-scene production.
+
+### Location Design Summary
+`Location(id, project_id, name, description, source, version, created_at, updated_at)` — no lifecycle status field. Scene has nullable `location_id` FK. ReferenceAsset gets nullable `location_id` FK. ENVIRONMENT kind preserved during transition. Multi-Location enrichment for new projects; single Location per project for legacy migration. Per-shot readiness via Scene → Location. Scene Location change → affected shots/plans `outdated`.
 
 ### Naming Debt
 `CharacterReference` class/table = Character entity. `director_context` dict = fragments of Story + Treatment + Style. Code/schema renames deferred.
@@ -100,15 +110,9 @@ python -m uvicorn "film_director.main:create_app" --factory --host 127.0.0.1 --p
 
 ## 9. Exact Next Action
 
-**Product-model consolidation on `p4-operator-workflow`.**
+**Implement Location Slice 1 on `p4-operator-workflow`.**
 
-The product-model audit is complete and documented. The next step is implementation planning for the highest-priority product-model gaps, in this order:
-
-1. **Location entity + per-scene environment** — blocks multi-scene production
-2. **Persistent shot-level generation drafts** — improves operator workflow
-3. **Storyboard pre-generation review** — reduces wasted GPU time
-4. **H3 Prompt Compilation** — improves generation quality
-5. **Second production project** — validates generalization (after Location entity)
+Location design is finalized. Begin implementation with Slice 1: Location model, `locations` table, `LocationRepository`, nullable `location_id` FK on `scenes` and `reference_assets`. Unit tests. See `docs/ROADMAP.md` for the complete 7-slice plan.
 
 Do NOT start broad infrastructure, new model adapters, or generalized routing until Location entity and a successful multi-scene production validate the target architecture.
 

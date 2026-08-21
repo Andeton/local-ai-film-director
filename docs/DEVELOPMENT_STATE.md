@@ -1,6 +1,6 @@
 # Development State — Local AI Film Director
 
-**Last Updated:** 2026-08-20
+**Last Updated:** 2026-08-21
 **Test Baseline:** 1997 passed, 1 skipped, 12 deselected (live tests)
 **Branch:** p4-operator-workflow (P3 merged to main at 0ea4bce)
 
@@ -9,7 +9,45 @@
 ## Current State
 
 **P3 production: COMPLETE — 6/6 shots APPROVED, scene assembled, HUMAN PASS**
-**P4 operator workflow: IN PROGRESS on p4-operator-workflow**
+**P4: Phase 1 (operator workflow) COMPLETE, Phase 2 (product-model audit) COMPLETE — documentation consolidated**
+
+---
+
+## Product-Model Audit (2026-08-21)
+
+Full product archaeology and entity capability audit completed. Reconciled ORIGINAL_SPEC.md against current implementation. Accepted 10 product decisions (PD-1 through PD-10) establishing the target product architecture.
+
+### Key Findings
+
+**Current implementation vs target architecture:**
+
+| Concept | Current Status | Target Status | Blocker? |
+|---|---|---|---|
+| Original Idea | EXISTS (P4) | Complete | — |
+| Story | Fragment in `director_context.description` | Canonical entity (PD-5) | No immediate blocker |
+| Director Treatment | Imported, never consumed | Canonical entity (PD-5) | No immediate blocker |
+| Style Bible | MISSING | Canonical entity (PD-5) | No immediate blocker |
+| Character | EXISTS as `CharacterReference` | Conceptually Character (PD-2, naming debt) | — |
+| Location | MISSING | First-class entity (PD-1) | **Blocks multi-scene production** |
+| Prop | MISSING | Future entity | No immediate blocker |
+| Scene/Beat | EXISTS (Beat invisible in UI) | Beat as lightweight grouping (PD-3) | — |
+| Storyboard | Schema exists, never populated | Core pre-generation stage (PD-8) | No immediate blocker |
+| Prompt drafts | Ephemeral JS state | Persistent per-shot (PD-4) | Impacts workflow quality |
+| ReferenceKind | 4 values | Extended scope (PD-7) | Blocks Location/Prop/Style refs |
+| Timeline | MISSING | Future minimal (PD-10) | Not blocking |
+| Semantic continuity | MISSING | Deferred (PD-10) | Not blocking |
+
+### Implementation Naming Debt
+
+| Code Name | Product Name | Location | Notes |
+|---|---|---|---|
+| `CharacterReference` | Character | `canonical.py`, `character_references` table | PD-2: code/schema rename deferred |
+| `director_context` dict | Story + Treatment + Style fragments | `production_projects.director_context` JSON | PD-5: will become canonical entities |
+| `environment_description` | Location description | `director_context.environment_description` | PD-1: will move to Location entity |
+
+### H3 Provider Leakage (Acknowledged Debt — PD-9)
+
+`routes.py` imports H3 types (`H3PromptBuilder`, `H3ReferenceBinding`), contains hardcoded H3 workflow IDs (`h3_r2v_image_pack_v1` etc.) and resolution (`1376x768`). Cleanup will occur when Generation API is consolidated. Not a standalone milestone.
 
 ---
 
@@ -29,9 +67,9 @@
 
 ---
 
-## P4 — Operator Workflow & Prompt Control (In Progress)
+## P4 — Operator Workflow & Product Architecture
 
-### Completed on p4-operator-workflow
+### Phase 1: Operator Workflow (Complete)
 
 - PRODUCT_SPEC.md: full operator-journey audit, 23 gaps identified, 13+ resolved
 - Original idea preservation (`director_context.original_idea`)
@@ -43,13 +81,18 @@
 - Character data-lineage fix (enrichment ordering, canonical name resolution)
 - UX cleanup: Fresh/Outdated badges, Review Prompt buttons, larger thumbnails, individual subject removal, improved field labels, larger prompt area, idea modal, structured Take details
 
+### Phase 2: Product-Model Audit (Complete)
+
+- Full product archaeology report
+- Entity capability matrix (35 target concepts classified)
+- Provider leakage audit
+- Dependency/invalidation readiness assessment
+- 10 product decisions accepted (PD-1 through PD-10)
+- Documentation consolidated (PRODUCT_SPEC, ARCHITECTURE, ROADMAP, DEVELOPMENT_STATE, CHATGPT_HANDOFF)
+
 ### Demonstrated Gaps Remaining
 
-See docs/PRODUCT_SPEC.md for the complete registry. Key remaining:
-- G14: Intentional dialogue control
-- G17: Side-by-side Take comparison
-- G20: Ephemeral prompt override state
-- G21-G23: Lower-priority polish
+See `docs/PRODUCT_SPEC.md` Gap Registry for the complete list (31 gaps tracked, 11 resolved).
 
 ---
 

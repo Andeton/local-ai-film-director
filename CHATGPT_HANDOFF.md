@@ -1,16 +1,20 @@
 # ChatGPT/Claude Code Handoff — Local AI Film Director
 
-**Date**: 2026-08-20
+**Date**: 2026-08-21
 **Branch**: `p4-operator-workflow` (run `git rev-parse HEAD` for current commit)
 **Main HEAD**: `0ea4bce835264621a2513af52cb12aa75b083479`
 **Test baseline**: 1997 passed, 1 skipped, 12 deselected (live tests)
+**GitHub**: https://github.com/Andeton/local-ai-film-director.git
 
 ## 1. Project Purpose
 
-Local AI Film Director orchestrates end-to-end AI film production:
-idea -> Wind Comic pre-production -> canonical import -> LLM enrichment (shot plan + character definitions + environment description) -> reference image generation -> H3 video generation -> take approval -> continuity chain -> scene assembly.
+Local AI Film Director (LFDirector) is an **AI Director + Production Manager + ComfyUI Orchestrator**. It owns the complete production pipeline from idea to assembled film:
 
-**Stack**: Python 3.14, FastAPI, SQLite, ComfyUI (MiniMax H3), Ollama (local LLM), OpenRouter (planning LLM).
+idea → canonical pre-production (story/treatment/style/characters/locations) → scene/beat/shot planning → storyboard → reference management → generation → take review → continuity → timeline → export.
+
+LFDirector owns the canonical production specification (ADR-002). External systems (Wind Comic, ComfyUI, H3, OpenRouter) are sources and execution providers, not canonical owners.
+
+**Stack**: Python 3.14, FastAPI, SQLite, ComfyUI (MiniMax H3), OpenRouter (planning LLM), Ollama (legacy LLM).
 
 ## 2. Paths
 
@@ -32,50 +36,49 @@ Work is on branch `p4-operator-workflow`. P3 was merged to main at `0ea4bce`.
 
 **Project `proj_cfb89b04f3c8`**: 6/6 shots APPROVED, 48.741s assembled scene, HUMAN PASS.
 
-## 5. P4 Implementation State
+## 5. P4 State
 
-P4 — Operator Workflow & Prompt Control. Partially complete on `p4-operator-workflow`:
+P4 has two completed phases:
 
-**Completed:**
-- PRODUCT_SPEC.md: full operator-journey audit with gap tracking
-- Original idea preservation (`director_context.original_idea`, legacy degradation)
-- Reference prompt preview/control (character + environment)
-- Reference prompt provenance on cards
-- P3 story contamination removed from environment negative prompt
-- Shot Production Editor (unified semantic editor for all shot inputs)
-- H3 prompt compilation visible in preview (from actual H3PromptBuilder)
-- Take generation provenance (historical immutable details per Take)
-- Character data-lineage fix (enrichment ordering, current canonical name resolution)
-- UX cleanup: Fresh/Outdated badges, Review Prompt buttons, larger thumbnails, individual subject removal, improved intent labels, larger prompt area, idea modal, structured Take details
+### Phase 1: Operator Workflow (Complete)
+- Original idea preservation, reference prompt preview/control, Shot Production Editor, Take generation provenance, character data-lineage fix, UX cleanup. See `docs/DEVELOPMENT_STATE.md` for full list.
 
-**Demonstrated gaps remaining (from human acceptance):**
-- G14: Intentional dialogue control — H3 controllability not established
-- G17: Side-by-side Take comparison
-- G20: Ephemeral prompt override state
-- G21-G23: Lower-priority polish items
+### Phase 2: Product-Model Audit (Complete — 2026-08-21)
+- Full product archaeology and entity capability audit
+- 10 product decisions accepted (PD-1 through PD-10)
+- Target product architecture documented in PRODUCT_SPEC.md
+- Documentation consolidated across all five handoff files
 
-See `docs/PRODUCT_SPEC.md` for the complete gap registry.
+### Accepted Product Decisions (PD-1 through PD-10)
 
-## 6. Key Architecture Decisions (P4)
+| ID | Decision |
+|----|----------|
+| PD-1 | Location is first-class canonical concept. Scenes reference reusable Locations. |
+| PD-2 | CharacterReference is conceptually Character. Code rename deferred. |
+| PD-3 | Beat remains in canonical hierarchy (Scene → Beat → Shot). |
+| PD-4 | Prompt editing has persistent shot-level draft + immutable per-generation snapshot. |
+| PD-5 | Story, Treatment, Style are canonical LFDirector-owned artifacts. |
+| PD-6 | Wind Comic is source/sidecar, not canonical owner. Output-quality revisit condition demonstrated. |
+| PD-7 | ReferenceKind (what asset IS) and AssetRole (how asset is USED) remain separate. |
+| PD-8 | Storyboard is core pre-generation stage. |
+| PD-9 | H3 leakage in routes is acknowledged tech debt, not a standalone milestone. |
+| PD-10 | Timeline is future minimal. Semantic continuity deferred. |
 
-### Original Idea Preservation
-- `director_context.original_idea`: exact operator input, preserved before WC processing
-- `director_context.description`: WC-processed version (may contain WC template text)
-- Legacy projects: `original_idea` absent, UI shows "Imported Description / legacy project"
+## 6. Key Architecture Clarifications (Audit)
 
-### Reference Lifecycle Terminology
-- Internal domain: `ReferenceSourceState.CURRENT` / `STALE` (unchanged)
-- Operator-facing UI: badges show `Fresh` / `Outdated`
-- `REJECTED + CURRENT` (now `REJECTED + Fresh`) is a valid state: not stale, just not approved
+### Ownership Principle
+LFDirector is the canonical owner of ALL production data. Wind Comic is a SOURCE that enters through `WindComicAdapter`. WC's output quality has been demonstrated as insufficient (generic placeholder content), confirming ADR-001's revisit condition. LFDirector compensates via OpenRouter planning and operator input.
 
-### Character Name Resolution
-- UI resolves subject display names from current `CharacterReference.name` by `character_id`
-- Stale `shot.subjects[].name` snapshots no longer control current display
-- Historical Take provenance remains immutable (shows names used at generation time)
-- Enrichment ordering: characters enriched before shot planning (future projects get enriched names in ShotSubject snapshots)
+### Current Implementation vs Target
+The current implementation successfully produces complete films (P3 proved this) but represents a subset of the target product model. Key gaps that block multi-scene/multi-location productions:
+- No Location entity (environment is project-level only)
+- No persistent prompt drafts (lost on shot switch)
+- No storyboard review stage
 
-### Durable Async Generation
-Architecture documented in `docs/ARCHITECTURE.md`. Embedded QueueWorker, timeout recovery, duplicate protection — all from P3, unchanged in P4.
+Story, Treatment, Style entities and Prop/Timeline models are accepted for the target but do not block current single-scene production.
+
+### Naming Debt
+`CharacterReference` class/table = Character entity. `director_context` dict = fragments of Story + Treatment + Style. Code/schema renames deferred.
 
 ## 7. Environment Variables (.env)
 
@@ -97,15 +100,16 @@ python -m uvicorn "film_director.main:create_app" --factory --host 127.0.0.1 --p
 
 ## 9. Exact Next Action
 
-**Resume P4 on `p4-operator-workflow`.**
+**Product-model consolidation on `p4-operator-workflow`.**
 
-The P4 UX Cleanup (items 1-9 from human acceptance) has been implemented. Perform human UI acceptance of the UX cleanup before deciding the next functional P4 slice.
+The product-model audit is complete and documented. The next step is implementation planning for the highest-priority product-model gaps, in this order:
 
-After UX acceptance, choose from:
-1. **Second production project** — validate generalization
-2. **H3 Prompt Compilation** — LLM-optimized prompts
-3. Additional P4 gaps from PRODUCT_SPEC.md
+1. **Location entity + per-scene environment** — blocks multi-scene production
+2. **Persistent shot-level generation drafts** — improves operator workflow
+3. **Storyboard pre-generation review** — reduces wasted GPU time
+4. **H3 Prompt Compilation** — improves generation quality
+5. **Second production project** — validates generalization (after Location entity)
 
-Do NOT start Environment 360, M8, LTX, broad model routing, or generalized infrastructure.
+Do NOT start broad infrastructure, new model adapters, or generalized routing until Location entity and a successful multi-scene production validate the target architecture.
 
-**Durable documentation:** See `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STATE.md`, `docs/ROADMAP.md`, `docs/TECHNOLOGY_RADAR.md`, `docs/PRODUCT_SPEC.md`.
+**Durable documentation:** `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STATE.md`, `docs/ROADMAP.md`, `docs/TECHNOLOGY_RADAR.md`, `docs/PRODUCT_SPEC.md`.

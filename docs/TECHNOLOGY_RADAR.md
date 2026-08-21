@@ -2,7 +2,7 @@
 
 Verified workflows, model capabilities, and candidate solutions.
 
-**Last updated:** 2026-08-20
+**Last updated:** 2026-08-21
 
 ---
 
@@ -115,6 +115,18 @@ Real locally-verified ComfyUI user workflows are copied into `workflows/source_r
 - Both prompt and negative_prompt are operator-editable before generation
 - Both are persisted in `ReferenceGenerationRequest` and inspectable afterward
 - Environment references now tracked via proper `ReferenceGenerationRequest` (real `rgreq_` ID)
+
+### Wind Comic — Pre-Production Source/Sidecar
+
+| Property | Value |
+|---|---|
+| Version | v12.320 |
+| License | MIT |
+| Role | External pre-production source behind ADR-001 adapter boundary |
+| Status | **SOURCE, not canonical owner (PD-6).** Output-quality revisit condition demonstrated. |
+| Integration | `WindComicAdapter` (read-only SQLite) + `WindComicPreproductionClient` (HTTP SSE/JWT) |
+| Known limitation | gemma4 local LLM produces generic placeholder content. LFDirector compensates via OpenRouter planning and `original_idea` as creative source. |
+| ADR-001 revisit | Output-quality condition triggered. WC remains useful as structural scaffolding but LFDirector owns canonical pre-production artifacts (PD-5). |
 
 ---
 

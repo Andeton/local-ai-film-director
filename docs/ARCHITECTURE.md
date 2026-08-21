@@ -2,36 +2,49 @@
 
 **Status:** Active
 **ADRs:** ADR-001 through ADR-005 (frozen)
-**Last updated:** 2026-08-20
+**Last updated:** 2026-08-21 (product-model audit)
 
 ---
 
 ## 1. System Overview
 
-Local AI Film Director (LFDirector) is an orchestration product that assembles a working AI film production pipeline from ready-made solutions:
+Local AI Film Director (LFDirector) is an **AI Director + Production Manager + ComfyUI Orchestrator** that assembles a working AI film production pipeline from ready-made solutions:
 
-- **Wind Comic** — pre-production sidecar (story, script, storyboard, characters). Known limitation: WC's local gemma4 model often produces generic placeholder content; the original project description is the primary creative context.
+- **Wind Comic** — external pre-production source/sidecar (story, script, storyboard, characters). A SOURCE of pre-production data, not the canonical owner. Known limitation: WC's local gemma4 model produces generic placeholder content. ADR-001 output-quality revisit condition has been demonstrated.
 - **ComfyUI** — execution runtime (REST/WebSocket API). External installation at `D:\ComfyUI\`, treated as READ-ONLY by LFDirector development.
-- **MiniMax H3** — video generation model (R2V image-pack, legacy R2V, legacy FLF workflows)
-- **Z-Image Turbo / Krea 2 Turbo** — character and environment reference image generation
+- **MiniMax H3** — current video generation model (R2V image-pack, legacy R2V, legacy FLF workflows)
+- **Z-Image Turbo / Krea 2 Turbo** — reference image generation
 - **OpenRouter** — planning LLM (shot planning, character enrichment, environment description derivation)
 - **Ollama** — local LLM (legacy beat/coverage enrichment chain)
-- **LFDirector** — canonical orchestration, Takes, continuity, approval, assembly
-
-LFDirector owns the production pipeline. It does not own pre-production (Wind Comic) or model execution (ComfyUI/H3).
+- **LFDirector** — canonical production owner: pre-production artifacts, production specification, orchestration, Takes, continuity, approval, assembly
 
 ---
 
-## 2. System Boundary Matrix
+## 2. Ownership Principle
+
+LFDirector owns the canonical production specification (ADR-002). External systems are SOURCES of data that enter through adapter boundaries. LFDirector is the canonical owner of:
+
+- Story, Director Treatment, Style Bible (pre-production artifacts, per PD-5)
+- Characters, Locations, Props (production elements)
+- Scenes, Beats, Shots (production hierarchy)
+- References, Generation Plans, Takes (production execution)
+- Continuity, Timeline, Assembly (production output)
+
+Wind Comic is a source/sidecar (ADR-001) — its output is imported through `WindComicAdapter` but LFDirector owns the accepted/current canonical version of all production data.
+
+---
+
+## 3. System Boundary Matrix
 
 | Capability | Wind Comic | LFDirector | ComfyUI | H3/Models | OpenRouter | Ollama |
 |---|---|---|---|---|---|---|
-| Project/story/script/storyboard | OWNER | CONSUMER | — | — | — | — |
-| Character design/library | OWNER | CONSUMER | — | — | — | — |
+| Project/story/script/storyboard | SOURCE | CANONICAL OWNER | — | — | — | — |
+| Character design/library | SOURCE | CANONICAL OWNER | — | — | — | — |
+| Director treatment / style | SOURCE | CANONICAL OWNER | — | — | — | — |
 | Shot planning (direct) | — | OWNER | — | — | PROVIDER | — |
 | Beat/coverage (legacy) | — | OWNER | — | — | — | PROVIDER |
 | Character enrichment | — | OWNER | — | — | PROVIDER | — |
-| Environment derivation | — | OWNER | — | — | PROVIDER | — |
+| Environment/location derivation | — | OWNER | — | — | PROVIDER | — |
 | Shot specification | — | OWNER | — | — | — | — |
 | Generation strategy | — | OWNER | — | — | — | — |
 | Prompt building | — | OWNER | — | — | — | — |
@@ -45,26 +58,56 @@ LFDirector owns the production pipeline. It does not own pre-production (Wind Co
 
 ---
 
-## 3. Canonical Production Hierarchy
+## 4. Target Canonical Production Hierarchy
 
 ```
-ProductionProject (from Wind Comic)
-  ├── director_context.description   (original idea / project description)
-  ├── director_context.environment_description  (derived stable set/location)
+ProductionProject
+  ├── Original Idea (immutable operator input)
+  ├── Story (canonical, sourced from WC/LLM/operator)
+  ├── Director Treatment (canonical, sourced from WC/LLM/operator)
+  ├── Style Bible (canonical, sourced from LLM/operator)
+  ├── Characters (canonical, sourced from WC/LLM/operator)
+  │     └── ReferenceAssets (CHARACTER_BODY, CHARACTER_FACE)
+  ├── Locations (canonical, reusable across scenes)
+  │     └── ReferenceAssets (ENVIRONMENT / location views)
+  ├── Props (canonical)
+  │     └── ReferenceAssets (PROP)
   └── Sequence
-        └── Scene
-              └── Beat (LLM-enriched dramatic unit)
+        └── Scene (references Location, cast, props)
+              └── Beat (dramatic unit)
                     └── ShotSpecificationV1 (coverage shot)
+                          ├── Storyboard frame
                           ├── GenerationPlan (strategy, requirements)
+                          ├── Provider Prompt (H3PromptV1 — below adapter boundary)
                           ├── GenerationRequest (immutable execution snapshot)
                           └── Take (generated video + approval state)
 ```
 
-All canonical entities are **provider/model agnostic** (ADR-005).
+All canonical entities above the adapter boundary are **provider/model agnostic** (ADR-005).
+
+### Current Implementation vs Target
+
+The current implementation represents a subset of this hierarchy:
+
+| Concept | Current Implementation | Notes |
+|---|---|---|
+| Original Idea | `director_context.original_idea` | Exists (P4) |
+| Story | `director_context.description` | Fragment, not canonical entity |
+| Director Treatment | `director_context.genre/style/story_structure` | Imported, never consumed |
+| Style Bible | Not represented | — |
+| Character | `CharacterReference` class/table | Naming debt — see PD-2 |
+| Location | Not represented | `Scene.location` exists but unused |
+| Prop | Not represented | `AssetRole.PROP_REFERENCE` exists in enum |
+| Sequence/Scene/Beat/Shot | Full schema | Beat invisible in UI |
+| Storyboard | `storyboard_image_path` field exists | Never populated |
+| GenerationPlan | Full schema | Model-agnostic |
+| Provider Prompt | `H3PromptV1` / `h3_prompts` table | Correctly isolated per ADR-005 |
+| GenerationRequest | Full schema | Immutable snapshot |
+| Take | Full schema | Full lifecycle |
 
 ---
 
-## 4. Enrichment Architecture
+## 5. Enrichment Architecture
 
 ### Enrichment Semantics
 
@@ -104,16 +147,26 @@ Operator-facing current state resolves subject display names from `CharacterRefe
 
 ---
 
-## 5. Reference Asset Architecture
+## 6. Reference Asset Architecture
 
-### Kinds
+### Kinds and Roles (Separate Concepts — PD-7)
+
+**ReferenceKind** — what the managed asset IS / ownership semantics:
 
 | Kind | Ownership | Purpose |
 |------|-----------|---------|
 | CHARACTER_FACE | character_id | Character face identity |
 | CHARACTER_BODY | character_id | Character full-body identity (production-critical) |
 | ENVIRONMENT | project-level (no char/shot) | Scene environment/location reference |
-| STORYBOARD | shot_id | Per-shot storyboard frame (legacy) |
+| STORYBOARD | shot_id | Per-shot storyboard frame |
+
+Target scope (PD-7): Character, Location, Prop, Style, Storyboard references.
+
+**AssetRole** — how an asset is USED in a generation/conditioning recipe:
+
+18 values including CHARACTER_FACE_CLOSEUP, CHARACTER_BODY_FRONT/SIDE/BACK, ENVIRONMENT_MASTER/VIEW/PANORAMA_360/DEPTH/LAYOUT, PROP_REFERENCE/TURNAROUND, STYLE_REFERENCE, CONTINUITY_FRAME, MOTION_REFERENCE, CONTROL_VIDEO, AUDIO_REFERENCE.
+
+AssetRole is used in `VisualAssetPack` bindings and `ConditioningRecipe` slot definitions. Provider-specific picture-slot semantics (e.g., H3 "Picture N") are NOT canonical — they belong below the adapter boundary.
 
 ### Lifecycle
 
@@ -133,30 +186,22 @@ Eligibility: Only `APPROVED + CURRENT` assets are production-eligible.
 
 `ReferenceSelector.select()` is subject-scoped: selects one eligible ref per shot subject's `character_id`. Both preview and generation use the same per-subject selection logic.
 
-### Reference Generation
-
-Character and environment references are generated via ComfyUI using Z-Image Turbo v1 (default profile). Environment prompts explicitly request empty-set images with no people/characters/action. Environment description is derived from the project idea by the OpenRouter LLM, stripping narrative events.
-
 ### Reference Prompt Visibility (P4)
 
 - `GET /characters/{id}/reference-prompt-preview`: returns default prompt + negative before generation
 - `GET /projects/{id}/environment-reference-prompt-preview`: returns default env prompt + negative
 - `GET /reference-generation-requests/{id}`: returns stored prompt/negative after generation
 - Both character and environment generation accept `prompt_override` and `negative_prompt_override`
-- Environment references now create proper `ReferenceGenerationRequest` (real `rgreq_` ID, linked via `source_provenance`)
-
-### Reference Lifecycle Terminology (P4)
-
-- Internal domain: `ReferenceSourceState.CURRENT` / `STALE` (unchanged)
-- Operator-facing UI: badges display `Fresh` / `Outdated`
-- `ReferenceStatus` (CANDIDATE/APPROVED/REJECTED/ARCHIVED) is the review lifecycle
-- `ReferenceSourceState` is freshness relative to source definition — independent of review status
-- `REJECTED + CURRENT` ("Rejected + Fresh") is a valid state: generated from current source, operator judged visually inadequate
-- Selection requires `APPROVED + CURRENT`; rejected refs never selected
 
 ---
 
-## 6. H3 Image-Pack Production Path
+## 7. H3 Image-Pack Production Path
+
+### Provider Boundary
+
+Everything in this section is below the canonical product layer. H3-specific types (`H3PromptV1`, `H3ReferenceBinding`, `H3PromptBuilder`) are correctly isolated per ADR-005. Provider-specific workflow definitions, frame grids, and slot semantics do not define product limits.
+
+**Known technical debt:** `routes.py` currently imports H3 types directly and contains hardcoded H3 workflow IDs and resolution values. This leakage is acknowledged (PD-9) and will be cleaned up when the Generation API is consolidated.
 
 ### Workflow Source of Truth
 
@@ -175,9 +220,7 @@ The external ComfyUI installation (`D:\ComfyUI\`) is READ-ONLY and must never be
 | Picture 3 | Predecessor continuity frame | Downstream shots only |
 | Picture 4 | Second visible character | 2-character shots |
 
-**Slot pruning:** Unused slots (LoadImage nodes + `ref_images.ref_image_N` connections) are removed from the workflow JSON before ComfyUI submission. This matches real ComfyUI workflow behavior where unused inputs have `link=null`.
-
-**Overflow:** If required inputs exceed 4 slots, `ParameterResolutionError` is raised — never silently drops a character.
+**Note:** The 4-slot limit is a property of this specific H3 workflow template, not a product constraint. H3's `MiniMaxH3ReferenceToVideo` node supports up to 9 image references. Workflow templates with more slots can be created.
 
 ### Workflow Selection
 
@@ -187,11 +230,9 @@ elif downstream (has predecessor) → h3_flf_v1 (legacy fallback)
 else → h3_r2v_v1 (legacy fallback)
 ```
 
-Preview and execution use the same selection logic.
-
 ---
 
-## 7. Durable Generation Lifecycle (P3)
+## 8. Durable Generation Lifecycle (P3)
 
 ### UI → Queue → Worker → ComfyUI → Take
 
@@ -227,21 +268,19 @@ The embedded worker calls `recover()` on startup, resolving all orphaned `claime
 
 `QueueService.has_active_jobs(shot_id)` prevents concurrent generation for the same shot. The API returns 409 if pending/claimed jobs exist. The UI disables the Generate button during active generation.
 
-### Operator Overrides
-
-Queue jobs support optional `overrides` (JSON): `prompt_override` and `duration_override`. These are passed through to `generate_take()` by the worker.
-
 ---
 
-## 8. Continuity System
+## 9. Continuity System
 
 Per-shot continuity chain within scenes. In the image-pack path, the predecessor's approved Take's last frame is uploaded as Picture 3. ContinuityState tracks upstream Take provenance. Replace-approved triggers downstream invalidation.
 
-Legacy FLF path (`h3_flf_v1`) remains available as fallback when no environment ref exists. FLF has NO ref_images input — identity propagates through first_frame pixels + text prompt only.
+Current baseline: frame-level continuity only. Semantic continuity (character state, prop state, narrative state per ORIGINAL_SPEC §27) is a future capability.
+
+Legacy FLF path (`h3_flf_v1`) remains available as fallback when no environment ref exists.
 
 ---
 
-## 9. ComfyUI Integration
+## 10. ComfyUI Integration
 
 | Aspect | Detail |
 |---|---|
@@ -254,7 +293,7 @@ Legacy FLF path (`h3_flf_v1`) remains available as fallback when no environment 
 
 ---
 
-## 10. Operator Console
+## 11. Operator Console
 
 Single-file HTML/JS application (`src/film_director/ui/static/index.html`):
 - Project selection with localStorage persistence
@@ -270,7 +309,7 @@ Single-file HTML/JS application (`src/film_director/ui/static/index.html`):
 
 ---
 
-## 11. Key Technical Facts
+## 12. Key Technical Facts
 
 | Fact | Value |
 |---|---|
@@ -279,24 +318,18 @@ Single-file HTML/JS application (`src/film_director/ui/static/index.html`):
 | Database | SQLite (WAL mode, FK enforcement) |
 | GPU | NVIDIA RTX 5090, 32GB VRAM |
 | ComfyUI | REST+WebSocket |
-| H3 R2V UNET | minimax_h3_ref2va_pruned_int8_convrot.safetensors |
-| H3 FLF UNET | minimax_h3_fl2va_pruned_int8_convrot.safetensors |
-| Text encoder | qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors |
-| Video/Audio VAE | minimax_h3_video_vae_fp16 / audio_vae_fp32 |
-| FPS | 24 (fixed) |
-| Frame grid | 17k+5 |
+| FPS | 24 (fixed, H3 model constraint) |
 | Output | MP4 (H264 + AAC muxed) |
-| Output resolution (16:9) | 1376x768 |
 | Image-pack generation time | ~7-15 min typical on RTX 5090 |
 
 ---
 
-## 12. Architecture Decisions (Frozen)
+## 13. Architecture Decisions (Frozen)
 
-| ADR | Decision |
-|---|---|
-| ADR-001 | Hybrid Wind Comic Sidecar Architecture |
-| ADR-002 | Canonical Production Specification independent of Wind Comic |
-| ADR-003 | ComfyUI runtime via REST/WebSocket API only |
-| ADR-004 | ComfyUI MCP as development tool only |
-| ADR-005 | Provider-specific generation artifacts separated from canonical model |
+| ADR | Decision | Status |
+|---|---|---|
+| ADR-001 | Hybrid Wind Comic Sidecar Architecture | Frozen. Output-quality revisit condition demonstrated. |
+| ADR-002 | Canonical Production Specification independent of Wind Comic | Frozen. Reinforced by PD-5 (LFDirector owns pre-production artifacts). |
+| ADR-003 | ComfyUI runtime via REST/WebSocket API only | Frozen. |
+| ADR-004 | ComfyUI MCP as development tool only | Frozen. |
+| ADR-005 | Provider-specific generation artifacts separated from canonical model | Frozen. |

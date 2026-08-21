@@ -1,334 +1,346 @@
 # Product Specification — Local AI Film Director
 
-**Purpose:** Durable operator-facing product specification documenting the complete production journey, current implementation state, and demonstrated gaps.
+**Purpose:** Durable operator-facing product specification. Defines the target production journey, current implementation state, and gaps between them. Not a handoff file — a separate product reference.
 
-**Last updated:** 2026-08-20
-
----
-
-## Complete Operator Journey
-
-### Stage 1: Project Creation (Idea)
-
-**TARGET PRODUCT BEHAVIOR:**
-The operator enters a creative idea/premise and gets a working production project. The original idea remains visible, inspectable, and referenceable throughout the entire production — it is the single source of creative truth.
-
-**CURRENT IMPLEMENTATION:**
-- Operator enters idea text + optional style in a modal dialog (`showNewProject()`)
-- `POST /projects/from-idea` sends idea to Wind Comic, which creates story/script/storyboard/characters
-- Returns: project with `director_context.description` (original idea stored here)
-- WC project is imported into canonical LFDirector models
-- **Original Idea section** (P4.1 + Fix A): displayed in the sidebar between the project selector and shot list, sourced from `director_context.original_idea`. This is the exact text entered by the operator in LFDirector's Create Project flow, preserved before Wind Comic processing. The WC-processed `director_context.description` (which may contain WC-appended production instructions) is kept as imported context but NOT displayed as "Original Idea". Collapsible (80px default, 300px expanded). Read-only.
-- **Legacy projects** created before Fix A (including proj_cfb89b04f3c8) do not have `original_idea`. The UI shows "Imported Description" with "legacy project" label instead of "Original Idea" — honest degradation without mislabeling.
-
-**GAP:**
-- ~~G1: Original idea becomes invisible.~~ **RESOLVED (P4.1 + Fix A).** True operator idea is preserved in `director_context.original_idea` at project creation time, before WC processing. Displayed as "Original Idea" in the sidebar. WC-processed description stored separately. Legacy projects degrade honestly.
-- **G2: WC import results are opaque.** The operator sees "Created!" but cannot inspect what WC actually produced (scenes, script, storyboard descriptions) vs what was generic placeholder content.
+**Last updated:** 2026-08-21 (product-model audit)
 
 ---
 
-### Stage 2: Enrichment
+## Product Identity
 
-**TARGET PRODUCT BEHAVIOR:**
-The operator triggers enrichment to fill in production data: character definitions, environment description, and shot plan. Each enrichment result should be clearly attributed (LLM-derived vs WC-imported vs operator-written) and inspectable before use.
+LFDirector is an **AI Director + Production Manager + ComfyUI Orchestrator**.
 
-**CURRENT IMPLEMENTATION:**
-- `POST /projects/{id}/enrich` runs three sub-processes atomically:
-  1. Character enrichment: deficient characters get LLM-generated `appearance` + `display_name`
-  2. Environment derivation: LLM extracts physical set description from idea → stored in `director_context.environment_description`
-  3. Shot planning: LLM generates 5-7 shot plan with actions, camera, subjects, duration
-- `POST /projects/{id}/replan` replaces shot plan (refuses if Takes exist)
+It is NOT a prompt-to-video generator. It owns the complete production pipeline from idea to assembled film, using ready-made solutions (Wind Comic, ComfyUI, video models, LLMs) while maintaining its own canonical production specification.
 
-**GAP:**
-- **G3: Enrichment is a black box.** The operator clicks "Enrich" and gets results with no visibility into what the LLM was asked, what context it received, or why it produced these specific shots/characters/environment. There is no preview-before-commit.
-- **G4: Enrichment source attribution missing.** Characters, environment description, and shots all appear the same in the UI regardless of whether they came from WC import, LLM enrichment, or operator editing. The operator cannot distinguish "WC gave us this" from "the LLM generated this" from "I wrote this."
+The operator should be able to start with a simple idea and follow a managed process without needing to understand the underlying AI video production mechanics. The system proposes production structure but the operator can intervene at any stage.
 
 ---
 
-### Stage 3: Character Definitions
+## Target Operator Journey
 
-**TARGET PRODUCT BEHAVIOR:**
-The operator can inspect, understand, and edit each character's production definition. The relationship between the character's origin (WC), enrichment (LLM), and current state (operator-edited) should be clear.
+### Stage 1: Idea
 
-**CURRENT IMPLEMENTATION:**
-- Reference Manager shows each character with:
-  - Editable `Display Name` field
-  - Editable `Appearance` textarea
-  - Save button → `PUT /characters/{id}`
-  - Status badge (Ready / Needs ref)
-- Editing appearance triggers staleness on GENERATED references
+**TARGET:** The operator enters a creative idea/premise. The original idea remains visible, inspectable, and referenceable throughout the entire production — it is the single source of creative truth.
+
+**CURRENT:** Idea is captured as `director_context.original_idea` before Wind Comic processing. Displayed in sidebar "Original Idea" section. Legacy projects degrade honestly with "Imported Description" label.
 
 **GAP:**
-- **G5: Character origin/history invisible.** The operator sees current name + appearance but not what WC originally imported, what the LLM enriched, or what they changed. No diff or provenance trail.
-- The character `description` field (WC-originated) is stored but never shown in the UI — only `appearance` is visible.
+- ~~G1: Original idea invisible.~~ **RESOLVED (P4.1).**
+- **G2: WC import results opaque.** Operator cannot inspect what WC actually produced vs what was generic placeholder content.
 
 ---
 
-### Stage 4: Environment Description
+### Stage 2: Canonical Pre-Production (Story, Treatment, Style)
 
-**TARGET PRODUCT BEHAVIOR:**
-The operator can inspect, understand, and edit the physical set/location description. The relationship between the original idea and the derived environment should be clear.
+**TARGET:** From the idea, the system produces three canonical pre-production artifacts:
 
-**CURRENT IMPLEMENTATION:**
-- Reference Manager shows environment description textarea
-- Editable via Save → `PUT /projects/{id}/environment-description`
-- Editing triggers staleness on GENERATED environment references
+- **Story** — narrative structure: logline, genre, tone, characters, beginning/middle/ending
+- **Director Treatment** — visual language, cinematography, pacing, camera language, lighting strategy, shot density
+- **Style Bible** — visual style, color palette, lighting conventions, texture, production design references
+
+Each artifact:
+- has a SOURCE (Wind Comic, LLM, operator input)
+- is owned canonically by LFDirector (ADR-002)
+- is editable by the operator
+- carries provenance attribution
+- is consumed by downstream planning and generation
+
+The operator should be able to review, accept, edit, or regenerate each artifact independently.
+
+**CURRENT:** These concepts exist only as fragments in `director_context`:
+- `director_context.description` — WC-processed project description (consumed by planning)
+- `director_context.genre`, `.style`, `.story_structure` — imported from WC `WCDirectorPlan` but **never consumed downstream**
+- No `Story`, `DirectorTreatment`, or `StyleBible` canonical entities
+- No editing, versioning, or provenance for these fragments
+- `style_id` from WC is captured in provenance hash but not stored accessibly
 
 **GAP:**
-- **G6: No connection shown between idea and derived environment.** The environment description appears as a standalone text field. The operator cannot see the original idea alongside it to verify that the derivation makes sense. (See G1 — the idea itself is invisible.)
+- **G24: No canonical Story entity.** Story is a dict field inside `director_context`, not an independently versioned artifact.
+- **G25: Director Treatment imported but dead.** Genre/style/structure are imported from WC and then completely ignored by all enrichment and generation code.
+- **G26: No Style Bible.** No representation at any level.
+- **G3: Enrichment is a black box.** No visibility into what the LLM was asked or why it produced specific results.
+- **G4: Enrichment source attribution missing.** Cannot distinguish WC/LLM/operator origins.
 
 ---
 
-### Stage 5: Reference Prompts & Generation
+### Stage 3: Characters
 
-**TARGET PRODUCT BEHAVIOR:**
-Before generating expensive reference images, the operator should see exactly what prompt will be sent to ComfyUI. The operator should be able to edit the prompt, adjust negative prompts, and understand what visual output to expect.
+**TARGET:** The operator can inspect, create, edit, and manage each character's production identity. Characters are canonical LFDirector entities with clear provenance (WC-imported, LLM-enriched, operator-authored). Each character has:
+- display name
+- description (narrative role)
+- appearance (visual production description)
+- visual identity references (managed `ReferenceAsset` entities)
 
-**CURRENT IMPLEMENTATION:**
+Editing a character's appearance invalidates generated visual references. Character definitions are consumed by shot planning, prompt building, and reference generation.
 
-Character references:
-- `POST /characters/{id}/references/generate` accepts optional `prompt_override` and `negative_prompt_override`
-- Default prompt built from: `"A character reference photo of {name}. {appearance}. {pose}, neutral studio lighting..."` (`reference_generator.py:194-201`)
-- Default negative: `"text, labels, watermark, blurry, low quality, deformed, split panels..."` (`reference_generator.py:43`)
-- The UI has Generate Body / Generate Face buttons but NO prompt preview or editing before generation
+**CURRENT:** Characters are stored as `CharacterReference` entities (naming debt — see Implementation Notes). Display name and appearance are editable. LLM enrichment fills empty appearances. Staleness propagation works for GENERATED refs.
 
-Environment references:
-- `POST /projects/{id}/environment-references/generate` accepts NO prompt_override in UI
-- Default prompt built from: `"A single continuous cinematic production design reference photograph of: {description}..."` (`reference_generator.py:54-65`)
-- Default negative includes story-specific exclusions: `"police car, blood, envelope, weapon"` (`reference_generator.py:44-51`)
-- The UI has Generate Environment button but NO prompt preview or editing before generation
+**IMPLEMENTATION NOTE — naming debt:** The current class `CharacterReference` and table `character_references` store what is conceptually the Character entity. Actual visual reference images are stored in `ReferenceAsset`. The `face_ref_path`, `turnaround_paths`, and `visual_anchors` fields on `CharacterReference` are dead code from early design — all visual assets are managed through `ReferenceAsset`. Target documentation and UI should use "Character" terminology. Code/schema rename is deferred.
 
 **GAP:**
-- ~~G7: Reference generation prompts are invisible.~~ **RESOLVED (P4.2).** Clicking Generate Body/Face/Environment now opens a prompt preview panel showing the exact default prompt and negative prompt. The operator can edit both before confirming generation. The displayed defaults come from the same `build_character_prompt()` / `build_environment_prompt()` functions used by actual generation. API endpoints `GET /characters/{id}/reference-prompt-preview` and `GET /projects/{id}/environment-reference-prompt-preview` provide the preview data. Both `prompt_override` and `negative_prompt_override` are now supported for character AND environment generation.
-- ~~G8: Negative prompts are hardcoded with story-specific terms.~~ **RESOLVED (P4.2a).** The P3 story-specific terms (`"police car, blood, envelope, weapon"`) have been removed from the generic `DEFAULT_ENVIRONMENT_NEGATIVE`. The default now contains only generic empty-set exclusions (people, text, artifacts, composition problems). The operator can see and edit the negative prompt before every generation (P4.2). Regression tests prevent recontamination. Future enhancement: project-derived automatic negative prompts (not a contamination bug, separate feature).
+- **G5: Character origin/history invisible.** No diff or provenance trail visible to operator.
+- `CharacterReference.description` (WC-originated narrative role) is stored but never shown — only `appearance` is visible.
 
 ---
 
-### Stage 6: Reference Review
+### Stage 4: Locations
 
-**TARGET PRODUCT BEHAVIOR:**
-The operator reviews generated/uploaded reference images and approves or rejects them. The operator should understand what prompt produced each reference and be able to regenerate with adjustments.
+**TARGET:** Locations are first-class canonical production concepts:
+- A Location represents a physical place/set with its own visual description and reference assets.
+- Scenes reference reusable Locations — the same Location can appear in multiple scenes.
+- A Location owns its environment description and location reference images (replacing the current project-level-only ENVIRONMENT pattern).
+- Shots inherit their scene's Location but may have shot-level environment overrides.
 
-**CURRENT IMPLEMENTATION:**
-- Reference cards show: thumbnail, status badge (candidate/approved/rejected/archived), source state (current/stale), dimensions, source provenance ID
-- Actions: Approve, Reject, Archive, Pin/Unpin
-- Re-generation: click Generate again (creates new candidate)
+**CURRENT:** No `Location` entity exists. Environment is represented as:
+- `director_context.environment_description` — a single project-level string
+- `ReferenceAsset` with `kind=ENVIRONMENT` — project-level, one per project
+- `Scene.location` — imported from WC but never displayed, edited, or consumed
+- `Shot.environment` — JSON dict, partially consumed by FLF continuity prompts but not editable in UI
 
 **GAP:**
-- ~~G9: Generated reference prompt not shown on reference card.~~ **RESOLVED (P4.3).** Each generated reference card now has a "Show prompt used" toggle that fetches and displays the stored prompt, negative prompt, seed, and kind from the `ReferenceGenerationRequest` via `GET /reference-generation-requests/{id}`. User-uploaded refs show "User upload" instead. Historical refs with pre-P4 pseudo provenance IDs degrade gracefully (show "Prompt details unavailable").
+- **G27: No Location entity.** A multi-scene project with different locations (e.g., kitchen interior + street exterior) cannot have different environment references. All shots share one project-wide ENVIRONMENT ref.
+- **G6: No idea↔environment connection shown.** Partially mitigated by G1 fix, but the derivation relationship is not visible.
 
 ---
 
-### Stage 7: Shot Plan
+### Stage 5: Props
 
-**TARGET PRODUCT BEHAVIOR:**
-The operator can inspect, understand, and edit every aspect of each shot: action description, dramatic purpose, camera (size/angle/movement), subjects, duration, lighting intent, and audio intent. The shot plan should be understandable as a coherent sequence.
+**TARGET:** Props are trackable production elements with optional reference assets. A prop may have a visual reference, location/condition state, and ownership (which character holds it). Props appear in shot specifications and can affect continuity.
 
-**CURRENT IMPLEMENTATION:**
-- Shot list in sidebar shows shot number + truncated action + status badge
-- Shot Plan Editor: textarea per shot for action text, move up/down/delete buttons, Add Shot button
-- Main panel shows: Shot Description, Camera metadata, Duration, Workflow
-- Right panel shows: Duration input, Seed control
-- Shot editing via `PUT /shots/{id}` supports: action, dramatic_purpose, subjects, camera, environment, lighting, audio_intent, duration_sec
+**CURRENT:** No `Prop` entity. `AssetRole.PROP_REFERENCE` and `PROP_TURNAROUND` exist in the `AssetRole` enum. H3_IMAGE_PACK_RECIPE slot 3 is typed as `PROP_REFERENCE` (optional). `ReferenceKind` does NOT include a PROP value. No prop tracking, no prop references in any production path.
 
 **GAP:**
-- ~~G10: Shot editing is split across disconnected views.~~ **RESOLVED (P4.4).** The main panel now shows a unified "Shot Production Editor" with editable fields for: action, dramatic_purpose, camera (size/angle/movement), duration, lighting, ambient sound, music, and subjects. An explicit "Save Shot" button persists changes and regenerates the H3 prompt preview.
-- ~~G11: Subjects are not editable in the UI.~~ **RESOLVED (P4.4).** The editor shows current subjects as badges. An "Add character" picker populated from the project's character list lets the operator add characters. "Remove Last" removes the most recent subject. Duplicate characters are prevented. Subject changes affect reference binding (visible in the generation preview pictures).
-- ~~G12: Audio/lighting/environment not editable in the UI.~~ **PARTIALLY RESOLVED (P4.4).** Ambient sound and music fields are now editable and map directly to `[Overall Soundscape]` and `[Non-Diegetic Music]` H3 prompt sections. Lighting is editable as key:value pairs. Environment intent (dict) is not yet exposed — low priority since environment continuity is driven by the environment reference image, not shot-level text. **Remaining gap: intentional spoken dialogue is not represented in the current `audio_intent` model (H3 generates dialogue spontaneously without operator control). This is G14.**
+- **G28: No Prop entity or lifecycle.**
 
 ---
 
-### Stage 8: Generation Prompt (H3 Video Prompt)
+### Stage 6: Scenes and Beats
 
-**TARGET PRODUCT BEHAVIOR:**
-Before committing to an expensive 7-15+ minute ComfyUI render, the operator should see the exact prompt that will be sent to H3, understand every section, and be able to edit or override it.
+**TARGET:** The production hierarchy is: Sequence → Scene → Beat → Shot.
 
-**CURRENT IMPLEMENTATION:**
-- Generation Preview (`GET /shots/{id}/generation-preview`) returns the prompt text
-- The main panel shows the prompt in a textarea with "Generated" or "Override" badge
-- Operator can edit the prompt inline → `onPromptEdit()` sets `draftPrompt`
-- Edited prompt is sent as `prompt_override` to `POST /shots/{id}/generate`
-- Reset button returns to generated prompt
+A Scene represents a continuous dramatic unit at a Location with specific cast and props. A Scene has:
+- Location reference
+- Cast (which Characters appear)
+- Dramatic purpose
+- Beats (dramatic sub-units)
 
-H3 prompt sections (assembled by `H3PromptBuilder.build()`):
-1. `[Subject Definitions]` — `<Subject N> is {name} — {appearance} in <Picture N>`
-2. `[Summary]` — `{names}: {action}. {dramatic_purpose}.`
-3. `[Retention Analysis]` — `<Subject N> fully_preserved — {appearance}`
-4. `[Detailed Description]` — `Camera: {shot_size}. angle {angle}. movement {movement}. Action: {action}. Duration: {duration}s.`
-5. `[Overall Soundscape]` — from `audio_intent.ambient` (if set)
-6. `[Non-Diegetic Music]` — from `audio_intent.music` (if set)
+A Beat is a dramatic moment within a scene (action, character intention, change). Beats group shots that cover the same dramatic moment. A beat may map 1:1 with a shot or may have multiple shots providing coverage (master, close-up, reaction, etc.).
+
+**CURRENT:**
+- Scene: exists as structural entity. `location` and `description` are imported from WC but never displayed or consumed. No cast assignment. No scene-level editing UI.
+- Beat: exists and persists. The current `ShotPlanner` creates 1:1 beat→shot mappings. The legacy `BeatEnricher` → `CoveragePlanner` chain supports multi-shot-per-beat coverage. Beats have full API (`GET/PUT` beats, `POST enrich-beats`, `POST plan-coverage`) but are **invisible in the operator UI**.
+- `shots.beat_id` is a NOT NULL foreign key — shots cannot exist without beats.
 
 **GAP:**
-- ~~G13: Prompt is a raw text wall.~~ **RESOLVED (P4.4).** The operator now edits meaningful production inputs (action, camera, subjects, audio) in the Shot Production Editor. The H3 prompt is clearly labeled "Generated from inputs" and compiled from the actual H3PromptBuilder path via the generation-preview endpoint. The operator can still override the raw prompt text for fine-tuning, with a "Reset to generated" action. The relationship INPUTS → COMPILED PROMPT → OPTIONAL OVERRIDE → GENERATION is now visible.
-- **G14: No intentional dialogue direction.** H3 generates audio (including spontaneous dialogue) but the operator has no explicit control over spoken dialogue content. The `audio_intent` model supports `ambient` and `music` fields (now editable in the UI), but there is no `dialogue` field or mechanism to direct what characters say. H3's dialogue generation is not controllable through the prompt. This remains an observation-level gap — H3's dialogue controllability is not established.
-- **G15: Prompt sections are not explained.** The operator sees `[Subject Definitions]`, `[Retention Analysis]` etc. without explanation of what each section does or how H3 interprets them. Mitigated by P4.4 — the operator now edits semantic fields rather than raw prompt sections, making section understanding less critical for basic operation.
+- Scenes are invisible/non-editable. Location, cast, and description fields exist but are not exposed.
+- Beats are invisible. Whether they should be visible as a grouping UI or remain a structural intermediate is an accepted product decision (lightweight grouping layer, preserve multi-shot semantics).
 
 ---
 
-### Stage 9: Generation Preview
+### Stage 7: Storyboard
 
-**TARGET PRODUCT BEHAVIOR:**
-Before generation, the operator should see all inputs that will be sent to ComfyUI: reference images, continuity frame, workflow, resolution, duration, frame count, seed, and prompt. Each input should be inspectable and its purpose clear.
+**TARGET:** Before expensive video generation, the operator reviews a visual storyboard of the entire production. Each shot has a storyboard frame showing the intended composition. Sources:
+- Wind Comic import (WC storyboard images)
+- Generated image (via ComfyUI/image model from shot description)
+- Operator upload
 
-**CURRENT IMPLEMENTATION:**
-- Right panel shows Picture cards with: thumbnail, role label, reference ID, status badge
-- Duration input with resolved frames/duration display
-- Seed mode selector (random/explicit)
-- Workflow + resolution display
-- Generation summary: workflow, duration, inputs count, seed
-- "Blocked" state shown when predecessor shot has no approved Take
-- Generate button enabled/disabled based on `can_generate` and active job state
+The operator can review, approve, reject, and regenerate storyboard frames. The storyboard provides a pre-generation quality gate.
+
+**CURRENT:**
+- `ShotSpecificationV1.storyboard_image_path` exists (nullable, never populated)
+- `ShotSpecificationV1.wc_storyboard_id` and `wc_shot_number` exist for WC correlation
+- `ReferenceKind.STORYBOARD` exists with ownership rules (shot_id required)
+- WC storyboard descriptions are parsed during import for camera/lighting extraction
+- WC storyboard **images** are available via URLs but **never downloaded or stored**
 
 **GAP:**
-- ~~G16: Reference images are small thumbnails with no inspection.~~ **RESOLVED (P4 UX cleanup).** Reference card thumbnails increased to 72x72. Clicking any reference thumbnail opens a large modal preview (90vw/90vh). Aspect ratio preserved.
-- The generation preview is otherwise well-implemented and shows the correct information.
+- **G29: No storyboard review stage.** Storyboard images are not imported, generated, or displayed. The operator goes directly from shot plan to video generation with no visual preview of intended compositions.
 
 ---
 
-### Stage 10: Generation (Durable Async)
+### Stage 8: Shot Specification
 
-**TARGET PRODUCT BEHAVIOR:**
-Generation should be durable: the operator clicks Generate, gets immediate feedback, and can close/refresh the browser without losing the generation. Status should be visible throughout. Completed renders must always be persisted.
+**TARGET:** Each shot has a complete, model-agnostic production specification: action, dramatic purpose, subjects, camera (size/angle/movement), lighting, audio intent (ambient/music/dialogue), duration, and environment. The operator can edit all fields. Changes trigger version increments and prompt recompilation.
 
-**CURRENT IMPLEMENTATION:**
-- `POST /shots/{id}/generate` returns 202 with `{job_id, status: "pending", seed}`
-- Embedded QueueWorker claims and executes in background thread
-- UI polls `GET /queue/jobs/{job_id}` every 4 seconds
-- "Generating" badge shown on shot in sidebar
-- Generate button disabled during active generation
-- Duplicate protection: 409 if active jobs exist for shot
-- Page refresh rediscovers active jobs via `GET /queue/jobs?shot_id=X`
-- Timeout leaves job claimed for recovery (not permanently failed)
-- Worker recovery checks ComfyUI history for failed-with-prompt_id
+**CURRENT:** `ShotSpecificationV1` covers all listed fields except dialogue. The Shot Production Editor (P4.4) provides semantic editing for action, dramatic purpose, camera, duration, lighting, ambient, music, and subjects. Shot editing triggers version increment and prompt rebuild.
 
 **GAP:**
-- **NONE for core generation lifecycle.** Durable async generation is fully implemented (P3).
-- Minor: no estimated completion time or progress indicator (ComfyUI does not provide percent-complete for H3).
+- **G14: No intentional dialogue direction.** H3 generates spontaneous dialogue without operator control. The `audio_intent` model has `ambient` and `music` but no `dialogue` field.
+- **G15: Prompt sections not explained.** Mitigated by semantic editor but H3 section labels remain unexplained.
 
 ---
 
-### Stage 11: Take Review
+### Stage 9: References
 
-**TARGET PRODUCT BEHAVIOR:**
-The operator reviews generated Takes: watches the video, compares multiple takes, approves or rejects each. Approved takes become the canonical output for the shot and feed continuity to downstream shots.
+**TARGET:** Before generation, the system assembles reference assets for each shot. Reference types include:
+- Character identity references (face, body)
+- Location/environment references
+- Style references
+- Prop references
+- Storyboard/shot composition references
+- Continuity frames (from predecessor's approved Take)
 
-**CURRENT IMPLEMENTATION:**
-- Main panel shows video player with the latest/approved take
-- Takes list shows each take with: status badge, seed, take ID, Approve/Reject buttons
-- Approve → `POST /takes/{id}/approve` (triggers continuity chain)
-- Reject → `POST /takes/{id}/reject`
-- Only one approved take per shot (enforced by partial unique index)
+`ReferenceKind` defines what a managed asset IS (ownership semantics). `AssetRole` defines how an asset is USED in a generation/conditioning recipe. These are separate concepts — a CHARACTER_BODY `ReferenceAsset` might be bound in the `CHARACTER_BODY_FRONT` role. Provider-specific picture-slot semantics are NOT canonical.
+
+**CURRENT:**
+- `ReferenceKind` has 4 values: CHARACTER_FACE, CHARACTER_BODY, STORYBOARD, ENVIRONMENT
+- `AssetRole` has 18 values (broader semantic roles) but is only used in `VisualAssetPack` bindings, not in `ReferenceAsset.kind`
+- Character refs: full lifecycle (generate/upload/approve/reject/archive/pin) with prompt preview
+- Environment refs: full lifecycle, project-level ownership
+- Storyboard refs: enum exists but never populated
+- Style/Prop refs: no `ReferenceKind` values, no production paths
+- Continuity frames: tracked in `ContinuityState`, not as `ReferenceAsset` entities
 
 **GAP:**
-- **G17: No side-by-side take comparison.** When multiple takes exist, the operator can only view one at a time via the video player. There is no comparison/A-B view.
-- ~~G18: No take-level metadata display.~~ **RESOLVED (P4.9/P4.12).** Each Take has a "Details" button that shows the immutable historical prompt, seed, workflow, references, continuity source, and timestamps from its GenerationRequest. Multiple Takes each resolve to their own historical data.
+- **G30: ReferenceKind too narrow.** Target scope must support Character, Location, Prop, Style, and Storyboard references. Current 4-value enum reflects MVP/H3 production needs.
+- Style and Prop references have no creation, lifecycle, or selection paths.
 
 ---
 
-### Stage 12: Prompt Revision & Regeneration
+### Stage 10: Generation Prompt
 
-**TARGET PRODUCT BEHAVIOR:**
-After reviewing a take, the operator should be able to revise the prompt, adjust camera/duration/seed, and regenerate while preserving the history of previous takes and their settings.
+**TARGET:** The operator sees a compiled generation prompt derived from shot specification inputs. The prompt is provider-specific (currently H3) but the operator edits model-agnostic inputs, not raw provider syntax. The operator can override the compiled prompt for fine-tuning. Two distinct prompt states exist:
 
-**CURRENT IMPLEMENTATION:**
-- Operator edits prompt in textarea, changes duration/seed in right panel
-- Clicks Generate again → new queue job, new take with new take_number
-- Previous takes remain in the Takes list (never deleted)
-- `draftPrompt`/`draftDuration`/`draftSeedValue` are UI-local state (reset on shot switch)
+1. **Persistent shot-level working draft** — saved per shot, survives shot switching and page refresh
+2. **Immutable per-generation snapshot** — frozen in `GenerationRequest` at generation time
+
+**CURRENT:** Shot inputs are persistent (action, camera, subjects, etc. via `PUT /shots/{id}`). The H3 prompt is compiled via `H3PromptBuilder` and shown in the editor. Prompt overrides are **ephemeral JS state** (`draftPrompt`) — lost on shot switch.
 
 **GAP:**
-- ~~G19: No prompt history.~~ **RESOLVED (P4.9).** Each Take now has an expandable "Details" section showing the historical prompt, seed, workflow, references, continuity source, and timestamps from the immutable GenerationRequest that produced it. Multiple Takes from the same shot each show their own historical data. Editing the current shot does NOT change displayed Take provenance.
-- **G20: Override state is ephemeral.** If the operator sets a prompt override and switches shots, the override is lost. There is no way to persist a custom prompt for a shot without generating.
+- **G20: Override state is ephemeral.** Prompt/duration/seed drafts are JS-only. No persistent shot-level working draft.
+
+---
+
+### Stage 11: Generation Preview and Execution
+
+**TARGET:** Before generation, the operator sees all inputs (references, prompt, workflow, resolution, duration, seed). Generation is durable and async.
+
+**CURRENT:** Fully implemented (P3/P4). Generation preview shows picture cards, duration, seed, workflow. Durable async generation via persistent queue with timeout recovery. Duplicate protection. Page-refresh discovery.
+
+**GAP:** None for core lifecycle. Minor: no progress indicator.
+
+---
+
+### Stage 12: Takes and Review
+
+**TARGET:** The operator reviews generated Takes, compares multiple takes, and approves or rejects each. Each Take preserves immutable provenance (prompt, seed, references, continuity source). Approved takes feed continuity to downstream shots.
+
+Future: AI Review provides automated quality assessment (character consistency, composition, prompt adherence) before human review.
+
+**CURRENT:** Human review with approve/reject. Take provenance via generation details (P4.9/P4.12). Single approved per shot.
+
+**GAP:**
+- **G17: No side-by-side Take comparison.**
+- AI Review (originally M8) deferred.
 
 ---
 
 ### Stage 13: Continuity
 
-**TARGET PRODUCT BEHAVIOR:**
-The operator should understand the continuity chain: which approved take feeds into which downstream shot as Picture 3. Replacing an approved take should clearly show which downstream shots are affected.
+**TARGET:** The operator understands the continuity chain and can see which approved Takes feed which downstream shots. Replacing an approved Take shows affected downstream shots. Current baseline: frame-level continuity (predecessor's last frame). Semantic continuity (character state, prop state, narrative state) is a future capability.
 
-**CURRENT IMPLEMENTATION:**
-- Continuity is automatic: approved take's last frame becomes Picture 3 for next shot
-- "Blocked" state shown when predecessor has no approved take
-- ContinuityState tracks upstream provenance (take_id, shot_id, last_frame_sha256)
-- Replace-approved triggers downstream invalidation
+**CURRENT:** Frame-level continuity works. `ContinuityState` tracks upstream provenance. Replace-approved triggers downstream invalidation. "Blocked" indicator for unresolved predecessors. API endpoints for chain inspection exist.
 
 **GAP:**
-- **G21: Continuity chain is not visualized.** The operator can see "Blocked: Approve Shot N" but cannot see the full continuity graph (Shot 1 → Shot 2 → Shot 3...). There is no visual representation of which takes feed which shots.
+- **G21: Continuity chain not visualized.** API exists but UI shows only "Blocked" indicator.
+- Semantic continuity (character/prop/narrative state per ORIGINAL_SPEC §27) is deferred.
 
 ---
 
-### Stage 14: Scene Assembly
+### Stage 14: Timeline and Assembly
 
-**TARGET PRODUCT BEHAVIOR:**
-When all shots are approved, the operator builds the final scene. The assembled video should be playable, inspectable, and exportable.
+**TARGET:** A minimal production timeline — NOT a full NLE. The timeline represents:
+- ordered approved clips per scene
+- clip source, start, duration
+- transitions (future)
+- assembly version/freshness tracking
 
-**CURRENT IMPLEMENTATION:**
-- Scene Assembly section in sidebar shows approval count
-- "Build Scene" button enabled when all shots approved
-- `POST /projects/{id}/build-scene` concatenates all approved take videos via ffmpeg
-- Result shown in video player with duration and resolution
+Scene assembly produces concatenated output. The timeline may eventually export to external NLE (EDL/OTIO for DaVinci Resolve per ORIGINAL_SPEC §34).
+
+**CURRENT:** Scene assembly via FFmpeg stream-copy concatenation. Produces MP4 + JSON manifest. No persistent timeline model. No transition support. No stale tracking.
 
 **GAP:**
-- **G22: No scene re-assembly after shot replacement.** If the operator replaces an approved take after assembly, there is no indication that the scene is stale or needs rebuilding.
-- Scene assembly is otherwise functional.
+- **G31: No timeline model.** Assembly is a one-shot operation with no persistent clip/track representation.
+- **G22: No stale assembly indicator.** Replacing a Take after assembly produces no warning.
+- **G23: No export/download button.** Operator must know media URL convention.
 
 ---
 
-### Stage 15: Final Review & Export
+## Accepted Product Decisions
 
-**TARGET PRODUCT BEHAVIOR:**
-The operator can review the complete assembled scene, export it, and access individual shot videos.
+The following decisions were accepted during the product-model audit (2026-08-21) and govern the target architecture:
 
-**CURRENT IMPLEMENTATION:**
-- Assembled scene plays in main panel video player
-- Scene export metadata available via `GET /projects/{id}/scene-export`
-- Individual take videos accessible via media URLs
+### PD-1: Location is a first-class canonical concept
+Scenes reference reusable Locations. A Location owns its visual description and reference assets. The current project-level `environment_description` is legacy/MVP behavior.
 
-**GAP:**
-- **G23: No export/download button.** The assembled scene plays in the browser but there is no explicit download/export action. The operator must know the media URL convention.
+### PD-2: CharacterReference is conceptually Character
+Visual references remain `ReferenceAsset`. Code/schema rename deferred. Documentation and UI use "Character" terminology.
+
+### PD-3: Beat remains in canonical hierarchy
+Scene → Beat → Shot is the target hierarchy. Beat may be a lightweight grouping layer in UI. Multi-shot coverage semantics preserved.
+
+### PD-4: Prompt editing has two states
+Persistent shot-level working draft + immutable per-generation snapshot. Current JS-only drafts are not target behavior.
+
+### PD-5: Story, Treatment, Style are canonical LFDirector artifacts
+Source may be WC, LLM, or operator. LFDirector owns the canonical version. Provenance attribution preserved.
+
+### PD-6: Wind Comic is source, not canonical owner
+ADR-001 adapter boundary remains. WC output-quality revisit condition has been demonstrated. WC not removed.
+
+### PD-7: ReferenceKind and AssetRole remain separate
+ReferenceKind = what the asset IS. AssetRole = how it is USED in generation. Target ReferenceKind scope: Character, Location, Prop, Style, Storyboard.
+
+### PD-8: Storyboard is a core pre-generation stage
+Each shot can have a storyboard frame. Sources: WC import, generated image, operator upload.
+
+### PD-9: H3 leakage in routes is technical debt
+Not a standalone milestone. Cleanup occurs when Generation API is consolidated.
+
+### PD-10: Timeline is future minimal, semantic continuity deferred
+Frame-level continuity is the current baseline.
 
 ---
 
-## Future Accepted Capabilities (Not P4 Priority)
+## Gap Registry
 
-### Environment View Packs / Multi-View Environment
-A single project-level ENVIRONMENT reference was observed to be insufficient for maintaining spatial/environment continuity across shots using substantially different camera angles. A multi-view environment pack (e.g., front/side/overhead views of the set) or 360-degree environment source would address this. Record as accepted future capability but do NOT prioritize in P4.
+### Resolved (P4)
 
-### H3 Prompt Compilation
-An intermediate LLM step that "compiles" operator-facing shot direction into optimal H3 prompt format. Should be integrated into the operator-visible prompt control (Stage 8) rather than hidden as backend behavior. The prompt editing UI (G13) should be addressed first so compilation has a proper surface.
+| ID | Description | Resolution |
+|----|-------------|------------|
+| G1 | Original idea invisible | P4.1 — `original_idea` in sidebar |
+| G7 | Reference prompts invisible | P4.2 — prompt preview + editable |
+| G8 | Story-specific negative prompts | P4.2a — generic defaults only |
+| G9 | Reference prompt not on card | P4.3 — "Show prompt used" toggle |
+| G10 | Shot editing split | P4.4 — unified editor |
+| G11 | Subjects not editable | P4.4 — character picker |
+| G12 | Audio/lighting not editable | P4.4 — partially (dialogue remains G14) |
+| G13 | Prompt raw text wall | P4.4 — semantic editor + compiled prompt |
+| G16 | Thumbnails not inspectable | P4 UX — 72x72 + click-to-enlarge |
+| G18 | No take metadata | P4.9/P4.12 — generation details |
+| G19 | No prompt history | P4.9 — historical prompt per Take |
 
-### AI Reviewer (M8)
-Automated quality assessment of generated Takes before human review. Deferred until operator workflow is stable.
+### Open
 
----
-
-## P4 Prioritized Gap List
-
-Priority based on real operator journey order and impact on production quality:
-
-| Priority | Gap | Stage | Type | Impact |
-|----------|-----|-------|------|--------|
-| ~~P4.1~~ | ~~G1: Original idea invisible after creation~~ | 1 | ~~UI~~ | **RESOLVED** — displayed in sidebar "Original Idea" section |
-| ~~P4.2~~ | ~~G7: Reference generation prompts invisible~~ | 5 | ~~UI+Backend~~ | **RESOLVED** — prompt preview + editable before generation |
-| ~~P4.3~~ | ~~G9: Generated reference prompt not shown on card~~ | 6 | ~~UI+Backend~~ | **RESOLVED** — "Show prompt used" on generated ref cards |
-| ~~P4.4~~ | ~~G13: H3 prompt is raw text wall~~ | 8 | ~~UI~~ | **RESOLVED** — semantic editor + compiled prompt + override |
-| **P4.5** | G14: No intentional dialogue direction | 8 | UI+Backend | H3 generates dialogue but operator has no control |
-| ~~P4.6~~ | ~~G10: Shot editing split across views~~ | 7 | ~~UI~~ | **RESOLVED** — unified Shot Production Editor |
-| ~~P4.7~~ | ~~G11: Subjects not editable in UI~~ | 7 | ~~UI~~ | **RESOLVED** — add/remove via character picker |
-| ~~P4.8~~ | ~~G12: Audio/lighting/environment not editable~~ | 7 | ~~UI~~ | **PARTIALLY RESOLVED** — ambient/music/lighting editable; dialogue gap remains (G14) |
-| ~~P4.9~~ | ~~G19: No prompt history across takes~~ | 12 | ~~UI+Backend~~ | **RESOLVED** — historical prompt/seed/refs per Take via generation-details |
-| ~~P4.10~~ | ~~G16: Reference thumbnails not inspectable~~ | 9 | ~~UI~~ | **RESOLVED** — 72x72 thumbnails + click-to-enlarge modal |
-| **P4.11** | G6: No idea↔environment connection shown | 4 | UI | Derived environment appears disconnected from idea |
-| ~~P4.12~~ | ~~G18: No take-level metadata display~~ | 11 | ~~UI~~ | **RESOLVED** — expandable generation details per Take |
-| ~~P4.13~~ | ~~G8: Hardcoded story-specific negative prompts~~ | 5 | ~~Backend~~ | **RESOLVED (P4.2a)** — P3-specific terms removed, generic defaults only |
-| **P4.14** | G17: No side-by-side take comparison | 11 | UI | Can only view one take at a time |
-| **P4.15** | G20: Override state is ephemeral | 12 | UI | Prompt overrides lost on shot switch |
-| **P4.16** | G4: Enrichment source attribution missing | 2 | UI+Backend | Cannot distinguish WC/LLM/operator sources |
-| **P4.17** | G21: Continuity chain not visualized | 13 | UI | No visual graph of shot continuity |
-| **P4.18** | G5: Character origin/history invisible | 3 | UI | No provenance trail for character definitions |
-| **P4.19** | G3: Enrichment is a black box | 2 | UI+Backend | No visibility into enrichment process |
-| **P4.20** | G22: No stale scene indicator | 14 | UI | No warning when assembly is outdated |
-| **P4.21** | G23: No export/download button | 15 | UI | Must know media URL convention |
-| **P4.22** | G2: WC import results opaque | 1 | UI | Cannot inspect what WC produced |
-| **P4.23** | G15: Prompt sections not explained | 8 | UI | Section labels without documentation |
+| ID | Description | Stage | Type | Requires |
+|----|-------------|-------|------|----------|
+| G2 | WC import results opaque | 1 | UI | API changes |
+| G3 | Enrichment is black box | 2 | UI+Backend | API changes |
+| G4 | Source attribution missing | 2 | UI+Backend | API changes |
+| G5 | Character origin/history | 3 | UI | API changes |
+| G6 | No idea↔environment link | 4 | UI | UI only |
+| G14 | No dialogue direction | 8 | Model limitation | Investigation |
+| G15 | Prompt sections unexplained | 10 | UI | UI only |
+| G17 | No side-by-side Take comparison | 12 | UI | UI only |
+| G20 | Override state ephemeral | 10 | Schema+UI | Schema extension (PD-4) |
+| G21 | Continuity chain not visualized | 13 | UI | UI only (API exists) |
+| G22 | No stale assembly indicator | 14 | UI | API changes |
+| G23 | No export/download button | 14 | UI | UI only |
+| G24 | No canonical Story entity | 2 | Schema | Schema extension (PD-5) |
+| G25 | Director Treatment dead | 2 | Schema+Service | Schema extension (PD-5) |
+| G26 | No Style Bible | 2 | Schema | Schema extension (PD-5) |
+| G27 | No Location entity | 4 | Schema | Schema extension (PD-1) |
+| G28 | No Prop entity | 5 | Schema | Schema extension |
+| G29 | No storyboard review | 7 | Schema+UI | Schema extension (PD-8) |
+| G30 | ReferenceKind too narrow | 9 | Enum extension | Schema extension (PD-7) |
+| G31 | No timeline model | 14 | Schema | Schema extension (PD-10) |

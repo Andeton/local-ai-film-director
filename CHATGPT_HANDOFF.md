@@ -3,7 +3,7 @@
 **Date**: 2026-08-21
 **Branch**: `p4-operator-workflow` (run `git rev-parse HEAD` for current commit)
 **Main HEAD**: `0ea4bce835264621a2513af52cb12aa75b083479`
-**Test baseline**: 2141 passed, 1 skipped, 12 deselected (live tests)
+**Test baseline**: 2146 passed, 1 skipped, 12 deselected (live tests)
 **GitHub**: https://github.com/Andeton/local-ai-film-director.git
 
 ## 1. Project Purpose
@@ -112,7 +112,7 @@ python -m uvicorn "film_director.main:create_app" --factory --host 127.0.0.1 --p
 
 **Implement Location Slice 6 (operator UI surfaces for Locations and Location-scoped references) on `p4-operator-workflow`.**
 
-Slices 1-5 complete. Slice 5: multi-Location planning via LLM with semantic deduplication, deterministic fallback, per-Location descriptions, enrichment integration (35 tests). 2141 total passed. Live enrichment check not performed (requires OpenRouter runtime). See `docs/ROADMAP.md` for the 7-slice plan.
+Slices 1-5 complete (Slice 5 corrected). Fail-closed LLM validation, no silent scene skip/repair, no fabricated Locations for empty evidence, partial enrichment reconciliation. Live OpenRouter check passed: 4 scenes → 3 Locations with apartment reuse. 2146 total passed. See `docs/ROADMAP.md` for the 7-slice plan.
 
 Do NOT start broad infrastructure, new model adapters, or generalized routing until Location entity and a successful multi-scene production validate the target architecture.
 

@@ -1,7 +1,7 @@
 # Development State — Local AI Film Director
 
 **Last Updated:** 2026-08-21 (Location Slice 5 implemented)
-**Test Baseline:** 2141 passed, 1 skipped, 12 deselected (live tests)
+**Test Baseline:** 2146 passed, 1 skipped, 12 deselected (live tests)
 **Branch:** p4-operator-workflow (P3 merged to main at 0ea4bce)
 
 ---

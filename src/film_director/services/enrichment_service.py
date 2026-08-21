@@ -145,7 +145,7 @@ class EnrichmentService:
                 enriched_by_id = {c.id: c for c in enriched_chars}
                 characters = [enriched_by_id.get(c.id, c) for c in characters]
 
-        # --- Location planning (Slice 5): only for new projects without Locations ---
+        # --- Location planning (Slice 5): plan for unassigned scenes ---
         new_locations: list = []
         location_assignments: dict[str, str] = {}  # scene_id → location_id
         if (self._shot_planner is not None
@@ -153,26 +153,49 @@ class EnrichmentService:
                 and scenes
                 and project_description):
             existing_locations = self._location_repo.list_by_project(project_id)
-            if not existing_locations:
-                # Plan Locations from scene structure
+
+            # Find scenes that still need Location assignment
+            unassigned_scenes = [s for s in scenes if s.location_id is None]
+
+            if unassigned_scenes:
                 import uuid as _uuid
                 from film_director.models.canonical import Location
                 now = datetime.now(timezone.utc).isoformat()
 
-                planned = self._shot_planner.plan_locations(scenes, project_description)
+                planned = self._shot_planner.plan_locations(
+                    unassigned_scenes, project_description,
+                )
                 for loc_plan in planned:
-                    loc_id = f"loc_{_uuid.uuid4().hex[:12]}"
-                    loc = Location(
-                        id=loc_id,
-                        project_id=project_id,
-                        name=loc_plan["name"],
-                        description=loc_plan.get("description", ""),
-                        source="llm" if loc_plan.get("description") else "wind_comic",
-                        version=1,
-                        created_at=now,
-                        updated_at=now,
+                    loc_name = loc_plan["name"]
+                    loc_desc = loc_plan.get("description", "")
+
+                    # Check for existing Location with same normalized name
+                    # to avoid duplicating on retry
+                    from film_director.enrichment.shot_planner import _normalize_location_string
+                    norm_name = _normalize_location_string(loc_name)
+                    existing_match = next(
+                        (el for el in existing_locations
+                         if _normalize_location_string(el.name) == norm_name),
+                        None,
                     )
-                    new_locations.append(loc)
+
+                    if existing_match:
+                        loc_id = existing_match.id
+                    else:
+                        loc_id = f"loc_{_uuid.uuid4().hex[:12]}"
+                        source = "llm" if loc_desc else "wind_comic"
+                        loc = Location(
+                            id=loc_id,
+                            project_id=project_id,
+                            name=loc_name,
+                            description=loc_desc,
+                            source=source,
+                            version=1,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                        new_locations.append(loc)
+
                     for sid in loc_plan.get("scene_ids", []):
                         location_assignments[sid] = loc_id
 

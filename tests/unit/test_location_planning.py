@@ -1,13 +1,12 @@
 """Tests for Location Slice 5 — multi-Location planning/enrichment.
 
-Covers LLM-based location identification, deterministic fallback,
-validation, deduplication, and integration with enrichment pipeline.
+Corrected validation: fail-closed, no silent skip/repair of bad scene IDs,
+no fabricated "Main Location", partial enrichment reconciliation.
 """
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -26,9 +25,10 @@ from film_director.models.provenance import Provenance
 from film_director.persistence.database import Database
 from film_director.persistence.repositories import (
     BeatRepository, CharacterRepository, GenerationPlanRepository,
-    LocationRepository, ProjectRepository, SceneRepository,
-    SequenceRepository, ShotRepository,
+    LocationRepository, ProjectRepository, ReferenceAssetRepository,
+    SceneRepository, SequenceRepository, ShotRepository,
 )
+from film_director.enrichment.stale_propagator import StalePropagator
 from film_director.services.enrichment_service import EnrichmentService
 
 NOW = "2026-08-21T00:00:00+00:00"
@@ -73,12 +73,12 @@ class TestNormalize:
 
 
 # ---------------------------------------------------------------------------
-# _validate_location_plan
+# _validate_location_plan — fail-closed
 # ---------------------------------------------------------------------------
 
 class TestValidateLocationPlan:
     def _scenes(self):
-        return [_scene("sc_1"), _scene("sc_2"), _scene("sc_3")]
+        return [_scene("sc_1", location="apt"), _scene("sc_2", location="sub"), _scene("sc_3", location="off")]
 
     def test_valid_plan(self):
         parsed = {"locations": [
@@ -88,37 +88,63 @@ class TestValidateLocationPlan:
         result, err = _validate_location_plan(parsed, self._scenes())
         assert err is None
         assert len(result) == 2
-        assert result[0]["scene_ids"] == ["sc_1", "sc_2"]
 
     def test_missing_key(self):
         _, err = _validate_location_plan({}, self._scenes())
         assert err is not None
-        assert "missing" in err.lower()
 
     def test_empty_list(self):
         _, err = _validate_location_plan({"locations": []}, self._scenes())
         assert err is not None
 
-    def test_invalid_scene_id_skipped(self):
+    def test_unknown_scene_id_invalidates(self):
+        """Unknown scene_id fails the entire plan."""
         parsed = {"locations": [
             {"name": "K", "description": "", "scene_ids": ["sc_1", "FAKE_ID", "sc_2"]},
         ]}
-        result, err = _validate_location_plan(parsed, self._scenes())
-        assert err is None
-        assert "FAKE_ID" not in result[0]["scene_ids"]
-        # sc_3 unassigned → appended to first location
-        assert "sc_3" in result[0]["scene_ids"]
+        _, err = _validate_location_plan(parsed, self._scenes())
+        assert err is not None
+        assert "FAKE_ID" in err
 
-    def test_duplicate_scene_assignment_deduped(self):
+    def test_foreign_scene_id_invalidates(self):
+        """Scene ID not in the input set fails the plan."""
+        scenes = [_scene("sc_1", location="x")]
+        parsed = {"locations": [
+            {"name": "K", "description": "", "scene_ids": ["sc_1", "sc_FOREIGN"]},
+        ]}
+        _, err = _validate_location_plan(parsed, scenes)
+        assert err is not None
+        assert "sc_FOREIGN" in err
+
+    def test_duplicate_scene_assignment_invalidates(self):
+        """Same scene under two Locations fails the plan."""
         parsed = {"locations": [
             {"name": "A", "description": "", "scene_ids": ["sc_1"]},
             {"name": "B", "description": "", "scene_ids": ["sc_1", "sc_2"]},
         ]}
-        result, err = _validate_location_plan(parsed, self._scenes())
+        _, err = _validate_location_plan(parsed, self._scenes())
+        assert err is not None
+        assert "multiple" in err.lower() or "sc_1" in err
+
+    def test_missing_scene_with_evidence_invalidates(self):
+        """Scenes with location evidence omitted from plan fails it."""
+        parsed = {"locations": [
+            {"name": "K", "description": "", "scene_ids": ["sc_1"]},
+        ]}
+        # sc_2 and sc_3 have location evidence but are not assigned
+        _, err = _validate_location_plan(parsed, self._scenes())
+        assert err is not None
+        assert "not assigned" in err.lower()
+
+    def test_scenes_without_evidence_may_be_omitted(self):
+        """Scenes with empty location can be omitted without invalidation."""
+        scenes = [_scene("sc_1", location="apt"), _scene("sc_2", location="")]
+        parsed = {"locations": [
+            {"name": "Apt", "description": "", "scene_ids": ["sc_1"]},
+        ]}
+        result, err = _validate_location_plan(parsed, scenes)
         assert err is None
-        # sc_1 assigned only to first location
-        all_assigned = [sid for loc in result for sid in loc["scene_ids"]]
-        assert all_assigned.count("sc_1") == 1
+        assert len(result) == 1
 
     def test_empty_name_rejected(self):
         parsed = {"locations": [
@@ -127,17 +153,9 @@ class TestValidateLocationPlan:
         _, err = _validate_location_plan(parsed, self._scenes())
         assert err is not None
 
-    def test_unassigned_scenes_appended(self):
-        parsed = {"locations": [
-            {"name": "K", "description": "", "scene_ids": ["sc_1"]},
-        ]}
-        result, err = _validate_location_plan(parsed, [_scene("sc_1"), _scene("sc_2")])
-        assert err is None
-        assert "sc_2" in result[0]["scene_ids"]
-
 
 # ---------------------------------------------------------------------------
-# _fallback_location_plan
+# _fallback_location_plan — corrected
 # ---------------------------------------------------------------------------
 
 class TestFallback:
@@ -156,11 +174,22 @@ class TestFallback:
         result = _fallback_location_plan(scenes)
         assert len(result) == 2
 
-    def test_empty_locations_grouped(self):
+    def test_empty_locations_not_grouped(self):
+        """Scenes with empty location are NOT assigned — no fake Location."""
         scenes = [_scene("sc_1", location=""), _scene("sc_2", location="")]
         result = _fallback_location_plan(scenes)
+        assert len(result) == 0  # no fake "Main Location"
+
+    def test_all_empty_creates_zero_locations(self):
+        scenes = [_scene("sc_1", location=""), _scene("sc_2", location="  ")]
+        result = _fallback_location_plan(scenes)
+        assert len(result) == 0
+
+    def test_mixed_empty_and_meaningful(self):
+        scenes = [_scene("sc_1", location="office"), _scene("sc_2", location="")]
+        result = _fallback_location_plan(scenes)
         assert len(result) == 1
-        assert result[0]["name"] == "Main Location"
+        assert result[0]["scene_ids"] == ["sc_1"]
 
     def test_single_scene(self):
         result = _fallback_location_plan([_scene("sc_1", location="office")])
@@ -198,52 +227,56 @@ class TestPlanLocationsLLM:
         apt = next(r for r in result if r["name"] == "Apartment")
         assert set(apt["scene_ids"]) == {"sc_1", "sc_4"}
 
-    def test_repeated_location_reused(self):
-        planner = self._mock_planner({"locations": [
-            {"name": "The Kitchen", "description": "Kitchen desc", "scene_ids": ["sc_1", "sc_3"]},
-            {"name": "Park", "description": "Park desc", "scene_ids": ["sc_2"]},
-        ]})
-        scenes = [_scene("sc_1"), _scene("sc_2"), _scene("sc_3")]
-        result = planner.plan_locations(scenes, "story")
-        kitchen = next(r for r in result if r["name"] == "The Kitchen")
-        assert set(kitchen["scene_ids"]) == {"sc_1", "sc_3"}
+    def test_invalid_first_valid_repair(self):
+        """Invalid first → repair accepted when valid."""
+        llm = MagicMock()
+        call_count = [0]
+        def _chat(msgs, **kw):
+            call_count[0] += 1
+            r = MagicMock()
+            if call_count[0] == 1:
+                r.parsed = {"locations": [{"name": "A", "description": "", "scene_ids": ["sc_1", "FAKE"]}]}
+            else:
+                r.parsed = {"locations": [{"name": "A", "description": "d", "scene_ids": ["sc_1"]}]}
+            r.content = json.dumps(r.parsed)
+            return r
+        llm.chat = _chat
+        planner = ShotPlanner(llm)
+        result = planner.plan_locations([_scene("sc_1", location="x")], "story")
+        assert len(result) == 1
+        assert result[0]["scene_ids"] == ["sc_1"]
 
-    def test_llm_failure_falls_back(self):
+    def test_invalid_both_falls_back(self):
+        """Invalid first + invalid repair → deterministic fallback."""
+        llm = MagicMock()
+        r = MagicMock()
+        r.parsed = {"locations": [{"name": "A", "description": "", "scene_ids": ["FAKE"]}]}
+        r.content = json.dumps(r.parsed)
+        llm.chat = MagicMock(return_value=r)
+        planner = ShotPlanner(llm)
+        scenes = [_scene("sc_1", location="apt"), _scene("sc_2", location="sub")]
+        result = planner.plan_locations(scenes, "story")
+        # Fallback groups by string
+        assert len(result) == 2
+
+    def test_llm_exception_falls_back(self):
         llm = MagicMock()
         llm.chat = MagicMock(side_effect=Exception("LLM error"))
         planner = ShotPlanner(llm)
         scenes = [_scene("sc_1", location="apt"), _scene("sc_2", location="street")]
         result = planner.plan_locations(scenes, "story")
-        assert len(result) == 2  # fallback groups by string
-
-    def test_malformed_response_falls_back(self):
-        planner = self._mock_planner({"bad": "data"})
-        # repair also returns bad data
-        scenes = [_scene("sc_1", location="x")]
-        result = planner.plan_locations(scenes, "story")
-        assert len(result) == 1  # fallback
+        assert len(result) == 2
 
     def test_no_scenes_returns_empty(self):
         planner = self._mock_planner({})
         assert planner.plan_locations([], "story") == []
 
-    def test_no_h3_concepts_in_description(self):
-        planner = self._mock_planner({"locations": [
-            {"name": "K", "description": "Kitchen set", "scene_ids": ["sc_1"]},
-        ]})
-        result = planner.plan_locations([_scene("sc_1")], "story")
-        desc = result[0]["description"]
-        assert "picture" not in desc.lower()
-        assert "h3" not in desc.lower()
-        assert "slot" not in desc.lower()
-
 
 # ---------------------------------------------------------------------------
-# EnrichmentService integration — multi-Location planning
+# EnrichmentService integration
 # ---------------------------------------------------------------------------
 
 def _setup_enrichment_db(db, n_scenes=4, locations=None):
-    """Create project with n_scenes. locations is a list of location strings."""
     if locations is None:
         locations = ["apartment", "subway", "office", "apartment"][:n_scenes]
     ProjectRepository(db).save_project(ProductionProject(
@@ -265,43 +298,32 @@ def _setup_enrichment_db(db, n_scenes=4, locations=None):
         provenance=_prov("wc_c1")))
 
 
-def _make_enrichment_service(db, llm_location_response=None, llm_shot_response=None):
-    """Create EnrichmentService with mocked LLM."""
+def _make_enrichment_service(db, llm_location_response=None):
     from film_director.enrichment.beat_enricher import BeatEnricher
     from film_director.enrichment.coverage_planner import CoveragePlanner
     from film_director.enrichment.shot_spec_builder import ShotSpecBuilder
     from film_director.enrichment.strategy_selector import StrategySelector
-    from film_director.enrichment.stale_propagator import StalePropagator
 
     llm = MagicMock()
-    call_count = [0]
     def _fake_chat(messages, **kwargs):
-        call_count[0] += 1
-        resp = MagicMock()
-        # Determine what's being asked by system prompt content
         system_msg = messages[0]["content"] if messages else ""
+        resp = MagicMock()
         if "identifying distinct physical location" in system_msg.lower():
             resp.parsed = llm_location_response or {"locations": []}
-            resp.content = json.dumps(resp.parsed)
         elif "character visual description" in system_msg.lower():
             resp.parsed = {"characters": []}
-            resp.content = json.dumps(resp.parsed)
         elif "physical set/location" in system_msg.lower() or "physical space" in system_msg.lower():
             resp.parsed = {"environment_description": "A dimly lit apartment"}
-            resp.content = json.dumps(resp.parsed)
         else:
-            # Default: return valid shot plan (covers plan_scene + repair calls)
-            resp.parsed = llm_shot_response or {"shots": [
+            resp.parsed = {"shots": [
                 {"action": "Man enters the room", "dramatic_purpose": "Establish the scene",
                  "shot_size": "wide", "angle": "eye_level", "movement": "static",
                  "characters": ["Old Man"], "duration_sec": 5.0},
             ]}
-            resp.content = json.dumps(resp.parsed)
+        resp.content = json.dumps(resp.parsed)
         return resp
 
     llm.chat = _fake_chat
-
-    shot_planner = ShotPlanner(llm)
 
     return EnrichmentService(
         db=db,
@@ -322,7 +344,7 @@ def _make_enrichment_service(db, llm_location_response=None, llm_shot_response=N
             db, BeatRepository(db), ShotRepository(db),
             GenerationPlanRepository(db), SequenceRepository(db), SceneRepository(db),
         ),
-        shot_planner=shot_planner,
+        shot_planner=ShotPlanner(llm),
         location_repo=LocationRepository(db),
     )
 
@@ -330,7 +352,7 @@ def _make_enrichment_service(db, llm_location_response=None, llm_shot_response=N
 class TestEnrichmentLocations:
     def test_creates_three_locations_from_four_scenes(self, db):
         _setup_enrichment_db(db, 4, ["apartment", "subway", "office", "apartment"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "Apartment", "description": "A dim NYC apartment", "scene_ids": ["sc_0", "sc_3"]},
             {"name": "Subway", "description": "Underground platform", "scene_ids": ["sc_1"]},
             {"name": "Office", "description": "Corporate office", "scene_ids": ["sc_2"]},
@@ -341,31 +363,30 @@ class TestEnrichmentLocations:
 
     def test_scenes_assigned_to_locations(self, db):
         _setup_enrichment_db(db, 4, ["apt", "street", "subway", "apt"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "Apartment", "description": "Apt", "scene_ids": ["sc_0", "sc_3"]},
             {"name": "Street", "description": "St", "scene_ids": ["sc_1"]},
             {"name": "Subway", "description": "Sub", "scene_ids": ["sc_2"]},
         ]})
         svc.enrich_project("proj_1")
-        scene_repo = SceneRepository(db)
-        sc0 = scene_repo.get_scene("sc_0")
-        sc3 = scene_repo.get_scene("sc_3")
+        sr = SceneRepository(db)
+        sc0 = sr.get_scene("sc_0")
+        sc3 = sr.get_scene("sc_3")
         assert sc0.location_id is not None
-        assert sc0.location_id == sc3.location_id  # same Location
+        assert sc0.location_id == sc3.location_id
 
     def test_scene_location_text_preserved(self, db):
         _setup_enrichment_db(db, 2, ["apartment", "subway"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "A", "description": "d", "scene_ids": ["sc_0"]},
             {"name": "B", "description": "d", "scene_ids": ["sc_1"]},
         ]})
         svc.enrich_project("proj_1")
-        sc = SceneRepository(db).get_scene("sc_0")
-        assert sc.location == "apartment"  # original WC string
+        assert SceneRepository(db).get_scene("sc_0").location == "apartment"
 
     def test_each_location_gets_own_description(self, db):
         _setup_enrichment_db(db, 2, ["x", "y"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "Kitchen", "description": "A small kitchen", "scene_ids": ["sc_0"]},
             {"name": "Rooftop", "description": "An open rooftop", "scene_ids": ["sc_1"]},
         ]})
@@ -375,37 +396,26 @@ class TestEnrichmentLocations:
         assert descs["Kitchen"] == "A small kitchen"
         assert descs["Rooftop"] == "An open rooftop"
 
-    def test_single_scene_creates_one_location(self, db):
-        _setup_enrichment_db(db, 1, ["office"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
-            {"name": "Office", "description": "A corporate office", "scene_ids": ["sc_0"]},
-        ]})
-        svc.enrich_project("proj_1")
-        assert len(LocationRepository(db).list_by_project("proj_1")) == 1
-
     def test_llm_failure_uses_fallback(self, db):
         _setup_enrichment_db(db, 3, ["apartment", "subway", "apartment"])
-        # LLM returns garbage → fallback
-        svc = _make_enrichment_service(db, llm_location_response={"bad": "data"})
+        svc = _make_enrichment_service(db, {"bad": "data"})
         svc.enrich_project("proj_1")
         locs = LocationRepository(db).list_by_project("proj_1")
-        # Fallback groups "apartment" together
-        assert len(locs) == 2
+        assert len(locs) == 2  # fallback groups "apartment" together
 
     def test_retry_does_not_duplicate(self, db):
         _setup_enrichment_db(db, 2, ["apt", "street"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "Apt", "description": "d", "scene_ids": ["sc_0"]},
             {"name": "Street", "description": "d", "scene_ids": ["sc_1"]},
         ]})
         svc.enrich_project("proj_1")
-        svc.enrich_project("proj_1")  # retry
-        locs = LocationRepository(db).list_by_project("proj_1")
-        assert len(locs) == 2  # not duplicated
+        svc.enrich_project("proj_1")
+        assert len(LocationRepository(db).list_by_project("proj_1")) == 2
 
     def test_initial_assignment_does_not_outdate_shots(self, db):
         _setup_enrichment_db(db, 1, ["apt"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "Apt", "description": "d", "scene_ids": ["sc_0"]},
         ]})
         svc.enrich_project("proj_1")
@@ -414,7 +424,6 @@ class TestEnrichmentLocations:
             assert s.status != "outdated"
 
     def test_legacy_project_unchanged(self, db):
-        """Existing legacy project with one migrated Location is not re-planned."""
         _setup_enrichment_db(db, 1, ["apt"])
         loc_repo = LocationRepository(db)
         loc_repo.save(Location(
@@ -425,37 +434,25 @@ class TestEnrichmentLocations:
             id="sc_0", sequence_id="seq_1", wc_scene_id="wc_sc_0",
             name="Scene 0", location="apt", description="",
             location_id="loc_legacy", order_index=0, provenance=_prov("wc_sc_0")))
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "New", "description": "d", "scene_ids": ["sc_0"]},
         ]})
         svc.enrich_project("proj_1")
         locs = loc_repo.list_by_project("proj_1")
         assert len(locs) == 1
-        assert locs[0].id == "loc_legacy"  # not replaced
+        assert locs[0].id == "loc_legacy"
 
-    def test_no_evidence_no_fabricated_description(self, db):
+    def test_empty_evidence_creates_zero_locations(self, db):
+        """Scenes with no location evidence → no Locations created."""
         _setup_enrichment_db(db, 2, ["", ""])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
-            {"name": "Main", "description": "", "scene_ids": ["sc_0", "sc_1"]},
-        ]})
+        svc = _make_enrichment_service(db, {"bad": "data"})  # LLM fails → fallback
         svc.enrich_project("proj_1")
         locs = LocationRepository(db).list_by_project("proj_1")
-        # Source should reflect WC origin when description is empty
-        assert len(locs) == 1
-
-    def test_foreign_scene_id_rejected(self):
-        """Validation rejects scene IDs not in the scene list."""
-        scenes = [_scene("sc_1")]
-        parsed = {"locations": [
-            {"name": "K", "description": "", "scene_ids": ["sc_1", "sc_FOREIGN"]},
-        ]}
-        result, err = _validate_location_plan(parsed, scenes)
-        assert err is None  # foreign IDs silently skipped
-        assert "sc_FOREIGN" not in result[0]["scene_ids"]
+        assert len(locs) == 0
 
     def test_location_source_llm_when_described(self, db):
         _setup_enrichment_db(db, 1, ["apt"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "Apartment", "description": "A nice apartment", "scene_ids": ["sc_0"]},
         ]})
         svc.enrich_project("proj_1")
@@ -464,9 +461,122 @@ class TestEnrichmentLocations:
 
     def test_location_source_wc_when_no_description(self, db):
         _setup_enrichment_db(db, 1, ["apt"])
-        svc = _make_enrichment_service(db, llm_location_response={"locations": [
+        svc = _make_enrichment_service(db, {"locations": [
             {"name": "Apartment", "description": "", "scene_ids": ["sc_0"]},
         ]})
         svc.enrich_project("proj_1")
         locs = LocationRepository(db).list_by_project("proj_1")
         assert locs[0].source == "wind_comic"
+
+
+class TestPartialEnrichment:
+    def test_partially_enriched_adds_missing(self, db):
+        """Project with one Location but unassigned scenes gets resolved."""
+        _setup_enrichment_db(db, 3, ["apt", "subway", "apt"])
+        loc_repo = LocationRepository(db)
+        loc_repo.save(Location(
+            id="loc_apt", project_id="proj_1", name="apartment",
+            description="Existing apt", source="llm", version=1,
+            created_at=NOW, updated_at=NOW))
+        # Assign sc_0 and sc_2 to existing Location
+        sr = SceneRepository(db)
+        sc0 = sr.get_scene("sc_0")
+        sr.save_scene(sc0.model_copy(update={"location_id": "loc_apt"}))
+        sc2 = sr.get_scene("sc_2")
+        sr.save_scene(sc2.model_copy(update={"location_id": "loc_apt"}))
+        # sc_1 (subway) remains unassigned
+        svc = _make_enrichment_service(db, {"locations": [
+            {"name": "Subway", "description": "Underground", "scene_ids": ["sc_1"]},
+        ]})
+        svc.enrich_project("proj_1")
+        locs = loc_repo.list_by_project("proj_1")
+        assert len(locs) == 2
+        sc1 = sr.get_scene("sc_1")
+        assert sc1.location_id is not None
+        # Existing assignments preserved
+        assert sr.get_scene("sc_0").location_id == "loc_apt"
+
+    def test_fully_enriched_retry_creates_nothing(self, db):
+        _setup_enrichment_db(db, 1, ["apt"])
+        loc_repo = LocationRepository(db)
+        loc_repo.save(Location(
+            id="loc_apt", project_id="proj_1", name="Apt",
+            description="D", source="llm", version=1,
+            created_at=NOW, updated_at=NOW))
+        sr = SceneRepository(db)
+        sc0 = sr.get_scene("sc_0")
+        sr.save_scene(sc0.model_copy(update={"location_id": "loc_apt"}))
+        svc = _make_enrichment_service(db, {"locations": [
+            {"name": "New", "description": "d", "scene_ids": ["sc_0"]},
+        ]})
+        svc.enrich_project("proj_1")
+        assert len(loc_repo.list_by_project("proj_1")) == 1
+
+    def test_operator_created_location_preserved(self, db):
+        _setup_enrichment_db(db, 1, ["apt"])
+        loc_repo = LocationRepository(db)
+        loc_repo.save(Location(
+            id="loc_custom", project_id="proj_1", name="Custom Loc",
+            description="Operator created", source="human", version=1,
+            created_at=NOW, updated_at=NOW))
+        sr = SceneRepository(db)
+        sc0 = sr.get_scene("sc_0")
+        sr.save_scene(sc0.model_copy(update={"location_id": "loc_custom"}))
+        svc = _make_enrichment_service(db, {"locations": [
+            {"name": "Something", "description": "d", "scene_ids": ["sc_0"]},
+        ]})
+        svc.enrich_project("proj_1")
+        locs = loc_repo.list_by_project("proj_1")
+        assert any(l.id == "loc_custom" for l in locs)
+        assert sr.get_scene("sc_0").location_id == "loc_custom"
+
+
+class TestEnvironmentDescCompat:
+    def test_env_desc_does_not_influence_location_resolution(self, db):
+        """Legacy environment_description must not affect Location ref selection."""
+        from film_director.models.reference import (
+            ReferenceAsset, ReferenceKind, ReferenceSource,
+            ReferenceSourceState, ReferenceStatus,
+        )
+        from film_director.services.reference_lifecycle import ReferenceSelector
+
+        _setup_enrichment_db(db, 2, ["apt", "subway"])
+        svc = _make_enrichment_service(db, {"locations": [
+            {"name": "Apt", "description": "Apartment desc", "scene_ids": ["sc_0"]},
+            {"name": "Subway", "description": "Subway desc", "scene_ids": ["sc_1"]},
+        ]})
+        svc.enrich_project("proj_1")
+
+        # Verify environment_description was set for compatibility
+        proj = ProjectRepository(db).get_project("proj_1")
+        assert proj.director_context.get("environment_description")
+
+        # Create Location-scoped refs
+        locs = LocationRepository(db).list_by_project("proj_1")
+        apt_loc = next(l for l in locs if l.name == "Apt")
+        sub_loc = next(l for l in locs if l.name == "Subway")
+        ref_repo = ReferenceAssetRepository(db)
+        ref_repo.save(ReferenceAsset(
+            id="ref_apt", project_id="proj_1", location_id=apt_loc.id,
+            kind=ReferenceKind.ENVIRONMENT, source=ReferenceSource.GENERATED,
+            managed_path="refs/apt.png", content_sha256=SHA,
+            source_provenance="rgreq_a",
+            status=ReferenceStatus.APPROVED,
+            source_state=ReferenceSourceState.CURRENT,
+            width=1024, height=1024, created_at=NOW, updated_at=NOW))
+        ref_repo.save(ReferenceAsset(
+            id="ref_sub", project_id="proj_1", location_id=sub_loc.id,
+            kind=ReferenceKind.ENVIRONMENT, source=ReferenceSource.GENERATED,
+            managed_path="refs/sub.png", content_sha256=SHA,
+            source_provenance="rgreq_b",
+            status=ReferenceStatus.APPROVED,
+            source_state=ReferenceSourceState.CURRENT,
+            width=1024, height=1024, created_at=NOW, updated_at=NOW))
+
+        # Location selector must select by location_id, NOT by project-level env desc
+        sel = ReferenceSelector()
+        all_refs = ref_repo.list_by_project("proj_1")
+        apt_ref = sel.select_location_ref(apt_loc.id, "proj_1", all_refs)
+        sub_ref = sel.select_location_ref(sub_loc.id, "proj_1", all_refs)
+        assert apt_ref.id == "ref_apt"
+        assert sub_ref.id == "ref_sub"

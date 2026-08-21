@@ -492,10 +492,11 @@ def _validate_location_plan(
     parsed: dict,
     scenes: list[Scene],
 ) -> tuple[list[dict], str | None]:
-    """Validate LLM location plan output.
+    """Strict validation of LLM location plan output.
 
-    Returns (list of validated location dicts, error_or_None).
-    Each validated dict has: name, description, scene_ids.
+    Fails closed: any invalid/foreign scene_id, duplicate assignment,
+    or missing scene invalidates the entire plan. Returns error string
+    so the caller can trigger repair or fallback.
     """
     if "locations" not in parsed:
         return [], "Response missing 'locations' key"
@@ -504,6 +505,8 @@ def _validate_location_plan(
         return [], "'locations' must be a non-empty list"
 
     valid_scene_ids = {s.id for s in scenes}
+    # Scenes with usable location evidence
+    scenes_with_evidence = {s.id for s in scenes if (s.location or "").strip()}
     assigned_scene_ids: set[str] = set()
     result = []
 
@@ -518,33 +521,29 @@ def _validate_location_plan(
         if not isinstance(scene_ids, list):
             return [], f"Location at index {i}: scene_ids must be a list"
 
-        # Validate scene_ids
-        validated_ids = []
         for sid in scene_ids:
             if not isinstance(sid, str):
-                continue
+                return [], f"Location '{name}': non-string scene_id"
             if sid not in valid_scene_ids:
-                continue  # skip invalid IDs silently (may be LLM hallucination)
+                return [], f"Location '{name}': unknown scene_id '{sid}'"
             if sid in assigned_scene_ids:
-                continue  # skip duplicate assignment
-            validated_ids.append(sid)
+                return [], f"Scene '{sid}' assigned to multiple Locations"
             assigned_scene_ids.add(sid)
 
-        if validated_ids:
+        if scene_ids:
             result.append({
                 "name": name,
                 "description": desc,
-                "scene_ids": validated_ids,
+                "scene_ids": list(scene_ids),
             })
 
     if not result:
-        return [], "No valid locations with assigned scenes"
+        return [], "No locations with assigned scenes"
 
-    # Assign any unassigned scenes to nearest match or create catch-all
-    unassigned = [s for s in scenes if s.id not in assigned_scene_ids]
-    if unassigned and result:
-        # Append unassigned to the first location as fallback
-        result[0]["scene_ids"].extend(s.id for s in unassigned)
+    # Check for unassigned scenes that had usable evidence
+    unassigned_with_evidence = scenes_with_evidence - assigned_scene_ids
+    if unassigned_with_evidence:
+        return [], f"Scenes with location evidence not assigned: {sorted(unassigned_with_evidence)}"
 
     return result, None
 
@@ -552,21 +551,22 @@ def _validate_location_plan(
 def _fallback_location_plan(scenes: list[Scene]) -> list[dict]:
     """Deterministic fallback when LLM fails.
 
-    Groups scenes by normalized location string. Scenes with identical
-    normalized strings share one Location. Empty/missing location strings
-    are grouped together as "Main Location".
+    Groups scenes by normalized location string. Scenes with empty/unusable
+    location evidence remain unassigned (not included in any Location).
+    Does NOT fabricate a shared Location for unknown scenes.
     """
     groups: dict[str, list[str]] = {}
     for s in scenes:
         key = _normalize_location_string(s.location)
+        if not key:
+            continue  # empty location → unassigned
         groups.setdefault(key, []).append(s.id)
 
     result = []
     for key, scene_ids in groups.items():
-        name = key if key else "Main Location"
         result.append({
-            "name": name,
-            "description": "",  # no LLM available for description
+            "name": key,
+            "description": "",
             "scene_ids": scene_ids,
         })
     return result

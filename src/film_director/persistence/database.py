@@ -551,6 +551,75 @@ class Database:
             )
             logger.debug("Migration: added location_id to reference_assets")
 
+        # Location Slice 2: Backfill legacy Locations from existing projects.
+        # For each project with a meaningful environment_description, create
+        # one deterministic Location and assign orphan scenes + ENVIRONMENT refs.
+        # Idempotent: uses deterministic ID derived from project_id, skips
+        # if Location already exists, never overwrites non-NULL location_id.
+        import hashlib as _hashlib
+        import json as _json
+
+        projects_with_env = conn.execute(
+            "SELECT id, director_context FROM production_projects"
+        ).fetchall()
+
+        for proj_row in projects_with_env:
+            proj_id = proj_row[0]
+            try:
+                dc = _json.loads(proj_row[1]) if proj_row[1] else {}
+            except (ValueError, TypeError):
+                dc = {}
+            env_desc = (dc.get("environment_description") or "").strip()
+            if not env_desc:
+                continue  # Case B: no meaningful description
+
+            # Deterministic Location ID: "loc_" + first 12 hex chars of
+            # SHA-256(project_id). Same project always produces same ID.
+            loc_id = "loc_" + _hashlib.sha256(proj_id.encode()).hexdigest()[:12]
+
+            # Check if Location already exists (idempotent)
+            existing = conn.execute(
+                "SELECT id FROM locations WHERE id = ?", (loc_id,)
+            ).fetchone()
+            if existing is not None:
+                # Case C: already migrated — still assign orphan scenes/refs
+                pass
+            else:
+                now = conn.execute("SELECT datetime('now')").fetchone()[0]
+                conn.execute(
+                    "INSERT INTO locations "
+                    "(id, project_id, name, description, source, version, "
+                    " created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (loc_id, proj_id, "Main Location", env_desc,
+                     "llm", 1, now, now),
+                )
+                logger.debug(
+                    "Migration: created legacy Location %s for project %s",
+                    loc_id, proj_id,
+                )
+
+            # Assign orphan scenes (location_id IS NULL) in this project
+            conn.execute(
+                "UPDATE scenes SET location_id = ? "
+                "WHERE location_id IS NULL "
+                "  AND sequence_id IN ("
+                "    SELECT id FROM sequences WHERE project_id = ?"
+                "  )",
+                (loc_id, proj_id),
+            )
+
+            # Assign orphan ENVIRONMENT refs (location_id IS NULL) in this project
+            conn.execute(
+                "UPDATE reference_assets SET location_id = ? "
+                "WHERE location_id IS NULL "
+                "  AND project_id = ? "
+                "  AND kind = 'environment'",
+                (loc_id, proj_id),
+            )
+
+        logger.debug("Migration: Location Slice 2 backfill complete")
+
     @contextmanager
     def connection(self):
         """Yield a connection that commits on success and rolls back on error.

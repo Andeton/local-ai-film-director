@@ -3,7 +3,7 @@
 **Date**: 2026-08-21
 **Branch**: `p4-operator-workflow` (run `git rev-parse HEAD` for current commit)
 **Main HEAD**: `0ea4bce835264621a2513af52cb12aa75b083479`
-**Test baseline**: 2026 passed, 1 skipped, 12 deselected (live tests)
+**Test baseline**: 2050 passed, 1 skipped, 12 deselected (live tests)
 **GitHub**: https://github.com/Andeton/local-ai-film-director.git
 
 ## 1. Project Purpose
@@ -110,9 +110,9 @@ python -m uvicorn "film_director.main:create_app" --factory --host 127.0.0.1 --p
 
 ## 9. Exact Next Action
 
-**Implement Location Slice 2 (legacy migration) on `p4-operator-workflow`.**
+**Implement Location Slice 3 (API + assignment + staleness) on `p4-operator-workflow`.**
 
-Slice 1 is complete: `Location` model, `locations` table, `LocationRepository`, nullable `location_id` on `scenes` and `reference_assets`. 29 tests, 2026 total passed. See `docs/ROADMAP.md` for the complete 7-slice plan.
+Slices 1-2 complete: `Location` model, persistence, repository (Slice 1, 29 tests). Legacy migration backfill — deterministic Location per existing project, idempotent, historical data immutable (Slice 2, 24 tests). 2050 total passed. See `docs/ROADMAP.md` for the complete 7-slice plan.
 
 Do NOT start broad infrastructure, new model adapters, or generalized routing until Location entity and a successful multi-scene production validate the target architecture.
 

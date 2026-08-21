@@ -107,6 +107,14 @@ class AssignSceneLocationRequest(BaseModel):
     location_id: str
 
 
+class LocationRefGenRequest(BaseModel):
+    """Generate a Location reference image."""
+    profile_id: str | None = None
+    seed: int | None = None
+    prompt_override: str | None = None
+    negative_prompt_override: str | None = None
+
+
 class BeatEditRequest(BaseModel):
     dramatic_action: str | None = None
     character_intention: str | None = None
@@ -508,6 +516,118 @@ def create_router(
 
         return {"scene_id": scene_id, "location_id": body.location_id, "changed": True}
 
+    # Location reference endpoints (Slice 4)
+
+    @router.get("/locations/{location_id}/references")
+    def list_location_references(location_id: str) -> list[dict]:
+        _loc_guard()
+        loc = location_repo.get(location_id)
+        if loc is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+        if ref_asset_repo is None:
+            return []
+        all_refs = ref_asset_repo.list_by_project(loc.project_id)
+        return [r.model_dump() for r in all_refs if r.location_id == location_id]
+
+    @router.get("/locations/{location_id}/reference-prompt-preview")
+    def location_reference_prompt_preview(location_id: str) -> dict:
+        _loc_guard()
+        loc = location_repo.get(location_id)
+        if loc is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+        if not loc.description or not loc.description.strip():
+            raise HTTPException(status_code=422, detail="Location has no description")
+        from film_director.generation.reference_generator import (
+            _build_environment_prompt,
+            _ENV_NEGATIVE,
+        )
+        prompt = _build_environment_prompt(loc.description)
+        return {
+            "prompt": prompt,
+            "negative_prompt": _ENV_NEGATIVE,
+            "location_id": loc.id,
+            "location_name": loc.name,
+        }
+
+    @router.post("/locations/{location_id}/references/generate")
+    def generate_location_reference(
+        location_id: str,
+        body: LocationRefGenRequest = Body(default=LocationRefGenRequest()),
+    ) -> dict:
+        _loc_guard()
+        loc = location_repo.get(location_id)
+        if loc is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+        if ref_generation_service is None:
+            raise HTTPException(status_code=501, detail="Reference generation not available")
+        if not loc.description or not loc.description.strip():
+            raise HTTPException(status_code=422, detail="Location has no description. Edit it first.")
+        result = ref_generation_service.generate_environment_reference(
+            project_id=loc.project_id,
+            environment_description=loc.description,
+            profile_id=body.profile_id,
+            seed=body.seed,
+            prompt_override=body.prompt_override,
+            negative_prompt_override=body.negative_prompt_override,
+            location_id=loc.id,
+        )
+        return {
+            "asset": result.asset.model_dump(),
+            "request_id": result.request_id,
+            "execution_id": result.execution_id,
+        }
+
+    @router.post("/locations/{location_id}/references/register")
+    async def register_location_reference(
+        location_id: str,
+        file: UploadFile = File(...),
+    ) -> dict:
+        _loc_guard()
+        loc = location_repo.get(location_id)
+        if loc is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+        if ref_ingest_service is None:
+            raise HTTPException(status_code=501, detail="Reference management not available")
+
+        tmp_path = None
+        try:
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".upload")
+            total = 0
+            try:
+                with os.fdopen(tmp_fd, "wb") as tmp_f:
+                    while True:
+                        chunk = await file.read(_UPLOAD_CHUNK)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > _MAX_UPLOAD_BYTES:
+                            raise HTTPException(status_code=413, detail=f"Upload exceeds {_MAX_UPLOAD_BYTES} byte limit")
+                        tmp_f.write(chunk)
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=422, detail=f"Upload failed: {e}")
+            if total == 0:
+                raise HTTPException(status_code=422, detail="Empty upload")
+
+            result = ref_ingest_service.register_user_reference(
+                project_id=loc.project_id,
+                kind=ReferenceKind.ENVIRONMENT,
+                source_path=tmp_path,
+                location_id=loc.id,
+            )
+            if result.outcome == "invalid_image":
+                raise HTTPException(status_code=422, detail="Invalid image file")
+            if result.asset is None:
+                raise HTTPException(status_code=422, detail=f"Ingest failed: {result.outcome}")
+            return result.asset.model_dump()
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
     # ------------------------------------------------------------------
     # M2 Routes
     # ------------------------------------------------------------------
@@ -794,7 +914,33 @@ def create_router(
 
         # Resolve references — per-subject, matching GenerationService behavior
         refs = ref_asset_repo.list_by_project(project_id) if project_id and ref_asset_repo else []
-        env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "environment"), None)
+
+        # Resolve environment ref via Location (Slice 4) — mirrors GenerationService
+        resolved_location_id = None
+        resolved_location_name = None
+        if project_id:
+            with generation_service._db.connection() as conn:
+                scene_row = conn.execute(
+                    "SELECT sc.location_id FROM shots s "
+                    "JOIN beats b ON s.beat_id = b.id "
+                    "JOIN scenes sc ON b.scene_id = sc.id "
+                    "WHERE s.id = ?", (shot_id,),
+                ).fetchone()
+                resolved_location_id = scene_row["location_id"] if scene_row else None
+                if resolved_location_id and location_repo:
+                    loc = location_repo.get(resolved_location_id, conn=conn)
+                    resolved_location_name = loc.name if loc else None
+
+        env_ref = None
+        if resolved_location_id is not None and ref_selector:
+            env_ref = ref_selector.select_location_ref(
+                location_id=resolved_location_id,
+                project_id=project_id,
+                assets=refs,
+            )
+        elif resolved_location_id is None:
+            # Legacy fallback: project-level ENVIRONMENT ref
+            env_ref = next((r for r in refs if r.status.value == "approved" and r.source_state.value == "current" and r.kind.value == "environment"), None)
 
         # Select character refs per shot subject (same as ReferenceSelector)
         shot_char_refs = []
@@ -901,13 +1047,16 @@ def create_router(
             })
             pic_idx += 1
 
-        # Picture 2: environment
+        # Picture 2: Location environment reference
+        env_role_label = f"LOCATION: {resolved_location_name}" if resolved_location_name else "ENVIRONMENT"
         if env_ref:
             pictures.append({
-                "picture_index": pic_idx, "role": "ENVIRONMENT",
+                "picture_index": pic_idx, "role": env_role_label,
                 "reference_id": env_ref.id, "kind": env_ref.kind.value,
                 "status": env_ref.status.value, "source_state": env_ref.source_state.value,
                 "thumbnail_url": f"/media/{env_ref.managed_path}",
+                "location_id": resolved_location_id,
+                "location_name": resolved_location_name,
             })
             pic_idx += 1
 
@@ -961,7 +1110,11 @@ def create_router(
             "pictures": pictures,
             "continuity_blocked": continuity_blocked,
             "predecessor_shot_index": shot_idx - 1 if shot_idx > 0 else None,
-            "can_generate": not continuity_blocked,
+            "can_generate": not continuity_blocked and (
+                env_ref is not None or resolved_location_id is None  # legacy path doesn't require env
+            ),
+            "location_id": resolved_location_id,
+            "location_name": resolved_location_name,
         }
 
     @router.post("/shots/{shot_id}/generate", status_code=202)
@@ -1847,7 +2000,12 @@ def create_router(
 
     @router.get("/projects/{project_id}/readiness")
     def get_readiness(project_id: str) -> dict:
-        """Check generation readiness for a project."""
+        """Check generation readiness for a project.
+
+        Per-shot readiness resolved via Scene → Location. A project is
+        ready when at least one shot is generatable. Individual shot
+        readiness requires character refs + Location env ref + continuity.
+        """
         if project_repo is None or shot_repo is None:
             raise HTTPException(status_code=501)
         p = project_repo.get_project(project_id)
@@ -1855,35 +2013,75 @@ def create_router(
             raise HTTPException(status_code=404, detail="Project not found")
         shots = shot_repo.get_current_shots_by_project(project_id)
         refs = ref_asset_repo.list_by_project(project_id) if ref_asset_repo else []
-        # Generation uses CHARACTER_BODY refs (via ReferenceSelector)
+
         has_char = any(
             r.kind.value == "character_body"
             and r.status.value == "approved"
             and r.source_state.value == "current"
             for r in refs
         )
-        # Image-pack production requires ENVIRONMENT ref (Picture 2)
-        has_env = any(
-            r.kind.value == "environment"
-            and r.status.value == "approved"
-            and r.source_state.value == "current"
-            for r in refs
-        )
+
+        # Per-shot Location-scoped environment readiness (Slice 4)
         has_shots = len(shots) > 0
+        shots_with_env = 0
+        shots_missing_env = 0
+        missing_location_names = set()
+        for s in shots:
+            # Resolve scene → location_id for this shot
+            loc_id = None
+            if generation_service:
+                with generation_service._db.connection() as conn:
+                    sr = conn.execute(
+                        "SELECT sc.location_id FROM shots sh "
+                        "JOIN beats b ON sh.beat_id = b.id "
+                        "JOIN scenes sc ON b.scene_id = sc.id "
+                        "WHERE sh.id = ?", (s.id,),
+                    ).fetchone()
+                    loc_id = sr["location_id"] if sr else None
+            if loc_id is not None and ref_selector:
+                env = ref_selector.select_location_ref(loc_id, project_id, refs)
+                if env:
+                    shots_with_env += 1
+                else:
+                    shots_missing_env += 1
+                    if location_repo:
+                        loc = location_repo.get(loc_id)
+                        if loc:
+                            missing_location_names.add(loc.name)
+            else:
+                # Legacy fallback
+                has_legacy_env = any(
+                    r.kind.value == "environment"
+                    and r.status.value == "approved"
+                    and r.source_state.value == "current"
+                    for r in refs
+                )
+                if has_legacy_env:
+                    shots_with_env += 1
+                else:
+                    shots_missing_env += 1
+
+        has_env = shots_with_env > 0 or not has_shots
         approved_takes = 0
         if take_repo:
             for s in shots:
                 t = take_repo.get_approved_for_shot(s.id)
                 if t:
                     approved_takes += 1
+
         missing = []
         if not has_shots:
             missing.append("Shot plan (no shots)")
         if not has_char:
             missing.append("Character reference (character_body, approved)")
-        if not has_env:
-            missing.append("Environment reference (environment, approved)")
-        ready = has_shots and has_char and has_env
+        if shots_missing_env > 0:
+            if missing_location_names:
+                loc_names = ", ".join(sorted(missing_location_names))
+                missing.append(f"Location environment reference ({shots_missing_env} shot(s) missing, locations: {loc_names})")
+            else:
+                missing.append(f"Environment reference (environment, approved) — {shots_missing_env} shot(s) missing")
+
+        ready = has_shots and has_char and shots_missing_env == 0
         next_action = "Review and correct the shot plan." if not has_shots else \
                       "Prepare character and environment references." if not ready else \
                       "Generate Shot 1." if approved_takes == 0 else \
@@ -1893,6 +2091,8 @@ def create_router(
             "shot_count": len(shots),
             "has_character_ref": has_char,
             "has_environment_ref": has_env,
+            "shots_with_env_ref": shots_with_env,
+            "shots_missing_env_ref": shots_missing_env,
             "approved_takes": approved_takes,
             "total_shots": len(shots),
             "missing": missing,

@@ -145,6 +145,34 @@ class ReferenceSelector:
 
         return selected
 
+    def select_location_ref(
+        self,
+        location_id: str,
+        project_id: str,
+        assets: list[ReferenceAsset],
+    ) -> ReferenceAsset | None:
+        """Select the best eligible ENVIRONMENT ref for a Location.
+
+        Returns one APPROVED + CURRENT ref with pinned priority, or None.
+        Same deterministic priority as character selection.
+        """
+        eligible = [
+            a for a in assets
+            if a.kind == ReferenceKind.ENVIRONMENT
+            and a.status == ReferenceStatus.APPROVED
+            and a.source_state == ReferenceSourceState.CURRENT
+            and a.project_id == project_id
+            and a.location_id == location_id
+        ]
+        if not eligible:
+            return None
+        eligible.sort(key=lambda a: (
+            not a.pinned,
+            _invert_ts(a.created_at),
+            a.id,
+        ))
+        return eligible[0]
+
 
 def _invert_ts(ts: str) -> str:
     """Invert timestamp string for descending sort within an ASC tuple."""

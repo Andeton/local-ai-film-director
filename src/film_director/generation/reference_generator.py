@@ -538,6 +538,7 @@ class ReferenceGenerationService:
         seed: int | None = None,
         prompt_override: str | None = None,
         negative_prompt_override: str | None = None,
+        location_id: str | None = None,
     ) -> ReferenceGenerationResult:
         """Generate an environment/location reference image via ComfyUI.
 
@@ -654,6 +655,7 @@ class ReferenceGenerationService:
         asset = ReferenceAsset(
             id=asset_id,
             project_id=project_id,
+            location_id=location_id,
             kind=ReferenceKind.ENVIRONMENT,
             source=ReferenceSource.GENERATED,
             managed_path=managed_relative,

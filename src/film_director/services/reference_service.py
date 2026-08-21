@@ -125,6 +125,7 @@ class ReferenceIngestService:
         source_path: str,
         character_id: str | None = None,
         shot_id: str | None = None,
+        location_id: str | None = None,
         source_fingerprint: str | None = None,
     ) -> IngestResult:
         """Register a user-provided local file as a reference asset."""
@@ -135,6 +136,7 @@ class ReferenceIngestService:
             source=ReferenceSource.USER_UPLOAD,
             character_id=character_id,
             shot_id=shot_id,
+            location_id=location_id,
             source_provenance=f"upload-{uuid.uuid4().hex[:12]}",
             source_fingerprint=source_fingerprint,
         )
@@ -286,6 +288,7 @@ class ReferenceIngestService:
         shot_id: str | None,
         source_provenance: str,
         source_fingerprint: str | None,
+        location_id: str | None = None,
     ) -> IngestResult:
         # 1. Validate image
         if not os.path.isfile(source_path):
@@ -344,6 +347,7 @@ class ReferenceIngestService:
             project_id=project_id,
             character_id=character_id,
             shot_id=shot_id,
+            location_id=location_id,
             kind=kind,
             source=source,
             managed_path=relative_path,

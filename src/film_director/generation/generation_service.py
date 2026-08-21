@@ -164,14 +164,34 @@ class GenerationService:
             characters=characters, assets=all_assets,
         )
 
-        # Check for approved+current environment ref
-        env_asset = next(
-            (a for a in all_assets
-             if a.kind == ReferenceKind.ENVIRONMENT
-             and a.status.value == "approved"
-             and a.source_state.value == "current"),
-            None,
-        )
+        # Resolve environment ref via Location-scoped selection (Slice 4)
+        # Path A: Shot → Beat → Scene → location_id → Location-scoped ref
+        # Path B (legacy): Scene has no location_id → project-level fallback
+        env_asset = None
+        with self._db.connection() as conn:
+            scene_row = conn.execute(
+                "SELECT sc.location_id FROM shots s "
+                "JOIN beats b ON s.beat_id = b.id "
+                "JOIN scenes sc ON b.scene_id = sc.id "
+                "WHERE s.id = ?", (shot_id,),
+            ).fetchone()
+            resolved_location_id = scene_row["location_id"] if scene_row else None
+
+        if resolved_location_id is not None:
+            env_asset = self._ref_selector.select_location_ref(
+                location_id=resolved_location_id,
+                project_id=project_id,
+                assets=all_assets,
+            )
+        else:
+            # Legacy fallback: project-level ENVIRONMENT ref (no location_id)
+            env_asset = next(
+                (a for a in all_assets
+                 if a.kind == ReferenceKind.ENVIRONMENT
+                 and a.status.value == "approved"
+                 and a.source_state.value == "current"),
+                None,
+            )
 
         # Step 5: Select workflow and build bindings
         if env_asset is not None:
